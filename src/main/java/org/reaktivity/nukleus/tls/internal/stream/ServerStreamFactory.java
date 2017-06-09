@@ -92,6 +92,8 @@ public final class ServerStreamFactory implements StreamFactory
 
     private final Long2ObjectHashMap<ServerHandshake> correlations;
     private final MessageFunction<RouteFW> wrapRoute;
+    private final ByteBuffer inAppByteBuffer;
+    private final ByteBuffer inNetByteBuffer;
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
     private final DirectBuffer outAppBuffer;
@@ -113,6 +115,8 @@ public final class ServerStreamFactory implements StreamFactory
 
         this.correlations = correlations;
         this.wrapRoute = this::wrapRoute;
+        this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
+        this.inNetByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppBuffer = new UnsafeBuffer(outAppByteBuffer);
         this.outNetByteBuffer = allocateDirect(writeBuffer.capacity());
@@ -706,11 +710,12 @@ public final class ServerStreamFactory implements StreamFactory
 
             // Note: inAppBuffer is emptied by SslEngine.wrap(...)
             //       so should be able to eliminate allocation+copy (stateless)
-            ByteBuffer inAppByteBuffer = ByteBuffer.allocate(payload.sizeof());
-            payload.buffer().getBytes(payload.offset(), inAppByteBuffer, inAppByteBuffer.capacity());
+            payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
             inAppByteBuffer.flip();
 
             doWrapData(inAppByteBuffer);
+
+            inAppByteBuffer.clear();
         }
 
         private void handleEnd(
@@ -898,15 +903,17 @@ public final class ServerStreamFactory implements StreamFactory
         DataFW data,
         ByteBuffer outAppByteBuffer) throws SSLException
     {
-        final int length = data.length();
         final OctetsFW payload = data.payload();
 
-        // Note: inNetBuffer is emptied by SslEngine.unwrap(...)
-        //       so should be able to eliminate allocation+copy (stateless)
-        ByteBuffer inNetByteBuffer = ByteBuffer.allocate(length);
-        payload.buffer().getBytes(payload.offset(), inNetByteBuffer, length);
+        // Note: inNetByteBuffer is emptied by SslEngine.unwrap(...)
+        //       so should be able to eliminate copy (stateless)
+        payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
         inNetByteBuffer.flip();
 
-        return engine.unwrap(inNetByteBuffer, outAppByteBuffer);
+        SSLEngineResult result = engine.unwrap(inNetByteBuffer, outAppByteBuffer);
+
+        inNetByteBuffer.clear();
+
+        return result;
     }
 }

@@ -6,7 +6,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.reaktivity</groupId>
   <artifactId>nukleus-tls</artifactId>
-  <version>0.1</version>
+  <version>0.2</version>
   <name>TLS Nukleus Implementation</name>
   <description>TLS Nukleus Implementation</description>
   <url>https://github.com/reaktivity/nukleus-tls.java</url>
@@ -190,6 +190,7 @@
         </executions>
       </plugin>
       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-resources-plugin</artifactId>
         <version>3.0.2</version>
         <executions>
