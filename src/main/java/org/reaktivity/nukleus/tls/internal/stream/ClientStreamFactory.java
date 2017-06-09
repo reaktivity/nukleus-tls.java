@@ -90,6 +90,8 @@ public final class ClientStreamFactory implements StreamFactory
     private final LongSupplier supplyCorrelationId;
 
     private final Long2ObjectHashMap<ClientHandshake> correlations;
+    private final ByteBuffer inAppByteBuffer;
+    private final ByteBuffer inNetByteBuffer;
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
     private final DirectBuffer outAppBuffer;
@@ -110,6 +112,8 @@ public final class ClientStreamFactory implements StreamFactory
         this.supplyCorrelationId = supplyCorrelationId;
 
         this.correlations = correlations;
+        this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
+        this.inNetByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppBuffer = new UnsafeBuffer(outAppByteBuffer);
         this.outNetByteBuffer = allocateDirect(writeBuffer.capacity());
@@ -333,13 +337,14 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 final OctetsFW payload = data.payload();
 
-                // Note: inAppBuffer is emptied by SslEngine.wrap(...)
-                //       so should be able to eliminate allocation+copy (stateless)
-                ByteBuffer inAppByteBuffer = ByteBuffer.allocate(payload.sizeof());
+                // Note: inAppByteBuffer is emptied by SslEngine.wrap(...)
+                //       so should be able to eliminate copy (stateless)
                 payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
                 inAppByteBuffer.flip();
 
                 wrapEngine(engine, inAppByteBuffer, connectTarget, connectId);
+
+                inAppByteBuffer.clear();
 
                 // TODO: delta between windows
             }
@@ -753,13 +758,16 @@ public final class ClientStreamFactory implements StreamFactory
         {
             final OctetsFW payload = data.payload();
 
-            // Note: inNetBuffer is emptied by SslEngine.unwrap(...)
-            //       so should be able to eliminate allocation+copy (stateless)
-            ByteBuffer inNetByteBuffer = ByteBuffer.allocate(payload.sizeof());
+            // Note: inNetByteBuffer is emptied by SslEngine.unwrap(...)
+            //       so should be able to eliminate copy (stateless)
             payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
             inNetByteBuffer.flip();
 
-            return unwrapEngine(engine, inNetByteBuffer, acceptReplyTarget, acceptReplyId);
+            SSLEngineResult result = unwrapEngine(engine, inNetByteBuffer, acceptReplyTarget, acceptReplyId);
+
+            inNetByteBuffer.clear();
+
+            return result;
         }
     }
 
