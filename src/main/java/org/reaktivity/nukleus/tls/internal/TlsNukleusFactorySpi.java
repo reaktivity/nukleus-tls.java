@@ -77,8 +77,6 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
 
         try
         {
-            context = SSLContext.getInstance("TLS");
-
             String keyStorePassword = getProperty(PROPERTY_TLS_KEYSTORE_PASSWORD, DEFAULT_TLS_KEYSTORE_PASSWORD);
             String keyStoreFilename = getProperty(PROPERTY_TLS_KEYSTORE, DEFAULT_TLS_KEYSTORE);
             File keyStoreFile = directory.resolve("tls").resolve(keyStoreFilename).toFile();
