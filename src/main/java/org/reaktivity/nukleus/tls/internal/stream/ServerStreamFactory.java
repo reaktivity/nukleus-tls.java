@@ -16,7 +16,6 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import static java.nio.ByteBuffer.allocateDirect;
-import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_UNWRAP;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -321,13 +320,14 @@ public final class ServerStreamFactory implements StreamFactory
                 payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
                 inNetByteBuffer.flip();
 
-                outAppByteBuffer.rewind();
-                do
+                while (inNetByteBuffer.hasRemaining())
                 {
+                    outAppByteBuffer.rewind();
                     SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+
                     handleFlush(result.bytesProduced());
                     handleStatus(result.getHandshakeStatus());
-                } while (tlsEngine.getHandshakeStatus() == NEED_UNWRAP && inNetByteBuffer.hasRemaining());
+                }
 
                 if (tlsEngine.isInboundDone())
                 {
@@ -577,13 +577,14 @@ public final class ServerStreamFactory implements StreamFactory
                 payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
                 inNetByteBuffer.flip();
 
-                outAppByteBuffer.rewind();
-                do
+                while (inNetByteBuffer.hasRemaining())
                 {
+                    outAppByteBuffer.rewind();
                     SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+
                     flushHandler.accept(result.bytesProduced());
                     statusHandler.accept(result.getHandshakeStatus());
-                } while (tlsEngine.getHandshakeStatus() == NEED_UNWRAP && inNetByteBuffer.hasRemaining());
+                }
             }
             catch (SSLException ex)
             {
