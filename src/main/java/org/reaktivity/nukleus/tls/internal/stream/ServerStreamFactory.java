@@ -16,11 +16,13 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import static java.nio.ByteBuffer.allocateDirect;
+import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_UNWRAP;
 
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 import java.util.function.LongSupplier;
 
 import javax.net.ssl.ExtendedSSLSession;
@@ -319,13 +321,13 @@ public final class ServerStreamFactory implements StreamFactory
                 payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
                 inNetByteBuffer.flip();
 
-                outAppByteBuffer.clear();
-                SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-                outAppByteBuffer.flip();
-
-                handleStatus(result.getHandshakeStatus());
-
-                handleFlush();
+                outAppByteBuffer.rewind();
+                do
+                {
+                    SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+                    handleFlush(result.bytesProduced());
+                    handleStatus(result.getHandshakeStatus());
+                } while (tlsEngine.getHandshakeStatus() == NEED_UNWRAP && inNetByteBuffer.hasRemaining());
 
                 if (tlsEngine.isInboundDone())
                 {
@@ -452,12 +454,12 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void handleFlush()
+        private void handleFlush(
+            int bytesProduced)
         {
-            if (outAppByteBuffer.hasRemaining())
+            if (bytesProduced > 0)
             {
-                final OctetsFW outAppOctets =
-                        outAppOctetsRO.wrap(outAppBuffer, outAppByteBuffer.position(), outAppByteBuffer.remaining());
+                final OctetsFW outAppOctets = outAppOctetsRO.wrap(outAppBuffer, 0, bytesProduced);
 
                 doData(applicationTarget, applicationId, outAppOctets);
             }
@@ -507,7 +509,7 @@ public final class ServerStreamFactory implements StreamFactory
     {
         private final SSLEngine tlsEngine;
         private final Consumer<HandshakeStatus> statusHandler;
-        private final Runnable flushHandler;
+        private final IntConsumer flushHandler;
         private final Consumer<EndFW> endHandler;
 
         private final MessageConsumer networkThrottle;
@@ -526,7 +528,7 @@ public final class ServerStreamFactory implements StreamFactory
             String networkReplyName,
             long networkReplyId,
             Consumer<HandshakeStatus> statusHandler,
-            Runnable flushHandler,
+            IntConsumer flushHandler,
             Consumer<EndFW> endHandler)
         {
             this.tlsEngine = tlsEngine;
@@ -575,12 +577,11 @@ public final class ServerStreamFactory implements StreamFactory
                 payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
                 inNetByteBuffer.flip();
 
-                outAppByteBuffer.clear();
+                outAppByteBuffer.rewind();
                 SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-                outAppByteBuffer.flip();
 
                 // handle TLS False Start
-                flushHandler.run();
+                flushHandler.accept(result.bytesProduced());
 
                 statusHandler.accept(result.getHandshakeStatus());
             }
