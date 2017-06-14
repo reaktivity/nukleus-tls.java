@@ -578,12 +578,12 @@ public final class ServerStreamFactory implements StreamFactory
                 inNetByteBuffer.flip();
 
                 outAppByteBuffer.rewind();
-                SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-
-                // handle TLS False Start
-                flushHandler.accept(result.bytesProduced());
-
-                statusHandler.accept(result.getHandshakeStatus());
+                do
+                {
+                    SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+                    flushHandler.accept(result.bytesProduced());
+                    statusHandler.accept(result.getHandshakeStatus());
+                } while (tlsEngine.getHandshakeStatus() == NEED_UNWRAP && inNetByteBuffer.hasRemaining());
             }
             catch (SSLException ex)
             {
