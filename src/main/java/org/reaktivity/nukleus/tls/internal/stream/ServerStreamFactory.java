@@ -262,7 +262,7 @@ public final class ServerStreamFactory implements StreamFactory
                 final long newNetworkReplyId = supplyStreamId.getAsLong();
 
                 final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkThrottle, networkId,
-                        networkReplyName, newNetworkReplyId, this::handleStatus, this::handleEnd);
+                        networkReplyName, newNetworkReplyId, this::handleStatus, this::handleFlush, this::handleEnd);
 
                 doWindow(networkThrottle, networkId, 8192, 8192);
 
@@ -325,13 +325,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                 handleStatus(result.getHandshakeStatus());
 
-                if (outAppByteBuffer.hasRemaining())
-                {
-                    final OctetsFW outAppOctets =
-                            outAppOctetsRO.wrap(outAppBuffer, outAppByteBuffer.position(), outAppByteBuffer.remaining());
-
-                    doData(applicationTarget, applicationId, outAppOctets);
-                }
+                handleFlush();
 
                 if (tlsEngine.isInboundDone())
                 {
@@ -458,6 +452,17 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
+        private void handleFlush()
+        {
+            if (outAppByteBuffer.hasRemaining())
+            {
+                final OctetsFW outAppOctets =
+                        outAppOctetsRO.wrap(outAppBuffer, outAppByteBuffer.position(), outAppByteBuffer.remaining());
+
+                doData(applicationTarget, applicationId, outAppOctets);
+            }
+        }
+
         private void handleThrottle(
             int msgTypeId,
             DirectBuffer buffer,
@@ -502,6 +507,7 @@ public final class ServerStreamFactory implements StreamFactory
     {
         private final SSLEngine tlsEngine;
         private final Consumer<HandshakeStatus> statusHandler;
+        private final Runnable flushHandler;
         private final Consumer<EndFW> endHandler;
 
         private final MessageConsumer networkThrottle;
@@ -520,10 +526,12 @@ public final class ServerStreamFactory implements StreamFactory
             String networkReplyName,
             long networkReplyId,
             Consumer<HandshakeStatus> statusHandler,
+            Runnable flushHandler,
             Consumer<EndFW> endHandler)
         {
             this.tlsEngine = tlsEngine;
             this.statusHandler = statusHandler;
+            this.flushHandler = flushHandler;
             this.endHandler = endHandler;
 
             this.networkThrottle = networkThrottle;
@@ -567,7 +575,12 @@ public final class ServerStreamFactory implements StreamFactory
                 payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
                 inNetByteBuffer.flip();
 
+                outAppByteBuffer.clear();
                 SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+                outAppByteBuffer.flip();
+
+                // handle TLS False Start
+                flushHandler.run();
 
                 statusHandler.accept(result.getHandshakeStatus());
             }
