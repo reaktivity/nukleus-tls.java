@@ -315,16 +315,16 @@ public final class ServerStreamFactory implements StreamFactory
 
                 // Note: inNetByteBuffer is emptied by SslEngine.unwrap(...)
                 //       so should be able to eliminate copy (stateless)
+                inNetByteBuffer.clear();
                 payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
                 inNetByteBuffer.flip();
 
+                outAppByteBuffer.clear();
                 SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-
-                inNetByteBuffer.clear();
+                outAppByteBuffer.flip();
 
                 handleStatus(result.getHandshakeStatus());
 
-                outAppByteBuffer.flip();
                 if (outAppByteBuffer.hasRemaining())
                 {
                     final OctetsFW outAppOctets =
@@ -332,7 +332,6 @@ public final class ServerStreamFactory implements StreamFactory
 
                     doData(applicationTarget, applicationId, outAppOctets);
                 }
-                outAppByteBuffer.clear();
 
                 if (tlsEngine.isInboundDone())
                 {
@@ -383,7 +382,9 @@ public final class ServerStreamFactory implements StreamFactory
                     try
                     {
                         // TODO: limit outNetByteBuffer by networkBytes and networkFrames
+                        outNetByteBuffer.clear();
                         SSLEngineResult result = tlsEngine.wrap(EMPTY_BYTE_BUFFER, outNetByteBuffer);
+                        outNetByteBuffer.flip();
                         flushNetwork(tlsEngine, networkReply, networkReplyId);
                         status = result.getHandshakeStatus();
                     }
@@ -395,7 +396,7 @@ public final class ServerStreamFactory implements StreamFactory
                 case FINISHED:
                     handleFinished();
                     status = tlsEngine.getHandshakeStatus();
-                    break loop;
+                    break;
                 default:
                     break loop;
                 }
@@ -562,12 +563,11 @@ public final class ServerStreamFactory implements StreamFactory
 
                 // Note: inNetByteBuffer is emptied by SslEngine.unwrap(...)
                 //       so should be able to eliminate copy (stateless)
+                inNetByteBuffer.clear();
                 payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
                 inNetByteBuffer.flip();
 
                 SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-
-                inNetByteBuffer.clear();
 
                 statusHandler.accept(result.getHandshakeStatus());
             }
@@ -745,14 +745,14 @@ public final class ServerStreamFactory implements StreamFactory
 
                 // Note: inAppBuffer is emptied by SslEngine.wrap(...)
                 //       so should be able to eliminate allocation+copy (stateless)
+                inAppByteBuffer.clear();
                 payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
                 inAppByteBuffer.flip();
 
+                outNetByteBuffer.clear();
                 SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-
+                outNetByteBuffer.flip();
                 flushNetwork(tlsEngine, networkReply, networkReplyId);
-
-                inAppByteBuffer.clear();
 
                 statusHandler.accept(result.getHandshakeStatus());
 
@@ -816,13 +816,11 @@ public final class ServerStreamFactory implements StreamFactory
         MessageConsumer networkReply,
         long networkReplyId)
     {
-        outNetByteBuffer.flip();
         if (outNetByteBuffer.hasRemaining())
         {
             final OctetsFW outNetOctets = outNetOctetsRO.wrap(outNetBuffer, 0, outNetByteBuffer.remaining());
             doData(networkReply, networkReplyId, outNetOctets);
         }
-        outNetByteBuffer.clear();
 
         if (tlsEngine.isOutboundDone())
         {
