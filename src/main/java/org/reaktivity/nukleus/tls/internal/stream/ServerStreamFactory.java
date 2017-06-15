@@ -267,8 +267,8 @@ public final class ServerStreamFactory implements StreamFactory
 
                 doWindow(networkThrottle, networkId, 8192, 8192);
 
-                doBegin(networkReply, networkReplyId, 0L, networkCorrelationId);
-                router.setThrottle(networkReplyName, networkReplyId, newHandshake::handleThrottle);
+                doBegin(networkReply, newNetworkReplyId, 0L, networkCorrelationId);
+                router.setThrottle(networkReplyName, newNetworkReplyId, newHandshake::handleThrottle);
 
                 tlsEngine.beginHandshake();
 
@@ -661,8 +661,8 @@ public final class ServerStreamFactory implements StreamFactory
 
     private final class ServerConnectReplyStream
     {
-        private final MessageConsumer applicationThrottle;
-        private final long applicationId;
+        private final MessageConsumer applicationReplyThrottle;
+        private final long applicationReplyId;
 
         private MessageConsumer networkReply;
         private long networkReplyId;
@@ -672,11 +672,11 @@ public final class ServerStreamFactory implements StreamFactory
         private Consumer<HandshakeStatus> statusHandler;
 
         private ServerConnectReplyStream(
-            MessageConsumer applicationThrottle,
-            long applicationId)
+            MessageConsumer applicationReplyThrottle,
+            long applicationReplyId)
         {
-            this.applicationThrottle = applicationThrottle;
-            this.applicationId = applicationId;
+            this.applicationReplyThrottle = applicationReplyThrottle;
+            this.applicationReplyId = applicationReplyId;
             this.streamState = this::beforeBegin;
         }
 
@@ -702,7 +702,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doReset(applicationThrottle, applicationId);
+                doReset(applicationReplyThrottle, applicationReplyId);
             }
         }
 
@@ -723,7 +723,7 @@ public final class ServerStreamFactory implements StreamFactory
                 handleEnd(end);
                 break;
             default:
-                doReset(applicationThrottle, applicationId);
+                doReset(applicationReplyThrottle, applicationReplyId);
                 break;
             }
         }
@@ -747,7 +747,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doReset(applicationThrottle, applicationId);
+                doReset(applicationReplyThrottle, applicationReplyId);
             }
         }
 
@@ -764,18 +764,20 @@ public final class ServerStreamFactory implements StreamFactory
                 payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
                 inAppByteBuffer.flip();
 
-                outNetByteBuffer.clear();
-                SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                outNetByteBuffer.flip();
-                flushNetwork(tlsEngine, networkReply, networkReplyId);
-
-                statusHandler.accept(result.getHandshakeStatus());
+                while (inAppByteBuffer.hasRemaining())
+                {
+                    outNetByteBuffer.clear();
+                    SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
+                    outNetByteBuffer.flip();
+                    flushNetwork(tlsEngine, networkReply, networkReplyId);
+                    statusHandler.accept(result.getHandshakeStatus());
+                }
 
                 // TODO: delta between windows
             }
             catch (SSLException ex)
             {
-                doReset(applicationThrottle, applicationId);
+                doReset(applicationReplyThrottle, applicationReplyId);
                 LangUtil.rethrowUnchecked(ex);
             }
         }
@@ -816,13 +818,13 @@ public final class ServerStreamFactory implements StreamFactory
             final int writableFrames = window.frames();
             final int newWritableBytes = writableBytes; // TODO: consider TLS Record padding
 
-            doWindow(applicationThrottle, applicationId, newWritableBytes, writableFrames);
+            doWindow(applicationReplyThrottle, applicationReplyId, newWritableBytes, writableFrames);
         }
 
         private void handleReset(
             ResetFW reset)
         {
-            doReset(applicationThrottle, applicationId);
+            doReset(applicationReplyThrottle, applicationReplyId);
         }
     }
 
