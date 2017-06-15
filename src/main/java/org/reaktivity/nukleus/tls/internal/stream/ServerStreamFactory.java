@@ -268,7 +268,7 @@ public final class ServerStreamFactory implements StreamFactory
                 doWindow(networkThrottle, networkId, 8192, 8192);
 
                 doBegin(networkReply, newNetworkReplyId, 0L, networkCorrelationId);
-                router.setThrottle(networkReplyName, networkReplyId, newHandshake::handleThrottle);
+                router.setThrottle(networkReplyName, newNetworkReplyId, newHandshake::handleThrottle);
 
                 tlsEngine.beginHandshake();
 
