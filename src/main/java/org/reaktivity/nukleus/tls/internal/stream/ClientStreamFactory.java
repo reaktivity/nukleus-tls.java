@@ -152,19 +152,18 @@ public final class ClientStreamFactory implements StreamFactory
         final long acceptRef = begin.sourceRef();
         final String acceptName = begin.source().asString();
         final OctetsFW extension = begin.extension();
-
         final TlsBeginExFW tlsBeginEx = extension.get(tlsBeginExRO::wrap);
-        final String tlsHostname = tlsBeginEx.hostname().asString();
 
         final MessagePredicate filter = (t, b, o, l) ->
         {
             final RouteFW route = routeRO.wrap(b, o, l);
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
+            final String tlsHostname = tlsBeginEx.hostname().asString();
 
             return acceptRef == route.sourceRef() &&
                     acceptName.equals(route.source().asString()) &&
-                    Objects.equals(tlsHostname, hostname);
+                    (tlsHostname == null || Objects.equals(tlsHostname, hostname));
         };
 
         final RouteFW route = router.resolve(filter, this::wrapRoute);
@@ -173,6 +172,13 @@ public final class ClientStreamFactory implements StreamFactory
 
         if (route != null)
         {
+            String tlsHostname = tlsBeginEx.hostname().asString();
+            if (tlsHostname == null)
+            {
+                final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+                tlsHostname = routeEx.hostname().asString();
+            }
+
             final String connectName = route.target().asString();
             final long connectRef = route.targetRef();
 
@@ -306,7 +312,10 @@ public final class ClientStreamFactory implements StreamFactory
 
                 final SSLParameters tlsParameters = tlsEngine.getSSLParameters();
                 tlsParameters.setEndpointIdentificationAlgorithm("HTTPS");
-                tlsParameters.setServerNames(asList(new SNIHostName(tlsHostname)));
+                if (tlsHostname != null)
+                {
+                    tlsParameters.setServerNames(asList(new SNIHostName(tlsHostname)));
+                }
                 tlsEngine.setSSLParameters(tlsParameters);
 
                 final ClientHandshake newHandshake = new ClientHandshake(tlsEngine, connectName, newConnectId, connectThrottle,
@@ -315,7 +324,6 @@ public final class ClientStreamFactory implements StreamFactory
                 correlations.put(newCorrelationId, newHandshake);
 
                 newHandshake.openNetwork(connectRef, newCorrelationId);
-                newHandshake.process();
 
                 this.handshake = newHandshake;
                 this.streamState = this::afterBegin;
