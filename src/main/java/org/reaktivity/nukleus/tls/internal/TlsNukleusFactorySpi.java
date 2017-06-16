@@ -62,11 +62,12 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
         Configuration config,
         NukleusBuilder builder)
     {
+        final TlsConfiguration tlsConfig = new TlsConfiguration(config);
         final Path directory = config.directory();
         final SSLContext context = initContext(directory);
 
-        return builder.streamFactory(SERVER, new ServerStreamFactoryBuilder(context))
-                      .streamFactory(CLIENT, new ClientStreamFactoryBuilder(context))
+        return builder.streamFactory(SERVER, new ServerStreamFactoryBuilder(tlsConfig, context))
+                      .streamFactory(CLIENT, new ClientStreamFactoryBuilder(tlsConfig, context))
                       .build();
     }
 

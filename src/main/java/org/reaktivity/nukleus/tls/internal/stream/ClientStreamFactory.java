@@ -17,6 +17,8 @@ package org.reaktivity.nukleus.tls.internal.stream;
 
 import static java.nio.ByteBuffer.allocateDirect;
 import static java.util.Arrays.asList;
+import static java.util.Objects.requireNonNull;
+import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
@@ -37,10 +39,12 @@ import org.agrona.LangUtil;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.reaktivity.nukleus.buffer.BufferPool;
 import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.route.RouteHandler;
 import org.reaktivity.nukleus.stream.StreamFactory;
+import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
@@ -83,34 +87,40 @@ public final class ClientStreamFactory implements StreamFactory
     private final SSLContext context;
     private final RouteHandler router;
     private final MutableDirectBuffer writeBuffer;
+    private final BufferPool bufferPool;
     private final LongSupplier supplyStreamId;
     private final LongSupplier supplyCorrelationId;
+    private final int handshakeWindowBytes;
+    private final int handshakeWindowFrames;
 
     private final Long2ObjectHashMap<ClientHandshake> correlations;
     private final ByteBuffer inAppByteBuffer;
-    private final ByteBuffer inNetByteBuffer;
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
     private final DirectBuffer outAppBuffer;
     private final DirectBuffer outNetBuffer;
 
     public ClientStreamFactory(
+        TlsConfiguration config,
         SSLContext context,
         RouteHandler router,
         MutableDirectBuffer writeBuffer,
+        BufferPool bufferPool,
         LongSupplier supplyStreamId,
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ClientHandshake> correlations)
     {
-        this.context = context;
-        this.router = router;
-        this.writeBuffer = writeBuffer;
-        this.supplyStreamId = supplyStreamId;
-        this.supplyCorrelationId = supplyCorrelationId;
+        this.context = requireNonNull(context);
+        this.router = requireNonNull(router);
+        this.writeBuffer = requireNonNull(writeBuffer);
+        this.bufferPool = requireNonNull(bufferPool);
+        this.supplyStreamId = requireNonNull(supplyStreamId);
+        this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
+        this.correlations = requireNonNull(correlations);
+        this.handshakeWindowBytes = config.handshakeWindowBytes();
+        this.handshakeWindowFrames = config.handshakeWindowFrames();
 
-        this.correlations = correlations;
         this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
-        this.inNetByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppBuffer = new UnsafeBuffer(outAppByteBuffer);
         this.outNetByteBuffer = allocateDirect(writeBuffer.capacity());
@@ -431,6 +441,8 @@ public final class ClientStreamFactory implements StreamFactory
 
         private MessageConsumer networkReplyThrottle;
         private long networkReplyId;
+        private int networkReplySlot = NO_SLOT;
+        private int networkReplySlotOffset;
 
         private IntConsumer flushHandler;
         private Consumer<HandshakeStatus> statusHandler;
@@ -565,32 +577,58 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
-            try
+            if (networkReplySlot == NO_SLOT)
             {
-                final OctetsFW payload = data.payload();
-
-                // Note: inNetByteBuffer is emptied by SslEngine.unwrap(...)
-                //       so should be able to eliminate copy (stateless)
-                inNetByteBuffer.clear();
-                payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
-                inNetByteBuffer.flip();
-
-                while (inNetByteBuffer.hasRemaining())
-                {
-                    outAppByteBuffer.rewind();
-                    SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-
-                    flushHandler.accept(result.bytesProduced());
-                    statusHandler.accept(result.getHandshakeStatus());
-                }
+                networkReplySlot = bufferPool.acquire(networkReplyId);
             }
-            catch (SSLException ex)
+
+            if (networkReplySlot == NO_SLOT)
             {
                 doReset(networkReplyThrottle, networkReplyId);
-                LangUtil.rethrowUnchecked(ex);
             }
+            else
+            {
+                try
+                {
+                    final OctetsFW payload = data.payload();
+                    final int payloadSize = payload.sizeof();
 
-            doWindow(networkReplyThrottle, networkReplyId, data.length(), 1);
+                    final MutableDirectBuffer buffer = bufferPool.buffer(networkReplySlot);
+                    buffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
+                    final ByteBuffer inNetByteBuffer = bufferPool.byteBuffer(networkReplySlot);
+                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset + payloadSize);
+
+                    loop:
+                    while (inNetByteBuffer.hasRemaining())
+                    {
+                        outAppByteBuffer.rewind();
+                        SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+
+                        switch (result.getStatus())
+                        {
+                        case BUFFER_UNDERFLOW:
+                            networkReplySlotOffset = inNetByteBuffer.remaining();
+                            break loop;
+                        default:
+                            bufferPool.release(networkReplySlot);
+                            networkReplySlot = NO_SLOT;
+                            networkReplySlotOffset = 0;
+
+                            flushHandler.accept(result.bytesProduced());
+                            statusHandler.accept(result.getHandshakeStatus());
+                            break;
+                        }
+                    }
+
+                    doWindow(networkReplyThrottle, networkReplyId, data.length(), 1);
+                }
+                catch (SSLException ex)
+                {
+                    bufferPool.release(networkReplySlot);
+                    doReset(networkReplyThrottle, networkReplyId);
+                    LangUtil.rethrowUnchecked(ex);
+                }
+            }
         }
 
         private void handleEnd(
@@ -615,6 +653,8 @@ public final class ClientStreamFactory implements StreamFactory
     {
         private final MessageConsumer networkReplyThrottle;
         private final long networkReplyId;
+        private int networkReplySlot;
+        private int networkReplySlotOffset;
 
         private SSLEngine tlsEngine;
 
@@ -696,11 +736,13 @@ public final class ClientStreamFactory implements StreamFactory
                 this.tlsEngine = handshake.tlsEngine;
                 this.networkTarget = handshake.networkTarget;
                 this.networkId = handshake.networkId;
+                this.networkReplySlot = handshake.networkReplySlot;
+                this.networkReplySlotOffset = handshake.networkReplySlotOffset;
                 this.doBeginApplicationReply = handshake::doBeginApplicationReply;
                 this.streamState = handshake::afterBegin;
 
                 handshake.onNetworkReply(networkReplyThrottle, networkReplyId, this::handleFlush, this::handleStatus);
-                doWindow(networkReplyThrottle, networkReplyId, 8192, 8192);
+                doWindow(networkReplyThrottle, networkReplyId, handshakeWindowBytes, handshakeWindowFrames);
             }
             else
             {
@@ -711,34 +753,61 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
-            try
+            if (networkReplySlot == NO_SLOT)
             {
-                final OctetsFW payload = data.payload();
-
-                // Note: inNetByteBuffer is emptied by SslEngine.unwrap(...)
-                //       so should be able to eliminate copy (stateless)
-                inNetByteBuffer.clear();
-                payload.buffer().getBytes(payload.offset(), inNetByteBuffer, payload.sizeof());
-                inNetByteBuffer.flip();
-
-                while (inNetByteBuffer.hasRemaining())
-                {
-                    outAppByteBuffer.rewind();
-                    SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-
-                    handleFlush(result.bytesProduced());
-                    handleStatus(result.getHandshakeStatus());
-                }
-
-                if (tlsEngine.isInboundDone())
-                {
-                    doEnd(applicationReply, applicationReplyId);
-                }
+                networkReplySlot = bufferPool.acquire(networkReplyId);
             }
-            catch (SSLException ex)
+
+            if (networkReplySlot == NO_SLOT)
             {
                 doReset(networkReplyThrottle, networkReplyId);
-                LangUtil.rethrowUnchecked(ex);
+            }
+            else
+            {
+                try
+                {
+                    final OctetsFW payload = data.payload();
+
+                    final int payloadSize = payload.sizeof();
+
+                    final MutableDirectBuffer buffer = bufferPool.buffer(networkReplySlot);
+                    buffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
+                    final ByteBuffer inNetByteBuffer = bufferPool.byteBuffer(networkReplySlot);
+                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset + payloadSize);
+
+                    loop:
+                    while (inNetByteBuffer.hasRemaining())
+                    {
+                        outAppByteBuffer.rewind();
+                        SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+
+                        switch (result.getStatus())
+                        {
+                        case BUFFER_UNDERFLOW:
+                            networkReplySlotOffset = inNetByteBuffer.remaining();
+                            break loop;
+                        default:
+                            bufferPool.release(networkReplySlot);
+                            networkReplySlot = NO_SLOT;
+                            networkReplySlotOffset = 0;
+
+                            handleFlush(result.bytesProduced());
+                            handleStatus(result.getHandshakeStatus());
+                            break;
+                        }
+                    }
+
+                    if (tlsEngine.isInboundDone())
+                    {
+                        doEnd(applicationReply, applicationReplyId);
+                    }
+                }
+                catch (SSLException ex)
+                {
+                    bufferPool.release(networkReplySlot);
+                    doReset(networkReplyThrottle, networkReplyId);
+                    LangUtil.rethrowUnchecked(ex);
+                }
             }
         }
 
