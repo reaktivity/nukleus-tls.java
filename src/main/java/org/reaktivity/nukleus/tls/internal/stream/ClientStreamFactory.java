@@ -342,7 +342,7 @@ public final class ClientStreamFactory implements StreamFactory
                 payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
                 inAppByteBuffer.flip();
 
-                while (inAppByteBuffer.hasRemaining())
+                while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                 {
                     outNetByteBuffer.rewind();
                     SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
