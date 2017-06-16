@@ -16,17 +16,21 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import javax.net.ssl.SSLContext;
 
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
+import org.reaktivity.nukleus.buffer.BufferPool;
 import org.reaktivity.nukleus.route.RouteHandler;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
+import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 
 public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 {
+    private final TlsConfiguration config;
     private final SSLContext context;
     private final Long2ObjectHashMap<ClientStreamFactory.ClientHandshake> correlations;
 
@@ -34,11 +38,13 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     private MutableDirectBuffer writeBuffer;
     private LongSupplier supplyStreamId;
     private LongSupplier supplyCorrelationId;
-
+    private Supplier<BufferPool> supplyBufferPool;
 
     public ClientStreamFactoryBuilder(
+        TlsConfiguration config,
         SSLContext context)
     {
+        this.config = config;
         this.context = context;
         this.correlations = new Long2ObjectHashMap<>();
     }
@@ -76,8 +82,19 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
+    public StreamFactoryBuilder setBufferPoolSupplier(
+        Supplier<BufferPool> supplyBufferPool)
+    {
+        this.supplyBufferPool = supplyBufferPool;
+        return this;
+    }
+
+    @Override
     public StreamFactory build()
     {
-        return new ClientStreamFactory(context, router, writeBuffer, supplyStreamId, supplyCorrelationId, correlations);
+        final BufferPool bufferPool = supplyBufferPool.get();
+
+        return new ClientStreamFactory(config, context, router, writeBuffer,
+                bufferPool, supplyStreamId, supplyCorrelationId, correlations);
     }
 }

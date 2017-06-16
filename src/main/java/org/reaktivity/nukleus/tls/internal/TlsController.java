@@ -36,7 +36,7 @@ import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 
 public final class TlsController implements Controller
 {
-    private static final int MAX_SEND_LENGTH = 1024; // TODO: Configuration and Context
+    private static final int MAX_SEND_LENGTH = 1024; // TODO: TlsConfiguration and Context
 
     // TODO: thread-safe flyweights or command queue from public methods
     private final RouteFW.Builder routeRW = new RouteFW.Builder();

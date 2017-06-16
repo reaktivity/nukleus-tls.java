@@ -16,18 +16,22 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import javax.net.ssl.SSLContext;
 
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
+import org.reaktivity.nukleus.buffer.BufferPool;
 import org.reaktivity.nukleus.route.RouteHandler;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
+import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactory.ServerHandshake;
 
 public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 {
+    private final TlsConfiguration config;
     private final SSLContext context;
     private final Long2ObjectHashMap<ServerHandshake> correlations;
 
@@ -35,10 +39,13 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private MutableDirectBuffer writeBuffer;
     private LongSupplier supplyStreamId;
     private LongSupplier supplyCorrelationId;
+    private Supplier<BufferPool> supplyBufferPool;
 
     public ServerStreamFactoryBuilder(
+        TlsConfiguration config,
         SSLContext context)
     {
+        this.config = config;
         this.context = context;
         this.correlations = new Long2ObjectHashMap<>();
     }
@@ -76,8 +83,17 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
+    public StreamFactoryBuilder setBufferPoolSupplier(
+        Supplier<BufferPool> supplyBufferPool)
+    {
+        this.supplyBufferPool = supplyBufferPool;
+        return this;
+    }
+
+    @Override
     public StreamFactory build()
     {
-        return new ServerStreamFactory(context, router, writeBuffer, supplyStreamId, supplyCorrelationId, correlations);
+        return new ServerStreamFactory(config, context, router, writeBuffer,
+                supplyBufferPool, supplyStreamId, supplyCorrelationId, correlations);
     }
 }
