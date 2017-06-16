@@ -217,7 +217,7 @@ public final class ServerStreamFactory implements StreamFactory
         private MessageConsumer networkReply;
         private long networkReplyId;
 
-        private int networkSlot;
+        private int networkSlot = NO_SLOT;
         private int networkSlotOffset;
 
         private MessageConsumer applicationTarget;
@@ -356,10 +356,7 @@ public final class ServerStreamFactory implements StreamFactory
                             networkSlotOffset = inNetByteBuffer.remaining();
                             break loop;
                         default:
-                            bufferPool.release(networkSlot);
-                            networkSlot = NO_SLOT;
                             networkSlotOffset = 0;
-
                             handleFlush(result.bytesProduced());
                             handleStatus(result.getHandshakeStatus());
                             break;
@@ -373,9 +370,17 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 catch (SSLException ex)
                 {
-                    bufferPool.release(networkSlot);
+                    networkSlotOffset = 0;
                     doReset(networkThrottle, networkId);
                     LangUtil.rethrowUnchecked(ex);
+                }
+                finally
+                {
+                    if (networkSlotOffset == 0)
+                    {
+                        bufferPool.release(networkSlot);
+                        networkSlot = NO_SLOT;
+                    }
                 }
             }
         }
@@ -417,10 +422,9 @@ public final class ServerStreamFactory implements StreamFactory
                     try
                     {
                         // TODO: limit outNetByteBuffer by networkBytes and networkFrames
-                        outNetByteBuffer.clear();
+                        outNetByteBuffer.rewind();
                         SSLEngineResult result = tlsEngine.wrap(EMPTY_BYTE_BUFFER, outNetByteBuffer);
-                        outNetByteBuffer.flip();
-                        flushNetwork(tlsEngine, networkReply, networkReplyId);
+                        flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId);
                         status = result.getHandshakeStatus();
                     }
                     catch (SSLException ex)
@@ -483,8 +487,12 @@ public final class ServerStreamFactory implements StreamFactory
                 doTlsBegin(applicationTarget, newApplicationId, applicationRef, newCorrelationId, tlsHostname);
                 router.setThrottle(applicationName, newApplicationId, this::handleThrottle);
 
-                this.networkSlot = handshake.networkSlot;
-                this.networkSlotOffset = handshake.networkSlotOffset;
+                if (handshake.networkSlotOffset != 0)
+                {
+                    this.networkSlot = handshake.networkSlot;
+                    this.networkSlotOffset = handshake.networkSlotOffset;
+                }
+
                 this.applicationTarget = applicationTarget;
                 this.applicationId = newApplicationId;
                 this.streamState = this::afterHandshake;
@@ -645,10 +653,7 @@ public final class ServerStreamFactory implements StreamFactory
                             networkSlotOffset = inNetByteBuffer.remaining();
                             break loop;
                         default:
-                            bufferPool.release(networkSlot);
-                            networkSlot = NO_SLOT;
                             networkSlotOffset = 0;
-
                             flushHandler.accept(result.bytesProduced());
                             statusHandler.accept(result.getHandshakeStatus());
                             break;
@@ -659,9 +664,17 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 catch (SSLException ex)
                 {
-                    bufferPool.release(networkSlot);
+                    networkSlotOffset = 0;
                     doReset(networkThrottle, networkId);
                     LangUtil.rethrowUnchecked(ex);
+                }
+                finally
+                {
+                    if (networkSlotOffset == 0)
+                    {
+                        bufferPool.release(networkSlot);
+                        networkSlot = NO_SLOT;
+                    }
                 }
             }
         }
@@ -837,10 +850,9 @@ public final class ServerStreamFactory implements StreamFactory
 
                 while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                 {
-                    outNetByteBuffer.clear();
+                    outNetByteBuffer.rewind();
                     SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                    outNetByteBuffer.flip();
-                    flushNetwork(tlsEngine, networkReply, networkReplyId);
+                    flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId);
                     statusHandler.accept(result.getHandshakeStatus());
                 }
 
@@ -901,12 +913,13 @@ public final class ServerStreamFactory implements StreamFactory
 
     private void flushNetwork(
         SSLEngine tlsEngine,
+        int bytesProduced,
         MessageConsumer networkReply,
         long networkReplyId)
     {
-        if (outNetByteBuffer.hasRemaining())
+        if (bytesProduced > 0)
         {
-            final OctetsFW outNetOctets = outNetOctetsRO.wrap(outNetBuffer, 0, outNetByteBuffer.remaining());
+            final OctetsFW outNetOctets = outNetOctetsRO.wrap(outNetBuffer, 0, bytesProduced);
             doData(networkReply, networkReplyId, outNetOctets);
         }
 
