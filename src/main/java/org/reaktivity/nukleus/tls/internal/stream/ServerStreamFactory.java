@@ -339,10 +339,12 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 try
                 {
-                    final MutableDirectBuffer buffer = bufferPool.buffer(networkSlot);
-                    buffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payload.sizeof());
+                    final int payloadSize = payload.sizeof();
+                    final MutableDirectBuffer inNetBuffer = bufferPool.buffer(networkSlot);
+                    inNetBuffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
                     final ByteBuffer inNetByteBuffer = bufferPool.byteBuffer(networkSlot);
-                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset + payload.sizeof());
+                    final int inNetByteBufferPosition = inNetByteBuffer.position();
+                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset + payloadSize);
 
                     loop:
                     while (inNetByteBuffer.hasRemaining())
@@ -353,7 +355,10 @@ public final class ServerStreamFactory implements StreamFactory
                         switch (result.getStatus())
                         {
                         case BUFFER_UNDERFLOW:
-                            networkSlotOffset = inNetByteBuffer.remaining();
+                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
+                            final int totalBytesRemaining = inNetByteBuffer.remaining();
+                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
+                            networkSlotOffset = totalBytesRemaining;
                             break loop;
                         default:
                             networkSlotOffset = 0;
@@ -636,9 +641,10 @@ public final class ServerStreamFactory implements StreamFactory
                     final OctetsFW payload = data.payload();
                     final int payloadSize = payload.sizeof();
 
-                    final MutableDirectBuffer buffer = bufferPool.buffer(networkSlot);
-                    buffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
+                    final MutableDirectBuffer inNetBuffer = bufferPool.buffer(networkSlot);
+                    inNetBuffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
                     final ByteBuffer inNetByteBuffer = bufferPool.byteBuffer(networkSlot);
+                    final int inNetByteBufferPosition = inNetByteBuffer.position();
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset + payloadSize);
 
                     loop:
@@ -650,7 +656,10 @@ public final class ServerStreamFactory implements StreamFactory
                         switch (result.getStatus())
                         {
                         case BUFFER_UNDERFLOW:
-                            networkSlotOffset = inNetByteBuffer.remaining();
+                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
+                            final int totalBytesRemaining = inNetByteBuffer.remaining();
+                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
+                            networkSlotOffset = totalBytesRemaining;
                             break loop;
                         default:
                             networkSlotOffset = 0;
@@ -926,6 +935,18 @@ public final class ServerStreamFactory implements StreamFactory
         if (tlsEngine.isOutboundDone())
         {
             doEnd(networkReply, networkReplyId);
+        }
+    }
+
+    private void alignSlotBuffer(
+        final MutableDirectBuffer slotBuffer,
+        final int bytesConsumed,
+        final int bytesRemaining)
+    {
+        if (bytesConsumed > 0)
+        {
+            writeBuffer.putBytes(0, slotBuffer, bytesConsumed, bytesRemaining);
+            slotBuffer.putBytes(0, writeBuffer, 0, bytesRemaining);
         }
     }
 

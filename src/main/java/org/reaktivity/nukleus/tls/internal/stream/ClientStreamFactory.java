@@ -593,9 +593,10 @@ public final class ClientStreamFactory implements StreamFactory
                     final OctetsFW payload = data.payload();
                     final int payloadSize = payload.sizeof();
 
-                    final MutableDirectBuffer buffer = bufferPool.buffer(networkReplySlot);
-                    buffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
+                    final MutableDirectBuffer inNetBuffer = bufferPool.buffer(networkReplySlot);
+                    inNetBuffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
                     final ByteBuffer inNetByteBuffer = bufferPool.byteBuffer(networkReplySlot);
+                    final int inNetByteBufferPosition = inNetByteBuffer.position();
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset + payloadSize);
 
                     loop:
@@ -607,7 +608,10 @@ public final class ClientStreamFactory implements StreamFactory
                         switch (result.getStatus())
                         {
                         case BUFFER_UNDERFLOW:
-                            networkReplySlotOffset = inNetByteBuffer.remaining();
+                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
+                            final int totalBytesRemaining = inNetByteBuffer.remaining();
+                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
+                            networkReplySlotOffset = totalBytesRemaining;
                             break loop;
                         default:
                             networkReplySlotOffset = 0;
@@ -775,9 +779,10 @@ public final class ClientStreamFactory implements StreamFactory
 
                     final int payloadSize = payload.sizeof();
 
-                    final MutableDirectBuffer buffer = bufferPool.buffer(networkReplySlot);
-                    buffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
+                    final MutableDirectBuffer inNetBuffer = bufferPool.buffer(networkReplySlot);
+                    inNetBuffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
                     final ByteBuffer inNetByteBuffer = bufferPool.byteBuffer(networkReplySlot);
+                    final int inNetByteBufferPosition = inNetByteBuffer.position();
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset + payloadSize);
 
                     loop:
@@ -789,7 +794,10 @@ public final class ClientStreamFactory implements StreamFactory
                         switch (result.getStatus())
                         {
                         case BUFFER_UNDERFLOW:
-                            networkReplySlotOffset = inNetByteBuffer.remaining();
+                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
+                            final int totalBytesRemaining = inNetByteBuffer.remaining();
+                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
+                            networkReplySlotOffset = totalBytesRemaining;
                             break loop;
                         default:
                             networkReplySlotOffset = 0;
@@ -958,6 +966,18 @@ public final class ClientStreamFactory implements StreamFactory
         if (tlsEngine.isOutboundDone())
         {
             doEnd(networkTarget, networkId);
+        }
+    }
+
+    private void alignSlotBuffer(
+        final MutableDirectBuffer slotBuffer,
+        final int bytesConsumed,
+        final int bytesRemaining)
+    {
+        if (bytesConsumed > 0)
+        {
+            writeBuffer.putBytes(0, slotBuffer, bytesConsumed, bytesRemaining);
+            slotBuffer.putBytes(0, writeBuffer, 0, bytesRemaining);
         }
     }
 
