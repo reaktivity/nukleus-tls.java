@@ -764,7 +764,7 @@ public final class ServerStreamFactory implements StreamFactory
                 payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
                 inAppByteBuffer.flip();
 
-                while (inAppByteBuffer.hasRemaining())
+                while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                 {
                     outNetByteBuffer.clear();
                     SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
