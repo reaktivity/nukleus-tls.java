@@ -610,10 +610,7 @@ public final class ClientStreamFactory implements StreamFactory
                             networkReplySlotOffset = inNetByteBuffer.remaining();
                             break loop;
                         default:
-                            bufferPool.release(networkReplySlot);
-                            networkReplySlot = NO_SLOT;
                             networkReplySlotOffset = 0;
-
                             flushHandler.accept(result.bytesProduced());
                             statusHandler.accept(result.getHandshakeStatus());
                             break;
@@ -624,9 +621,17 @@ public final class ClientStreamFactory implements StreamFactory
                 }
                 catch (SSLException ex)
                 {
-                    bufferPool.release(networkReplySlot);
+                    networkReplySlotOffset = 0;
                     doReset(networkReplyThrottle, networkReplyId);
                     LangUtil.rethrowUnchecked(ex);
+                }
+                finally
+                {
+                    if (networkReplySlotOffset == 0)
+                    {
+                        bufferPool.release(networkReplySlot);
+                        networkReplySlot = NO_SLOT;
+                    }
                 }
             }
         }
@@ -787,10 +792,7 @@ public final class ClientStreamFactory implements StreamFactory
                             networkReplySlotOffset = inNetByteBuffer.remaining();
                             break loop;
                         default:
-                            bufferPool.release(networkReplySlot);
-                            networkReplySlot = NO_SLOT;
                             networkReplySlotOffset = 0;
-
                             handleFlush(result.bytesProduced());
                             handleStatus(result.getHandshakeStatus());
                             break;
@@ -804,9 +806,17 @@ public final class ClientStreamFactory implements StreamFactory
                 }
                 catch (SSLException ex)
                 {
-                    bufferPool.release(networkReplySlot);
+                    networkReplySlotOffset = 0;
                     doReset(networkReplyThrottle, networkReplyId);
                     LangUtil.rethrowUnchecked(ex);
+                }
+                finally
+                {
+                    if (networkReplySlotOffset == 0)
+                    {
+                        bufferPool.release(networkReplySlot);
+                        networkReplySlot = NO_SLOT;
+                    }
                 }
             }
         }
