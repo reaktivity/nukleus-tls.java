@@ -17,11 +17,13 @@ package org.reaktivity.nukleus.tls.internal.stream;
 
 import static java.nio.ByteBuffer.allocateDirect;
 import static java.util.Objects.requireNonNull;
+import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_WRAP;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.LongSupplier;
@@ -226,6 +228,18 @@ public final class ServerStreamFactory implements StreamFactory
         private MessageConsumer streamState;
         private ServerHandshake handshake;
 
+        private int networkWindowBytes;
+        private int networkWindowFrames;
+        private int networkWindowBytesAdjustment;
+        private int networkWindowFramesAdjustment;
+
+        @Override
+        public String toString()
+        {
+            return String.format("%s [networkWindowBytes=%d, networkWindowFrames=%d]",
+                                 getClass().getSimpleName(), networkWindowBytes, networkWindowFrames);
+        }
+
         private ServerAcceptStream(
             SSLEngine tlsEngine,
             MessageConsumer networkThrottle,
@@ -277,7 +291,8 @@ public final class ServerStreamFactory implements StreamFactory
                 final long newNetworkReplyId = supplyStreamId.getAsLong();
 
                 final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkThrottle, networkId,
-                        networkReplyName, newNetworkReplyId, this::handleStatus, this::handleFlush, this::handleEnd);
+                        networkReplyName, newNetworkReplyId, networkCorrelationId,
+                        this::handleStatus, this::handleFlush, this::handleEnd);
 
                 doWindow(networkThrottle, networkId, handshakeWindowBytes, handshakeWindowFrames);
 
@@ -324,21 +339,29 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
-            final OctetsFW payload = data.payload();
+            networkWindowBytes -= data.length();
+            networkWindowFrames--;
 
             if (networkSlot == NO_SLOT)
             {
                 networkSlot = bufferPool.acquire(networkId);
             }
 
-            if (networkSlot == NO_SLOT)
+            try
             {
-                doReset(networkThrottle, networkId);
-            }
-            else
-            {
-                try
+                if (networkSlot == NO_SLOT || networkWindowBytes < 0 || networkWindowFrames < 0)
                 {
+                    doReset(networkThrottle, networkId);
+                }
+                else
+                {
+                    if (networkWindowBytes == 0 || networkWindowFrames == 0)
+                    {
+                        doZeroWindow(networkThrottle, networkId);
+                    }
+
+                    final OctetsFW payload = data.payload();
+
                     final int payloadSize = payload.sizeof();
                     final MutableDirectBuffer inNetBuffer = bufferPool.buffer(networkSlot);
                     inNetBuffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
@@ -359,11 +382,13 @@ public final class ServerStreamFactory implements StreamFactory
                             final int totalBytesRemaining = inNetByteBuffer.remaining();
                             alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
                             networkSlotOffset = totalBytesRemaining;
+                            networkWindowFramesAdjustment--;
                             break loop;
                         default:
                             networkSlotOffset = 0;
                             handleFlush(result.bytesProduced());
-                            handleStatus(result.getHandshakeStatus());
+                            handleStatus(result.getHandshakeStatus(), r -> {});
+                            networkWindowBytesAdjustment += result.bytesConsumed() - result.bytesProduced();
                             break;
                         }
                     }
@@ -373,19 +398,19 @@ public final class ServerStreamFactory implements StreamFactory
                         doEnd(applicationTarget, applicationId);
                     }
                 }
-                catch (SSLException ex)
+            }
+            catch (SSLException ex)
+            {
+                networkSlotOffset = 0;
+                doReset(networkThrottle, networkId);
+                LangUtil.rethrowUnchecked(ex);
+            }
+            finally
+            {
+                if (networkSlotOffset == 0 && networkSlot != NO_SLOT)
                 {
-                    networkSlotOffset = 0;
-                    doReset(networkThrottle, networkId);
-                    LangUtil.rethrowUnchecked(ex);
-                }
-                finally
-                {
-                    if (networkSlotOffset == 0)
-                    {
-                        bufferPool.release(networkSlot);
-                        networkSlot = NO_SLOT;
-                    }
+                    bufferPool.release(networkSlot);
+                    networkSlot = NO_SLOT;
                 }
             }
         }
@@ -396,7 +421,7 @@ public final class ServerStreamFactory implements StreamFactory
             try
             {
                 tlsEngine.closeInbound();
-                handleStatus(tlsEngine.getHandshakeStatus());
+                handleStatus(tlsEngine.getHandshakeStatus(), r -> {});
             }
             catch (SSLException ex)
             {
@@ -405,8 +430,9 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private HandshakeStatus handleStatus(
-            HandshakeStatus status)
+        private void handleStatus(
+            HandshakeStatus status,
+            Consumer<SSLEngineResult> resultHandler)
         {
             loop:
             for (;;)
@@ -426,11 +452,16 @@ public final class ServerStreamFactory implements StreamFactory
                 case NEED_WRAP:
                     try
                     {
-                        // TODO: limit outNetByteBuffer by networkBytes and networkFrames
-                        outNetByteBuffer.rewind();
+                        outNetByteBuffer.clear();
                         SSLEngineResult result = tlsEngine.wrap(EMPTY_BYTE_BUFFER, outNetByteBuffer);
+                        resultHandler.accept(result);
                         flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId);
                         status = result.getHandshakeStatus();
+
+                        if (status == NEED_WRAP)
+                        {
+                            break loop;
+                        }
                     }
                     catch (SSLException ex)
                     {
@@ -445,8 +476,6 @@ public final class ServerStreamFactory implements StreamFactory
                     break loop;
                 }
             }
-
-            return status;
         }
 
         private void handleFinished()
@@ -498,6 +527,11 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkSlotOffset = handshake.networkSlotOffset;
                 }
 
+                this.networkWindowBytes = handshakeWindowBytes;
+                this.networkWindowBytesAdjustment = -handshakeWindowBytes;
+                this.networkWindowFrames = handshakeWindowFrames;
+                this.networkWindowFramesAdjustment = -handshakeWindowFrames;
+
                 this.applicationTarget = applicationTarget;
                 this.applicationId = newApplicationId;
                 this.streamState = this::afterHandshake;
@@ -545,12 +579,22 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleWindow(
             WindowFW window)
         {
-            // TODO: this is post handshake
-            final int writableBytes = window.update();
-            final int writableFrames = window.frames();
-            final int newWritableBytes = writableBytes; // TODO: consider TLS Record padding
+            final int applicationWindowBytesDelta = window.update();
+            final int applicationWindowFramesDelta = window.frames();
 
-            doWindow(networkThrottle, networkId, newWritableBytes, writableFrames);
+            final int networkWindowBytesDelta = applicationWindowBytesDelta + networkWindowBytesAdjustment;
+            final int networkWindowFramesDelta = applicationWindowFramesDelta + networkWindowFramesAdjustment;
+
+            networkWindowBytes += Math.max(networkWindowBytesDelta, 0);
+            networkWindowBytesAdjustment = Math.abs(Math.min(networkWindowBytesDelta, 0));
+
+            networkWindowFrames += Math.max(networkWindowFramesDelta, 0);
+            networkWindowFramesAdjustment = Math.abs(Math.min(networkWindowFramesDelta, 0));
+
+            if (networkWindowBytesDelta > 0 || networkWindowFramesDelta > 0)
+            {
+                doWindow(networkThrottle, networkId, networkWindowBytesDelta, Math.max(networkWindowFramesDelta, 0));
+            }
         }
 
         private void handleReset(
@@ -563,7 +607,7 @@ public final class ServerStreamFactory implements StreamFactory
     public final class ServerHandshake
     {
         private final SSLEngine tlsEngine;
-        private final Consumer<HandshakeStatus> statusHandler;
+        private final BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler;
         private final IntConsumer flushHandler;
         private final Consumer<EndFW> endHandler;
 
@@ -571,13 +615,13 @@ public final class ServerStreamFactory implements StreamFactory
         private final long networkId;
         private final String networkReplyName;
         private final long networkReplyId;
+        private final long networkCorrelationId;
 
         private int networkSlot = NO_SLOT;
         private int networkSlotOffset;
 
-        private int networkBytes;
-        private int networkFrames;
-        private boolean reset;
+        private int outNetworkWindowBytes;
+        private int outNetworkWindowFrames;
 
         private ServerHandshake(
             SSLEngine tlsEngine,
@@ -585,7 +629,8 @@ public final class ServerStreamFactory implements StreamFactory
             long networkId,
             String networkReplyName,
             long networkReplyId,
-            Consumer<HandshakeStatus> statusHandler,
+            long networkCorrelationId,
+            BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler,
             IntConsumer flushHandler,
             Consumer<EndFW> endHandler)
         {
@@ -598,6 +643,7 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkId = networkId;
             this.networkReplyName = networkReplyName;
             this.networkReplyId = networkReplyId;
+            this.networkCorrelationId = networkCorrelationId;
         }
 
         private void afterBegin(
@@ -664,7 +710,8 @@ public final class ServerStreamFactory implements StreamFactory
                         default:
                             networkSlotOffset = 0;
                             flushHandler.accept(result.bytesProduced());
-                            statusHandler.accept(result.getHandshakeStatus());
+                            final HandshakeStatus handshakeStatus = result.getHandshakeStatus();
+                            statusHandler.accept(handshakeStatus, this::updateNetworkWindow);
                             break;
                         }
                     }
@@ -694,24 +741,29 @@ public final class ServerStreamFactory implements StreamFactory
             endHandler.accept(end);
         }
 
-        private void setNetworkThrottle(
-            MessageConsumer networkThrottle)
+        private void updateNetworkWindow(
+            SSLEngineResult result)
         {
-            if (reset)
+            final int bytesProduced = result.bytesProduced();
+            if (bytesProduced != 0)
             {
-                doReset(networkThrottle, networkReplyId);
+                outNetworkWindowBytes -= bytesProduced;
+                outNetworkWindowFrames--;
             }
-            else
-            {
-                router.setThrottle(networkReplyName, networkReplyId, networkThrottle);
-                doWindow(networkThrottle, networkReplyId, networkBytes, networkFrames);
-            }
+        }
+
+        private void setNetworkThrottle(
+            MessageConsumer newNetworkThrottle)
+        {
+            router.setThrottle(networkReplyName, networkReplyId, newNetworkThrottle);
+            doWindow(newNetworkThrottle, networkReplyId, outNetworkWindowBytes, outNetworkWindowFrames);
         }
 
         @Override
         public String toString()
         {
-            return String.format("%s [tlsEngine=%s]", getClass().getSimpleName(), tlsEngine);
+            return String.format("%s [windowBytes=%d, windowFrames=%d]",
+                                 getClass().getSimpleName(), outNetworkWindowBytes, outNetworkWindowFrames);
         }
 
         private void handleThrottle(
@@ -739,16 +791,17 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleWindow(
             WindowFW window)
         {
-            this.networkBytes += window.update();
-            this.networkFrames += window.frames();
+            this.outNetworkWindowBytes += window.update();
+            this.outNetworkWindowFrames += window.frames();
 
-            statusHandler.accept(tlsEngine.getHandshakeStatus());
+            statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
         }
 
         private void handleReset(
             ResetFW reset)
         {
-            this.reset = true;
+            doReset(networkThrottle, networkReplyId);
+            correlations.remove(networkCorrelationId);
         }
     }
 
@@ -757,12 +810,24 @@ public final class ServerStreamFactory implements StreamFactory
         private final MessageConsumer applicationReplyThrottle;
         private final long applicationReplyId;
 
+        private int applicationWindowBytes;
+        private int applicationWindowBytesAdjustment;
+        private int applicationWindowFrames;
+        private int applicationWindowFramesAdjustment;
+
         private MessageConsumer networkReply;
         private long networkReplyId;
 
         private MessageConsumer streamState;
         private SSLEngine tlsEngine;
-        private Consumer<HandshakeStatus> statusHandler;
+        private BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler;
+
+        @Override
+        public String toString()
+        {
+            return String.format("%s [applicationWindowBytes=%d, applicationWindowFrames=%d]",
+                                 getClass().getSimpleName(), applicationWindowBytes, applicationWindowFrames);
+        }
 
         private ServerConnectReplyStream(
             MessageConsumer applicationReplyThrottle,
@@ -847,30 +912,44 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
-            try
-            {
-                final OctetsFW payload = data.payload();
+            applicationWindowBytes -= data.length();
+            applicationWindowFrames--;
 
-                // Note: inAppBuffer is emptied by SslEngine.wrap(...)
-                //       so should be able to eliminate allocation+copy (stateless)
-                inAppByteBuffer.clear();
-                payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
-                inAppByteBuffer.flip();
-
-                while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
-                {
-                    outNetByteBuffer.rewind();
-                    SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                    flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId);
-                    statusHandler.accept(result.getHandshakeStatus());
-                }
-
-                // TODO: delta between windows
-            }
-            catch (SSLException ex)
+            if (applicationWindowBytes < 0 || applicationWindowFrames < 0)
             {
                 doReset(applicationReplyThrottle, applicationReplyId);
-                LangUtil.rethrowUnchecked(ex);
+            }
+            else
+            {
+                if (applicationWindowBytes == 0 || applicationWindowFrames == 0)
+                {
+                    doZeroWindow(applicationReplyThrottle, applicationReplyId);
+                }
+
+                try
+                {
+                    final OctetsFW payload = data.payload();
+
+                    // Note: inAppBuffer is emptied by SslEngine.wrap(...)
+                    //       so should be able to eliminate copy (stateless)
+                    inAppByteBuffer.clear();
+                    payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
+                    inAppByteBuffer.flip();
+
+                    while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
+                    {
+                        outNetByteBuffer.rewind();
+                        SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
+                        updateNetworkWindow(result);
+                        flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId);
+                        statusHandler.accept(result.getHandshakeStatus(), this::updateNetworkWindow);
+                    }
+                }
+                catch (SSLException ex)
+                {
+                    doReset(applicationReplyThrottle, applicationReplyId);
+                    LangUtil.rethrowUnchecked(ex);
+                }
             }
         }
 
@@ -878,7 +957,14 @@ public final class ServerStreamFactory implements StreamFactory
             EndFW end)
         {
             tlsEngine.closeOutbound();
-            statusHandler.accept(tlsEngine.getHandshakeStatus());
+            statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
+        }
+
+        private void updateNetworkWindow(
+            SSLEngineResult result)
+        {
+            applicationWindowBytesAdjustment += result.bytesConsumed() - result.bytesProduced();
+            applicationWindowBytesAdjustment--;
         }
 
         private void handleThrottle(
@@ -906,11 +992,23 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleWindow(
             final WindowFW window)
         {
-            final int writableBytes = window.update();
-            final int writableFrames = window.frames();
-            final int newWritableBytes = writableBytes; // TODO: consider TLS Record padding
+            final int networkWindowBytesDelta = window.update();
+            final int networkWindowFramesDelta = window.frames();
 
-            doWindow(applicationReplyThrottle, applicationReplyId, newWritableBytes, writableFrames);
+            final int applicationWindowBytesDelta = networkWindowBytesDelta + applicationWindowBytesAdjustment;
+            final int applicationWindowFramesDelta = networkWindowFramesDelta + applicationWindowFramesAdjustment;
+
+            applicationWindowBytes += Math.max(applicationWindowBytesDelta, 0);
+            applicationWindowBytesAdjustment = Math.abs(Math.min(applicationWindowBytesDelta, 0));
+
+            applicationWindowFrames += Math.max(applicationWindowFramesDelta, 0);
+            applicationWindowFramesAdjustment = Math.abs(Math.min(applicationWindowFramesDelta, 0));
+
+            if (applicationWindowBytesDelta > 0 || applicationWindowFramesDelta > 0)
+            {
+                doWindow(applicationReplyThrottle, applicationReplyId,
+                         applicationWindowBytesDelta, Math.max(applicationWindowFramesDelta, 0));
+            }
         }
 
         private void handleReset(
@@ -1031,6 +1129,19 @@ public final class ServerStreamFactory implements StreamFactory
                 .streamId(throttleId)
                 .update(writableBytes)
                 .frames(writableFrames)
+                .build();
+
+        throttle.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
+    }
+
+    private void doZeroWindow(
+        final MessageConsumer throttle,
+        final long throttleId)
+    {
+        final WindowFW window = windowRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+                .streamId(throttleId)
+                .update(0)
+                .frames(0)
                 .build();
 
         throttle.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
