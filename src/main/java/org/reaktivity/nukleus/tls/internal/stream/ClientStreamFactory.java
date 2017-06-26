@@ -24,7 +24,6 @@ import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.IntConsumer;
 import java.util.function.LongSupplier;
 
 import javax.net.ssl.SNIHostName;
@@ -88,7 +87,8 @@ public final class ClientStreamFactory implements StreamFactory
     private final SSLContext context;
     private final RouteHandler router;
     private final MutableDirectBuffer writeBuffer;
-    private final BufferPool bufferPool;
+    private final BufferPool networkPool;
+    private final BufferPool applicationPool;
     private final LongSupplier supplyStreamId;
     private final LongSupplier supplyCorrelationId;
     private final int handshakeWindowBytes;
@@ -98,7 +98,6 @@ public final class ClientStreamFactory implements StreamFactory
     private final ByteBuffer inAppByteBuffer;
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
-    private final DirectBuffer outAppBuffer;
     private final DirectBuffer outNetBuffer;
 
     public ClientStreamFactory(
@@ -114,7 +113,8 @@ public final class ClientStreamFactory implements StreamFactory
         this.context = requireNonNull(context);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
-        this.bufferPool = requireNonNull(bufferPool);
+        this.networkPool = requireNonNull(bufferPool);
+        this.applicationPool = requireNonNull(bufferPool).duplicate();
         this.supplyStreamId = requireNonNull(supplyStreamId);
         this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
         this.correlations = requireNonNull(correlations);
@@ -123,7 +123,6 @@ public final class ClientStreamFactory implements StreamFactory
 
         this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
-        this.outAppBuffer = new UnsafeBuffer(outAppByteBuffer);
         this.outNetByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
     }
@@ -378,8 +377,10 @@ public final class ClientStreamFactory implements StreamFactory
                         SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
                         flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId);
                         applicationWindowBytesAdjustment -= result.bytesProduced() - result.bytesConsumed();
-                        applicationWindowBytesAdjustment--;
+                        applicationWindowFramesAdjustment--;
                     }
+
+                    applicationWindowFramesAdjustment++;
                 }
                 catch (SSLException ex)
                 {
@@ -474,7 +475,7 @@ public final class ClientStreamFactory implements StreamFactory
         private int networkReplySlot = NO_SLOT;
         private int networkReplySlotOffset;
 
-        private IntConsumer flushHandler;
+        private Runnable flushHandler;
         private Consumer<WindowFW> windowHandler;
         private BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler;
 
@@ -508,7 +509,7 @@ public final class ClientStreamFactory implements StreamFactory
         private void onNetworkReply(
             MessageConsumer networkReplyThrottle,
             long networkReplyId,
-            IntConsumer flushHandler,
+            Runnable flushHandler,
             BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler)
         {
             this.networkReplyThrottle = networkReplyThrottle;
@@ -534,7 +535,8 @@ public final class ClientStreamFactory implements StreamFactory
 
             router.setThrottle(networkName, networkId, networkThrottle);
 
-            doWindow(networkThrottle, networkId, outNetworkWindowBytes, outNetworkWindowFrames);
+            // TODO: improve heuristic to account for TLS protocol framing bytes
+            doWindow(networkThrottle, networkId, outNetworkWindowBytes * 80 / 100, outNetworkWindowFrames);
 
             return applicationReply;
         }
@@ -610,7 +612,7 @@ public final class ClientStreamFactory implements StreamFactory
         {
             if (networkReplySlot == NO_SLOT)
             {
-                networkReplySlot = bufferPool.acquire(networkReplyId);
+                networkReplySlot = networkPool.acquire(networkReplyId);
             }
 
             if (networkReplySlot == NO_SLOT)
@@ -624,9 +626,9 @@ public final class ClientStreamFactory implements StreamFactory
                     final OctetsFW payload = data.payload();
                     final int payloadSize = payload.sizeof();
 
-                    final MutableDirectBuffer inNetBuffer = bufferPool.buffer(networkReplySlot);
+                    final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkReplySlot);
                     inNetBuffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
-                    final ByteBuffer inNetByteBuffer = bufferPool.byteBuffer(networkReplySlot);
+                    final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkReplySlot);
                     final int inNetByteBufferPosition = inNetByteBuffer.position();
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset + payloadSize);
 
@@ -635,6 +637,12 @@ public final class ClientStreamFactory implements StreamFactory
                     {
                         outAppByteBuffer.rewind();
                         SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+
+                        if (outAppByteBuffer.position() != 0)
+                        {
+                            doReset(networkReplyThrottle, networkReplyId);
+                            break loop;
+                        }
 
                         switch (result.getStatus())
                         {
@@ -646,7 +654,7 @@ public final class ClientStreamFactory implements StreamFactory
                             break loop;
                         default:
                             networkReplySlotOffset = 0;
-                            flushHandler.accept(result.bytesProduced());
+                            flushHandler.run();
                             statusHandler.accept(result.getHandshakeStatus(), this::updateNetworkWindow);
                             break;
                         }
@@ -664,7 +672,7 @@ public final class ClientStreamFactory implements StreamFactory
                 {
                     if (networkReplySlotOffset == 0)
                     {
-                        bufferPool.release(networkReplySlot);
+                        networkPool.release(networkReplySlot);
                         networkReplySlot = NO_SLOT;
                     }
                 }
@@ -723,6 +731,10 @@ public final class ClientStreamFactory implements StreamFactory
         private ObjectLongBiFunction<MessageConsumer, MessageConsumer> doBeginApplicationReply;
 
         private MessageConsumer streamState;
+        private int applicationWindowBytes;
+        private int applicationWindowFrames;
+        private int applicationReplySlot = NO_SLOT;
+        private int applicationReplySlotOffset;
 
         private ClientConnectReplyStream(
             MessageConsumer networkReplyThrottle,
@@ -815,10 +827,16 @@ public final class ClientStreamFactory implements StreamFactory
 
             if (networkReplySlot == NO_SLOT)
             {
-                networkReplySlot = bufferPool.acquire(networkReplyId);
+                networkReplySlot = networkPool.acquire(networkReplyId);
             }
 
-            if (networkReplySlot == NO_SLOT || networkWindowBytes < 0 || networkWindowFrames < 0)
+            if (applicationReplySlot == NO_SLOT)
+            {
+                applicationReplySlot = applicationPool.acquire(applicationReplyId);
+            }
+
+            if (networkReplySlot == NO_SLOT || networkWindowBytes < 0 || networkWindowFrames < 0 ||
+                    applicationReplySlot == NO_SLOT)
             {
                 doReset(networkReplyThrottle, networkReplyId);
             }
@@ -835,16 +853,19 @@ public final class ClientStreamFactory implements StreamFactory
 
                     final int payloadSize = payload.sizeof();
 
-                    final MutableDirectBuffer inNetBuffer = bufferPool.buffer(networkReplySlot);
+                    final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkReplySlot);
                     inNetBuffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
-                    final ByteBuffer inNetByteBuffer = bufferPool.byteBuffer(networkReplySlot);
+                    final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkReplySlot);
                     final int inNetByteBufferPosition = inNetByteBuffer.position();
+                    final int inNetByteBufferCapacity = inNetByteBuffer.remaining();
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset + payloadSize);
 
                     loop:
                     while (inNetByteBuffer.hasRemaining())
                     {
-                        outAppByteBuffer.rewind();
+                        final ByteBuffer outAppByteBuffer = applicationPool.byteBuffer(applicationReplySlot);
+                        outAppByteBuffer.position(outAppByteBuffer.position() + applicationReplySlotOffset);
+
                         SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
 
                         switch (result.getStatus())
@@ -855,10 +876,26 @@ public final class ClientStreamFactory implements StreamFactory
                             alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
                             networkReplySlotOffset = totalBytesRemaining;
                             networkWindowFramesAdjustment--;
+                            if (networkReplySlotOffset == inNetByteBufferCapacity)
+                            {
+                                networkReplySlotOffset = 0;
+                                doReset(networkReplyThrottle, networkReplyId);
+                            }
+                            else
+                            {
+                                networkWindowBytes += data.length();
+                                networkWindowFrames++;
+                                doWindow(networkReplyThrottle, networkReplyId, data.length(), 1);
+                            }
+                            break loop;
+                        case BUFFER_OVERFLOW:
+                            applicationReplySlotOffset = 0;
+                            doReset(networkReplyThrottle, networkReplyId);
                             break loop;
                         default:
                             networkReplySlotOffset = 0;
-                            handleFlush(result.bytesProduced());
+                            applicationReplySlotOffset += result.bytesProduced();
+                            handleFlush();
                             handleStatus(result.getHandshakeStatus(), r -> {});
                             networkWindowBytesAdjustment += result.bytesConsumed() - result.bytesProduced();
                             break;
@@ -873,6 +910,7 @@ public final class ClientStreamFactory implements StreamFactory
                 catch (SSLException ex)
                 {
                     networkReplySlotOffset = 0;
+                    applicationReplySlotOffset = 0;
                     doReset(networkReplyThrottle, networkReplyId);
                     LangUtil.rethrowUnchecked(ex);
                 }
@@ -880,8 +918,14 @@ public final class ClientStreamFactory implements StreamFactory
                 {
                     if (networkReplySlotOffset == 0)
                     {
-                        bufferPool.release(networkReplySlot);
+                        networkPool.release(networkReplySlot);
                         networkReplySlot = NO_SLOT;
+                    }
+
+                    if (applicationReplySlotOffset == 0)
+                    {
+                        applicationPool.release(applicationReplySlot);
+                        applicationReplySlot = NO_SLOT;
                     }
                 }
             }
@@ -949,6 +993,11 @@ public final class ClientStreamFactory implements StreamFactory
 
         private void handleFinished()
         {
+            this.networkWindowBytes += handshakeWindowBytes;
+            this.networkWindowBytesAdjustment -= handshakeWindowBytes;
+            this.networkWindowFrames += handshakeWindowFrames;
+            this.networkWindowFramesAdjustment -= handshakeWindowFrames;
+
             final long newApplicationReplyId = supplyStreamId.getAsLong();
             this.applicationReply = this.doBeginApplicationReply.apply(this::handleThrottle, newApplicationReplyId);
             this.applicationReplyId = newApplicationReplyId;
@@ -957,14 +1006,31 @@ public final class ClientStreamFactory implements StreamFactory
             this.doBeginApplicationReply = null;
         }
 
-        private void handleFlush(
-            int bytesProduced)
+        private void handleFlush()
         {
-            if (bytesProduced > 0)
+            if (applicationReplySlotOffset > 0)
             {
-                final OctetsFW outAppOctets = outAppOctetsRO.wrap(outAppBuffer, 0, bytesProduced);
+                final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationReplySlot);
 
-                doData(applicationReply, applicationReplyId, outAppOctets);
+                final int applicationWindow = applicationWindowFrames == 0 ? 0 : applicationWindowBytes;
+                final int applicationBytesConsumed = Math.min(applicationReplySlotOffset, applicationWindow);
+
+                if (applicationBytesConsumed > 0)
+                {
+                    final OctetsFW outAppOctets = outAppOctetsRO.wrap(outAppBuffer, 0, applicationBytesConsumed);
+
+                    doData(applicationReply, applicationReplyId, outAppOctets);
+
+                    applicationWindowBytes -= applicationBytesConsumed;
+                    applicationWindowFrames--;
+                }
+
+                applicationReplySlotOffset -= applicationBytesConsumed;
+
+                if (applicationReplySlotOffset != 0)
+                {
+                    alignSlotBuffer(outAppBuffer, applicationBytesConsumed, applicationReplySlotOffset);
+                }
             }
         }
 
@@ -995,6 +1061,25 @@ public final class ClientStreamFactory implements StreamFactory
         {
             final int applicationWindowBytesDelta = window.update();
             final int applicationWindowFramesDelta = window.frames();
+
+            applicationWindowBytes += applicationWindowBytesDelta;
+            applicationWindowFrames += applicationWindowFramesDelta;
+
+            if (applicationReplySlotOffset != 0)
+            {
+                try
+                {
+                    handleFlush();
+                }
+                finally
+                {
+                    if (applicationReplySlotOffset == 0)
+                    {
+                        applicationPool.release(applicationReplySlot);
+                        applicationReplySlot = NO_SLOT;
+                    }
+                }
+            }
 
             final int networkWindowBytesDelta = applicationWindowBytesDelta + networkWindowBytesAdjustment;
             final int networkWindowFramesDelta = applicationWindowFramesDelta + networkWindowFramesAdjustment;
