@@ -1094,15 +1094,15 @@ public final class ServerStreamFactory implements StreamFactory
             final int applicationWindowFramesDelta = networkWindowFramesDelta + applicationWindowFramesAdjustment;
 
             applicationWindowBytes += Math.max(applicationWindowBytesDelta, 0);
-            applicationWindowBytesAdjustment = Math.abs(Math.min(applicationWindowBytesDelta, 0));
+            applicationWindowBytesAdjustment = Math.min(applicationWindowBytesDelta, 0);
 
             applicationWindowFrames += Math.max(applicationWindowFramesDelta, 0);
-            applicationWindowFramesAdjustment = Math.abs(Math.min(applicationWindowFramesDelta, 0));
+            applicationWindowFramesAdjustment = Math.min(applicationWindowFramesDelta, 0);
 
             if (applicationWindowBytesDelta > 0 || applicationWindowFramesDelta > 0)
             {
                 doWindow(applicationReplyThrottle, applicationReplyId,
-                         applicationWindowBytesDelta, Math.max(applicationWindowFramesDelta, 0));
+                         Math.max(applicationWindowBytesDelta, 0), Math.max(applicationWindowFramesDelta, 0));
             }
         }
 
