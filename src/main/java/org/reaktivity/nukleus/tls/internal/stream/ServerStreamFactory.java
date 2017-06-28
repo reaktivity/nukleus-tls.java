@@ -120,7 +120,7 @@ public final class ServerStreamFactory implements StreamFactory
         this.supplyStreamId = requireNonNull(supplyStreamId);
         this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
         this.correlations = requireNonNull(correlations);
-        this.handshakeWindowBytes = config.handshakeWindowBytes();
+        this.handshakeWindowBytes = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
         this.handshakeWindowFrames = config.handshakeWindowFrames();
 
         this.wrapRoute = this::wrapRoute;
@@ -296,7 +296,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                 final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkThrottle, networkId,
                         networkReplyName, newNetworkReplyId, networkCorrelationId,
-                        this::handleStatus, this::handleFlush, this::handleEnd);
+                        this::handleStatus, this::handleFlushAppData, this::handleEnd);
 
                 doWindow(networkThrottle, networkId, handshakeWindowBytes, handshakeWindowFrames);
 
@@ -371,13 +371,12 @@ public final class ServerStreamFactory implements StreamFactory
                     }
 
                     final OctetsFW payload = data.payload();
-
                     final int payloadSize = payload.sizeof();
+
                     final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkSlot);
                     inNetBuffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
                     final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkSlot);
                     final int inNetByteBufferPosition = inNetByteBuffer.position();
-                    final int inNetByteBufferCapacity = inNetByteBuffer.remaining();
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset + payloadSize);
 
                     loop:
@@ -390,32 +389,27 @@ public final class ServerStreamFactory implements StreamFactory
 
                         switch (result.getStatus())
                         {
+                        case BUFFER_OVERFLOW:
                         case BUFFER_UNDERFLOW:
                             final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
                             final int totalBytesRemaining = inNetByteBuffer.remaining();
                             alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
                             networkSlotOffset = totalBytesRemaining;
                             networkWindowFramesAdjustment--;
-                            if (networkSlotOffset == inNetByteBufferCapacity)
+                            if (networkSlotOffset == networkPool.slotCapacity())
                             {
                                 networkSlotOffset = 0;
                                 doReset(networkThrottle, networkId);
                             }
                             else
                             {
-                                networkWindowBytes += data.length();
-                                networkWindowFrames++;
-                                doWindow(networkThrottle, networkId, data.length(), 1);
+                                handleFlushNetworkWindow();
                             }
-                            break loop;
-                        case BUFFER_OVERFLOW:
-                            applicationSlotOffset = 0;
-                            doReset(networkThrottle, networkReplyId);
                             break loop;
                         default:
                             networkSlotOffset = 0;
                             applicationSlotOffset += result.bytesProduced();
-                            handleFlush();
+                            handleFlushAppData();
                             handleStatus(result.getHandshakeStatus(), r -> {});
                             networkWindowBytesAdjustment += result.bytesConsumed() - result.bytesProduced();
                             break;
@@ -579,7 +573,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void handleFlush()
+        private void handleFlushAppData()
         {
             if (applicationSlotOffset > 0)
             {
@@ -642,7 +636,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 try
                 {
-                    handleFlush();
+                    handleFlushAppData();
                 }
                 finally
                 {
@@ -650,6 +644,11 @@ public final class ServerStreamFactory implements StreamFactory
                     {
                         applicationPool.release(applicationSlot);
                         applicationSlot = NO_SLOT;
+
+                        if (networkSlotOffset != 0)
+                        {
+                            handleFlushNetworkWindow();
+                        }
                     }
                 }
             }
@@ -658,14 +657,14 @@ public final class ServerStreamFactory implements StreamFactory
             final int networkWindowFramesDelta = applicationWindowFramesDelta + networkWindowFramesAdjustment;
 
             networkWindowBytes += Math.max(networkWindowBytesDelta, 0);
-            networkWindowBytesAdjustment = Math.abs(Math.min(networkWindowBytesDelta, 0));
+            networkWindowBytesAdjustment = Math.min(networkWindowBytesDelta, 0);
 
             networkWindowFrames += Math.max(networkWindowFramesDelta, 0);
-            networkWindowFramesAdjustment = Math.abs(Math.min(networkWindowFramesDelta, 0));
+            networkWindowFramesAdjustment = Math.min(networkWindowFramesDelta, 0);
 
             if (networkWindowBytesDelta > 0 || networkWindowFramesDelta > 0)
             {
-                doWindow(networkThrottle, networkId, networkWindowBytesDelta, Math.max(networkWindowFramesDelta, 0));
+                doWindow(networkThrottle, networkId, Math.max(networkWindowBytesDelta, 0), Math.max(networkWindowFramesDelta, 0));
             }
         }
 
@@ -673,6 +672,20 @@ public final class ServerStreamFactory implements StreamFactory
             ResetFW reset)
         {
             doReset(networkThrottle, networkId);
+        }
+
+        private void handleFlushNetworkWindow()
+        {
+            final int networkReplySlotAvailable = networkPool.slotCapacity() - networkSlotOffset;
+            final int networkReplySlotAdjustment = networkWindowBytesAdjustment - networkWindowBytes;
+            final int networkWindowBytesUpdate = Math.max(networkReplySlotAvailable + networkReplySlotAdjustment, 0);
+
+            networkWindowBytes += networkWindowBytesUpdate;
+            networkWindowBytesAdjustment -= networkWindowBytesUpdate;
+            networkWindowFrames++;
+            networkWindowFramesAdjustment--;
+
+            doWindow(networkThrottle, networkId, networkWindowBytesUpdate, 1);
         }
     }
 
