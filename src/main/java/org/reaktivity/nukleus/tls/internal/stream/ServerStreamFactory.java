@@ -1059,7 +1059,7 @@ public final class ServerStreamFactory implements StreamFactory
             SSLEngineResult result)
         {
             applicationWindowBytesAdjustment += result.bytesConsumed() - result.bytesProduced();
-            applicationWindowBytesAdjustment--;
+            applicationWindowFramesAdjustment--;
         }
 
         private void handleThrottle(
