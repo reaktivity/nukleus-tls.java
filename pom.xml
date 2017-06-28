@@ -6,7 +6,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.reaktivity</groupId>
   <artifactId>nukleus-tls</artifactId>
-  <version>0.10</version>
+  <version>0.11</version>
   <name>TLS Nukleus Implementation</name>
   <description>TLS Nukleus Implementation</description>
   <url>https://github.com/reaktivity/nukleus-tls.java</url>
@@ -50,11 +50,11 @@
     <jmh.version>1.17.4</jmh.version>
     <jmh.profilers.version>0.1.3</jmh.profilers.version>
 
-    <nukleus.tls.spec.version>0.2</nukleus.tls.spec.version>
-    <reaktor.test.version>0.7</reaktor.test.version>
+    <nukleus.tls.spec.version>0.3</nukleus.tls.spec.version>
+    <reaktor.test.version>0.8</reaktor.test.version>
 
     <nukleus.plugin.version>0.7.8</nukleus.plugin.version>
-    <nukleus.version>0.5</nukleus.version>
+    <nukleus.version>0.6</nukleus.version>
   </properties>
 
   <dependencies>

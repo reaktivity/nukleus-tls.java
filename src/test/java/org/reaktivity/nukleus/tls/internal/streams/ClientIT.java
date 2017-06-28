@@ -73,4 +73,17 @@ public class ClientIT
     {
         k3po.finish();
     }
+
+    @Test
+    @Specification({
+        "${route}/client/controller",
+        "${client}/echo.payload.length.100k/client",
+        "${server}/echo.payload.length.100k/server"})
+    @ScriptProperty({
+        "newServerAcceptRef ${newClientConnectRef}",
+        "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldEchoPayloadLength100k() throws Exception
+    {
+        k3po.finish();
+    }
 }
