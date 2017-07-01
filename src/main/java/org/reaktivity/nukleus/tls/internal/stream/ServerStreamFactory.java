@@ -18,6 +18,7 @@ package org.reaktivity.nukleus.tls.internal.stream;
 import static java.nio.ByteBuffer.allocateDirect;
 import static java.util.Objects.requireNonNull;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_WRAP;
+import static javax.net.ssl.SSLEngineResult.Status.BUFFER_UNDERFLOW;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
@@ -356,28 +357,61 @@ public final class ServerStreamFactory implements StreamFactory
                 applicationSlot = applicationPool.acquire(applicationId);
             }
 
-            try
+            if (networkSlot == NO_SLOT || networkWindowBytes < 0 || networkWindowFrames < 0 ||
+                    applicationSlot == NO_SLOT)
             {
-                if (networkSlot == NO_SLOT || networkWindowBytes < 0 || networkWindowFrames < 0 ||
-                        applicationSlot == NO_SLOT)
+                doReset(networkThrottle, networkId);
+            }
+            else
+            {
+                if (networkWindowBytes == 0 || networkWindowFrames == 0)
                 {
-                    doReset(networkThrottle, networkId);
+                    doZeroWindow(networkThrottle, networkId);
                 }
-                else
+
+                final OctetsFW payload = data.payload();
+                final int payloadSize = payload.sizeof();
+
+                final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkSlot);
+                inNetBuffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
+                networkSlotOffset += payloadSize;
+
+                try
                 {
-                    if (networkWindowBytes == 0 || networkWindowFrames == 0)
+                    unwrapNetworkBufferData();
+                }
+                finally
+                {
+                    if (networkSlotOffset == 0)
                     {
-                        doZeroWindow(networkThrottle, networkId);
+                        networkPool.release(networkSlot);
+                        networkSlot = NO_SLOT;
                     }
+                }
+            }
+        }
 
-                    final OctetsFW payload = data.payload();
-                    final int payloadSize = payload.sizeof();
+        private void unwrapNetworkBufferData()
+        {
+            assert (networkSlotOffset != 0);
 
+            if (applicationSlot == NO_SLOT)
+            {
+                applicationSlot = applicationPool.acquire(applicationId);
+            }
+
+            if (applicationSlot == NO_SLOT)
+            {
+                doReset(networkThrottle, networkId);
+            }
+            else
+            {
+                try
+                {
                     final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkSlot);
-                    inNetBuffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
                     final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkSlot);
                     final int inNetByteBufferPosition = inNetByteBuffer.position();
-                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset + payloadSize);
+                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset);
 
                     loop:
                     while (inNetByteBuffer.hasRemaining())
@@ -396,14 +430,26 @@ public final class ServerStreamFactory implements StreamFactory
                             alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
                             networkSlotOffset = totalBytesRemaining;
                             networkWindowFramesAdjustment--;
-                            if (networkSlotOffset == networkPool.slotCapacity())
+                            if (networkSlotOffset == networkPool.slotCapacity() &&
+                                    result.getStatus() == BUFFER_UNDERFLOW)
                             {
                                 networkSlotOffset = 0;
                                 doReset(networkThrottle, networkId);
                             }
                             else
                             {
-                                handleFlushNetworkWindow();
+                                final int networkWindowBytesUpdate =
+                                        Math.max(networkPool.slotCapacity() - networkSlotOffset - networkWindowBytes, 0);
+
+                                if (networkWindowBytesUpdate > 0)
+                                {
+                                    networkWindowBytes += networkWindowBytesUpdate;
+                                    networkWindowBytesAdjustment -= networkWindowBytesUpdate;
+                                    networkWindowFrames++;
+                                    networkWindowFramesAdjustment--;
+
+                                    doWindow(networkThrottle, networkId, networkWindowBytesUpdate, 1);
+                                }
                             }
                             break loop;
                         default:
@@ -421,26 +467,20 @@ public final class ServerStreamFactory implements StreamFactory
                         doEnd(applicationTarget, applicationId);
                     }
                 }
-            }
-            catch (SSLException ex)
-            {
-                networkSlotOffset = 0;
-                applicationSlotOffset = 0;
-                doReset(networkThrottle, networkId);
-                LangUtil.rethrowUnchecked(ex);
-            }
-            finally
-            {
-                if (networkSlotOffset == 0 && networkSlot != NO_SLOT)
+                catch (SSLException ex)
                 {
-                    networkPool.release(networkSlot);
-                    networkSlot = NO_SLOT;
+                    networkSlotOffset = 0;
+                    applicationSlotOffset = 0;
+                    doReset(networkThrottle, networkId);
+                    LangUtil.rethrowUnchecked(ex);
                 }
-
-                if (applicationSlotOffset == 0 && applicationSlot != NO_SLOT)
+                finally
                 {
-                    applicationPool.release(applicationSlot);
-                    applicationSlot = NO_SLOT;
+                    if (applicationSlotOffset == 0)
+                    {
+                        applicationPool.release(applicationSlot);
+                        applicationSlot = NO_SLOT;
+                    }
                 }
             }
         }
@@ -448,16 +488,8 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            try
-            {
-                tlsEngine.closeInbound();
-                handleStatus(tlsEngine.getHandshakeStatus(), r -> {});
-            }
-            catch (SSLException ex)
-            {
-                doReset(networkThrottle, networkId);
-                LangUtil.rethrowUnchecked(ex);
-            }
+            doCloseInbound(tlsEngine);
+            handleStatus(tlsEngine.getHandshakeStatus(), r -> {});
         }
 
         private void handleStatus(
@@ -644,11 +676,22 @@ public final class ServerStreamFactory implements StreamFactory
                     {
                         applicationPool.release(applicationSlot);
                         applicationSlot = NO_SLOT;
+                    }
+                }
+            }
 
-                        if (networkSlotOffset != 0)
-                        {
-                            handleFlushNetworkWindow();
-                        }
+            if (networkSlotOffset != 0)
+            {
+                try
+                {
+                    unwrapNetworkBufferData();
+                }
+                finally
+                {
+                    if (networkSlotOffset == 0)
+                    {
+                        networkPool.release(networkSlot);
+                        networkSlot = NO_SLOT;
                     }
                 }
             }
@@ -672,20 +715,8 @@ public final class ServerStreamFactory implements StreamFactory
             ResetFW reset)
         {
             doReset(networkThrottle, networkId);
-        }
 
-        private void handleFlushNetworkWindow()
-        {
-            final int networkReplySlotAvailable = networkPool.slotCapacity() - networkSlotOffset;
-            final int networkReplySlotAdjustment = networkWindowBytesAdjustment - networkWindowBytes;
-            final int networkWindowBytesUpdate = Math.max(networkReplySlotAvailable + networkReplySlotAdjustment, 0);
-
-            networkWindowBytes += networkWindowBytesUpdate;
-            networkWindowBytesAdjustment -= networkWindowBytesUpdate;
-            networkWindowFrames++;
-            networkWindowFramesAdjustment--;
-
-            doWindow(networkThrottle, networkId, networkWindowBytesUpdate, 1);
+            doCloseInbound(tlsEngine);
         }
     }
 
@@ -895,6 +926,9 @@ public final class ServerStreamFactory implements StreamFactory
         {
             doReset(networkThrottle, networkReplyId);
             correlations.remove(networkCorrelationId);
+
+            tlsEngine.closeOutbound();
+            doCloseInbound(tlsEngine);
         }
     }
 
@@ -1110,6 +1144,8 @@ public final class ServerStreamFactory implements StreamFactory
             ResetFW reset)
         {
             doReset(applicationReplyThrottle, applicationReplyId);
+
+            tlsEngine.closeOutbound();
         }
     }
 
@@ -1251,5 +1287,24 @@ public final class ServerStreamFactory implements StreamFactory
                .build();
 
         throttle.accept(reset.typeId(), reset.buffer(), reset.offset(), reset.sizeof());
+    }
+
+    private void doCloseInbound(
+        final SSLEngine tlsEngine)
+    {
+        try
+        {
+            tlsEngine.closeInbound();
+        }
+        catch (SSLException ex)
+        {
+            // Inbound closed before receiving peer's close_notify: possible truncation attack?
+            // this remote end-point behavior is allowed by TLS RFC
+            final String message = ex.getMessage();
+            if (!message.contains("possible truncation attack"))
+            {
+                LangUtil.rethrowUnchecked(ex);
+            }
+        }
     }
 }
