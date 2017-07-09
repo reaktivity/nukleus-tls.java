@@ -50,6 +50,7 @@ import org.reaktivity.nukleus.tls.internal.types.Flyweight;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.AbortFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.EndFW;
@@ -68,10 +69,12 @@ public final class ClientStreamFactory implements StreamFactory
     private final BeginFW beginRO = new BeginFW();
     private final DataFW dataRO = new DataFW();
     private final EndFW endRO = new EndFW();
+    private final AbortFW abortRO = new AbortFW();
 
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
     private final DataFW.Builder dataRW = new DataFW.Builder();
     private final EndFW.Builder endRW = new EndFW.Builder();
+    private final AbortFW.Builder abortRW = new AbortFW.Builder();
 
     private final WindowFW windowRO = new WindowFW();
     private final ResetFW resetRO = new ResetFW();
@@ -296,6 +299,10 @@ public final class ClientStreamFactory implements StreamFactory
                 final EndFW end = endRO.wrap(buffer, index, index + length);
                 handleEnd(end);
                 break;
+            case AbortFW.TYPE_ID:
+                final AbortFW abort = abortRO.wrap(buffer, index, index + length);
+                handleAbort(abort);
+                break;
             default:
                 doReset(applicationThrottle, applicationId);
                 break;
@@ -351,19 +358,20 @@ public final class ClientStreamFactory implements StreamFactory
             applicationWindowBytes -= data.length();
             applicationWindowFrames--;
 
-            if (applicationWindowBytes < 0 || applicationWindowFrames < 0)
+            try
             {
-                doReset(applicationThrottle, applicationId);
-            }
-            else
-            {
-                if (applicationWindowBytes == 0 || applicationWindowFrames == 0)
+                if (applicationWindowBytes < 0 || applicationWindowFrames < 0)
                 {
-                    doZeroWindow(applicationThrottle, applicationId);
+                    doReset(applicationThrottle, applicationId);
+                    doCloseOutbound(tlsEngine, networkTarget, networkId);
                 }
-
-                try
+                else
                 {
+                    if (applicationWindowBytes == 0 || applicationWindowFrames == 0)
+                    {
+                        doZeroWindow(applicationThrottle, applicationId);
+                    }
+
                     final OctetsFW payload = data.payload();
 
                     // Note: inAppBuffer is emptied by SslEngine.wrap(...)
@@ -383,11 +391,12 @@ public final class ClientStreamFactory implements StreamFactory
 
                     applicationWindowFramesAdjustment++;
                 }
-                catch (SSLException ex)
-                {
-                    doReset(applicationThrottle, applicationId);
-                    LangUtil.rethrowUnchecked(ex);
-                }
+            }
+            catch (SSLException ex)
+            {
+                doReset(applicationThrottle, applicationId);
+                doAbort(networkTarget, networkId);
+                LangUtil.rethrowUnchecked(ex);
             }
         }
 
@@ -396,16 +405,20 @@ public final class ClientStreamFactory implements StreamFactory
         {
             try
             {
-                tlsEngine.closeOutbound();
-                outNetByteBuffer.rewind();
-                SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId);
+                doCloseOutbound(tlsEngine, networkTarget, networkId);
             }
             catch (SSLException ex)
             {
-                doReset(applicationThrottle, applicationId);
+                doAbort(networkTarget, networkId);
                 LangUtil.rethrowUnchecked(ex);
             }
+        }
+
+        private void handleAbort(
+            AbortFW abort)
+        {
+            tlsEngine.closeOutbound();
+            doAbort(networkTarget, networkId);
         }
 
         private void handleThrottle(
@@ -456,7 +469,6 @@ public final class ClientStreamFactory implements StreamFactory
             ResetFW reset)
         {
             doReset(applicationThrottle, applicationId);
-
             tlsEngine.closeOutbound();
         }
     }
@@ -589,10 +601,19 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleReset(
             ResetFW reset)
         {
-            networkThrottle.accept(reset.typeId(), reset.buffer(), reset.offset(), reset.sizeof());
-
-            tlsEngine.closeOutbound();
-            doCloseInbound(tlsEngine);
+            try
+            {
+                correlations.remove(applicationCorrelationId);
+                doCloseInbound(tlsEngine);
+            }
+            catch (SSLException ex)
+            {
+                LangUtil.rethrowUnchecked(ex);
+            }
+            finally
+            {
+                networkThrottle.accept(reset.typeId(), reset.buffer(), reset.offset(), reset.sizeof());
+            }
         }
 
         private void afterBegin(
@@ -611,6 +632,10 @@ public final class ClientStreamFactory implements StreamFactory
                 final EndFW end = endRO.wrap(buffer, index, index + length);
                 handleEnd(end);
                 break;
+            case AbortFW.TYPE_ID:
+                final AbortFW abort = abortRO.wrap(buffer, index, index + length);
+                handleAbort(abort);
+                break;
             default:
                 doReset(networkReplyThrottle, networkReplyId);
                 break;
@@ -628,19 +653,20 @@ public final class ClientStreamFactory implements StreamFactory
                 networkReplySlot = networkPool.acquire(networkReplyId);
             }
 
-            if (networkReplySlot == NO_SLOT || inNetworkWindowBytes < 0 || inNetworkWindowFrames < 0)
+            try
             {
-                doReset(networkReplyThrottle, networkReplyId);
-            }
-            else
-            {
-                if (inNetworkWindowBytes == 0 || inNetworkWindowFrames == 0)
+                if (networkReplySlot == NO_SLOT || inNetworkWindowBytes < 0 || inNetworkWindowFrames < 0)
                 {
-                    doZeroWindow(networkReplyThrottle, networkReplyId);
+                    doReset(networkReplyThrottle, networkReplyId);
+                    doCloseOutbound(tlsEngine, networkTarget, networkId);
                 }
-
-                try
+                else
                 {
+                    if (inNetworkWindowBytes == 0 || inNetworkWindowFrames == 0)
+                    {
+                        doZeroWindow(networkReplyThrottle, networkReplyId);
+                    }
+
                     final OctetsFW payload = data.payload();
                     final int payloadSize = payload.sizeof();
 
@@ -682,19 +708,20 @@ public final class ClientStreamFactory implements StreamFactory
 
                     doWindow(networkReplyThrottle, networkReplyId, data.length(), 1);
                 }
-                catch (SSLException ex)
+            }
+            catch (SSLException ex)
+            {
+                networkReplySlotOffset = 0;
+                doReset(networkReplyThrottle, networkReplyId);
+                doAbort(networkTarget, networkId);
+                LangUtil.rethrowUnchecked(ex);
+            }
+            finally
+            {
+                if (networkReplySlotOffset == 0 && networkReplySlot != NO_SLOT)
                 {
-                    networkReplySlotOffset = 0;
-                    doReset(networkReplyThrottle, networkReplyId);
-                    LangUtil.rethrowUnchecked(ex);
-                }
-                finally
-                {
-                    if (networkReplySlotOffset == 0)
-                    {
-                        networkPool.release(networkReplySlot);
-                        networkReplySlot = NO_SLOT;
-                    }
+                    networkPool.release(networkReplySlot);
+                    networkReplySlot = NO_SLOT;
                 }
             }
         }
@@ -704,16 +731,25 @@ public final class ClientStreamFactory implements StreamFactory
         {
             try
             {
-                tlsEngine.closeOutbound();
-                outNetByteBuffer.rewind();
-                SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId);
+                doCloseOutbound(tlsEngine, networkTarget, networkId);
             }
             catch (SSLException ex)
             {
-                doReset(networkReplyThrottle, networkReplyId);
+                doAbort(networkTarget, networkId);
                 LangUtil.rethrowUnchecked(ex);
             }
+            finally
+            {
+                doReset(networkThrottle, networkId);
+            }
+        }
+
+        private void handleAbort(
+            AbortFW abort)
+        {
+            correlations.remove(applicationCorrelationId);
+            tlsEngine.closeOutbound();
+            doAbort(networkTarget, networkId);
         }
 
         private void updateNetworkWindow(
@@ -807,6 +843,10 @@ public final class ClientStreamFactory implements StreamFactory
                 final EndFW end = endRO.wrap(buffer, index, index + length);
                 handleEnd(end);
                 break;
+            case AbortFW.TYPE_ID:
+                final AbortFW abort = abortRO.wrap(buffer, index, index + length);
+                handleAbort(abort);
+                break;
             default:
                 doReset(networkReplyThrottle, networkReplyId);
                 break;
@@ -849,35 +889,42 @@ public final class ClientStreamFactory implements StreamFactory
                 networkReplySlot = networkPool.acquire(networkReplyId);
             }
 
-            if (networkReplySlot == NO_SLOT || networkWindowBytes < 0 || networkWindowFrames < 0)
+            try
             {
-                doReset(networkReplyThrottle, networkReplyId);
-            }
-            else
-            {
-                if (networkWindowBytes == 0 || networkWindowFrames == 0)
+                if (networkReplySlot == NO_SLOT || networkWindowBytes < 0 || networkWindowFrames < 0)
                 {
-                    doZeroWindow(networkReplyThrottle, networkReplyId);
+                    doCloseInbound(tlsEngine);
+                    doReset(networkReplyThrottle, networkReplyId);
+                    doAbort(applicationReply, applicationReplyId);
                 }
-
-                try
+                else
                 {
+                    if (networkWindowBytes == 0 || networkWindowFrames == 0)
+                    {
+                        doZeroWindow(networkReplyThrottle, networkReplyId);
+                    }
+
                     final OctetsFW payload = data.payload();
                     final int payloadSize = payload.sizeof();
 
-                    final MutableDirectBuffer inNetBuffer0 = networkPool.buffer(networkReplySlot);
-                    inNetBuffer0.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
+                    final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkReplySlot);
+                    inNetBuffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
                     networkReplySlotOffset += payloadSize;
 
                     unwrapNetworkBufferData();
                 }
-                finally
+            }
+            catch (SSLException ex)
+            {
+                doReset(networkReplyThrottle, networkReplyId);
+                doAbort(applicationReply, applicationReplyId);
+            }
+            finally
+            {
+                if (networkReplySlotOffset == 0 && networkReplySlot != NO_SLOT)
                 {
-                    if (networkReplySlotOffset == 0)
-                    {
-                        networkPool.release(networkReplySlot);
-                        networkReplySlot = NO_SLOT;
-                    }
+                    networkPool.release(networkReplySlot);
+                    networkReplySlot = NO_SLOT;
                 }
             }
         }
@@ -891,13 +938,15 @@ public final class ClientStreamFactory implements StreamFactory
                 applicationReplySlot = applicationPool.acquire(applicationReplyId);
             }
 
-            if (applicationReplySlot == NO_SLOT)
+            try
             {
-                doReset(networkReplyThrottle, networkReplyId);
-            }
-            else
-            {
-                try
+                if (applicationReplySlot == NO_SLOT)
+                {
+                    doCloseInbound(tlsEngine);
+                    doReset(networkReplyThrottle, networkReplyId);
+                    doAbort(applicationReply, applicationReplyId);
+                }
+                else
                 {
                     final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkReplySlot);
                     final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkReplySlot);
@@ -925,7 +974,9 @@ public final class ClientStreamFactory implements StreamFactory
                                     result.getStatus() == BUFFER_UNDERFLOW)
                             {
                                 networkReplySlotOffset = 0;
+                                doCloseInbound(tlsEngine);
                                 doReset(networkReplyThrottle, networkReplyId);
+                                doAbort(applicationReply, applicationReplyId);
                             }
                             else
                             {
@@ -946,32 +997,29 @@ public final class ClientStreamFactory implements StreamFactory
                         default:
                             networkReplySlotOffset = 0;
                             applicationReplySlotOffset += result.bytesProduced();
-                            handleFlushAppData();
                             handleStatus(result.getHandshakeStatus(), r -> {});
                             networkWindowBytesAdjustment += result.bytesConsumed() - result.bytesProduced();
                             break;
                         }
                     }
 
-                    if (tlsEngine.isInboundDone())
-                    {
-                        doEnd(applicationReply, applicationReplyId);
-                    }
+                    handleFlushAppData();
                 }
-                catch (SSLException ex)
+            }
+            catch (SSLException ex)
+            {
+                networkReplySlotOffset = 0;
+                applicationReplySlotOffset = 0;
+                doReset(networkReplyThrottle, networkReplyId);
+                doAbort(applicationReply, applicationReplyId);
+                LangUtil.rethrowUnchecked(ex);
+            }
+            finally
+            {
+                if (applicationReplySlotOffset == 0 && applicationReplySlot != NO_SLOT)
                 {
-                    networkReplySlotOffset = 0;
-                    applicationReplySlotOffset = 0;
-                    doReset(networkReplyThrottle, networkReplyId);
-                    LangUtil.rethrowUnchecked(ex);
-                }
-                finally
-                {
-                    if (applicationReplySlotOffset == 0)
-                    {
-                        applicationPool.release(applicationReplySlot);
-                        applicationReplySlot = NO_SLOT;
-                    }
+                    applicationPool.release(applicationReplySlot);
+                    applicationReplySlot = NO_SLOT;
                 }
             }
         }
@@ -979,8 +1027,36 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            doCloseInbound(tlsEngine);
-            handleStatus(tlsEngine.getHandshakeStatus(), r -> {});
+            if (!tlsEngine.isInboundDone())
+            {
+                try
+                {
+                    doCloseInbound(tlsEngine);
+                    doEnd(applicationReply, applicationReplyId);
+                }
+                catch (SSLException ex)
+                {
+                    doAbort(applicationReply, applicationReplyId);
+                    LangUtil.rethrowUnchecked(ex);
+                }
+            }
+        }
+
+        private void handleAbort(
+            AbortFW abort)
+        {
+            try
+            {
+                doCloseInbound(tlsEngine);
+            }
+            catch (SSLException ex)
+            {
+                LangUtil.rethrowUnchecked(ex);
+            }
+            finally
+            {
+                doAbort(applicationReply, applicationReplyId);
+            }
         }
 
         private HandshakeStatus handleStatus(
@@ -1069,6 +1145,11 @@ public final class ClientStreamFactory implements StreamFactory
                     alignSlotBuffer(outAppBuffer, applicationBytesConsumed, applicationReplySlotOffset);
                 }
             }
+
+            if (applicationReplySlotOffset == 0 && tlsEngine.isInboundDone())
+            {
+                doEnd(applicationReply, applicationReplyId);
+            }
         }
 
         private void handleThrottle(
@@ -1153,9 +1234,15 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleReset(
             ResetFW reset)
         {
-            doReset(networkReplyThrottle, networkReplyId);
-
-            doCloseInbound(tlsEngine);
+            try
+            {
+                doReset(networkReplyThrottle, networkReplyId);
+                doCloseInbound(tlsEngine);
+            }
+            catch (SSLException ex)
+            {
+                LangUtil.rethrowUnchecked(ex);
+            }
         }
     }
 
@@ -1260,6 +1347,18 @@ public final class ClientStreamFactory implements StreamFactory
         target.accept(end.typeId(), end.buffer(), end.offset(), end.sizeof());
     }
 
+    private void doAbort(
+        final MessageConsumer target,
+        final long targetId)
+    {
+        final AbortFW abort = abortRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+                .streamId(targetId)
+                .extension(e -> e.reset())
+                .build();
+
+        target.accept(abort.typeId(), abort.buffer(), abort.offset(), abort.sizeof());
+    }
+
     private void doWindow(
         final MessageConsumer throttle,
         final long throttleId,
@@ -1300,7 +1399,7 @@ public final class ClientStreamFactory implements StreamFactory
     }
 
     private void doCloseInbound(
-        final SSLEngine tlsEngine)
+        final SSLEngine tlsEngine) throws SSLException
     {
         try
         {
@@ -1313,8 +1412,19 @@ public final class ClientStreamFactory implements StreamFactory
             final String message = ex.getMessage();
             if (!message.contains("possible truncation attack"))
             {
-                LangUtil.rethrowUnchecked(ex);
+                throw ex;
             }
         }
+    }
+
+    private void doCloseOutbound(
+        SSLEngine tlsEngine,
+        MessageConsumer networkTarget,
+        long networkId) throws SSLException
+    {
+        tlsEngine.closeOutbound();
+        outNetByteBuffer.rewind();
+        SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
+        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId);
     }
 }
