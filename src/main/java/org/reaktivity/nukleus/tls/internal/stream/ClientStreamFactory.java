@@ -43,7 +43,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.reaktivity.nukleus.buffer.BufferPool;
 import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessagePredicate;
-import org.reaktivity.nukleus.route.RouteHandler;
+import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
@@ -89,7 +89,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
     private final SSLContext context;
-    private final RouteHandler router;
+    private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
     private final BufferPool applicationPool;
@@ -107,7 +107,7 @@ public final class ClientStreamFactory implements StreamFactory
     public ClientStreamFactory(
         TlsConfiguration config,
         SSLContext context,
-        RouteHandler router,
+        RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
         LongSupplier supplyStreamId,
