@@ -179,4 +179,14 @@ public class ServerIT
     {
         k3po.finish();
     }
+
+    @Ignore("ABORT vs RESET read order not yet guaranteed to match write order")
+    @Test
+    @Specification({
+        "${route}/server/controller",
+        "${client}/client.hello.malformed/client"})
+    public void shouldResetMalformedClientHello() throws Exception
+    {
+        k3po.finish();
+    }
 }

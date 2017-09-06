@@ -908,7 +908,12 @@ public final class ServerStreamFactory implements StreamFactory
                 networkSlotOffset = 0;
                 doReset(networkThrottle, networkId);
                 doAbort(networkReply, networkReplyId);
-                LangUtil.rethrowUnchecked(ex);
+
+                final String message = ex.getMessage();
+                if (!message.contains("plaintext connection?"))
+                {
+                    LangUtil.rethrowUnchecked(ex);
+                }
             }
             finally
             {
