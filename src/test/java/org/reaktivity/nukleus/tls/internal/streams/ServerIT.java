@@ -17,7 +17,6 @@ package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
-import static org.reaktivity.reaktor.internal.ReaktorConfiguration.ABORT_STREAM_FRAME_TYPE_ID;
 
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -28,7 +27,6 @@ import org.junit.rules.Timeout;
 import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
-import org.reaktivity.nukleus.tls.internal.types.stream.AbortFW;
 import org.reaktivity.reaktor.test.ReaktorRule;
 
 public class ServerIT
@@ -46,7 +44,6 @@ public class ServerIT
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(1024)
             .nukleus("tls"::equals)
-            .configure(ABORT_STREAM_FRAME_TYPE_ID, AbortFW.TYPE_ID)
             .clean();
 
     @Rule
@@ -179,6 +176,16 @@ public class ServerIT
         "newClientAcceptRef ${newServerConnectRef}",
         "clientAccept \"nukleus://target/streams/tls#source\"" })
     public void shouldReceiveClientSentReadAbort() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Ignore("ABORT vs RESET read order not yet guaranteed to match write order")
+    @Test
+    @Specification({
+        "${route}/server/controller",
+        "${client}/client.hello.malformed/client"})
+    public void shouldResetMalformedClientHello() throws Exception
     {
         k3po.finish();
     }
