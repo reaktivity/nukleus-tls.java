@@ -280,11 +280,11 @@ public class TlsServerBM
 
         private boolean doWindow(
             final long streamId,
-            final int update)
+            final int credit)
         {
             final WindowFW window = windowRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                     .streamId(streamId)
-                    .update(update)
+                    .credit(credit)
                     .build();
 
             return throttle.test(window.typeId(), window.buffer(), window.offset(), window.sizeof());
