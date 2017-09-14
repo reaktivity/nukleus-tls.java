@@ -910,7 +910,8 @@ public final class ServerStreamFactory implements StreamFactory
                 doAbort(networkReply, networkReplyId);
 
                 final String message = ex.getMessage();
-                if (!message.contains("plaintext connection?"))
+                if (!message.contains("plaintext connection?") &&
+                        !"Unsupported SSL v2.0 ClientHello".equals(message))
                 {
                     LangUtil.rethrowUnchecked(ex);
                 }
