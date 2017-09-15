@@ -362,11 +362,6 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 else
                 {
-                    if (networkWindowBudget == 0)
-                    {
-                        doZeroWindow(networkThrottle, networkId);
-                    }
-
                     final OctetsFW payload = data.payload();
                     final int payloadSize = payload.sizeof();
 
@@ -1139,11 +1134,6 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 else
                 {
-                    if (applicationWindowBudget == 0)
-                    {
-                        doZeroWindow(applicationReplyThrottle, applicationReplyId);
-                    }
-
                     final OctetsFW payload = data.payload();
 
                     // Note: inAppBuffer is emptied by SslEngine.wrap(...)
@@ -1369,19 +1359,6 @@ public final class ServerStreamFactory implements StreamFactory
                 .streamId(throttleId)
                 .credit(credit)
                 .padding(padding)
-                .build();
-
-        throttle.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
-    }
-
-    private void doZeroWindow(
-        final MessageConsumer throttle,
-        final long throttleId)
-    {
-        final WindowFW window = windowRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-                .streamId(throttleId)
-                .credit(0)
-                .padding(0)
                 .build();
 
         throttle.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
