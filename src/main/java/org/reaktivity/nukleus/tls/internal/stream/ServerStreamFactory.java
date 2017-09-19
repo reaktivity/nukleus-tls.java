@@ -1030,6 +1030,9 @@ public final class ServerStreamFactory implements StreamFactory
         private SSLEngine tlsEngine;
         private BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler;
 
+        // TODO calculate no of frames using SSLSession#getPacketBufferSize()
+        private int maxHeaderSize = 5 * MAXIMUM_HEADER_SIZE;
+
         @Override
         public String toString()
         {
@@ -1125,7 +1128,7 @@ public final class ServerStreamFactory implements StreamFactory
             DataFW data)
         {
             applicationWindowBudget -= data.length() + applicationWindowPadding;
-            System.out.printf("TLS <-- DATA(%d) applicationWindowBudget=%d\n", data.length(), applicationWindowBudget);
+            //System.out.printf("\t\t\t TLS <-- DATA(%d) applicationWindowBudget=%d\n", data.length(), applicationWindowBudget);
 
             try
             {
@@ -1144,16 +1147,20 @@ public final class ServerStreamFactory implements StreamFactory
                     payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
                     inAppByteBuffer.flip();
 
+                    int totalBytesProduced = 0;
+                    int totalBytesConsumed = 0;
                     while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                     {
                         outNetByteBuffer.rewind();
                         SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                        applicationWindowBudgetAdjustment +=
-                                MAXIMUM_HEADER_SIZE - (result.bytesProduced() - result.bytesConsumed());
+                        totalBytesProduced += result.bytesProduced();
+                        totalBytesConsumed += result.bytesConsumed();
                         flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId);
                         statusHandler.accept(result.getHandshakeStatus(), this::updateNetworkWindow);
                     }
+    //System.out.printf("\t\t\t TLS totalBytesProduced=%d totalBytesConsumed=%d\n", totalBytesProduced, totalBytesConsumed);
 
+                    applicationWindowBudgetAdjustment += maxHeaderSize - (totalBytesProduced - totalBytesConsumed);
                 }
             }
             catch (SSLException ex)
@@ -1188,7 +1195,11 @@ public final class ServerStreamFactory implements StreamFactory
         private void updateNetworkWindow(
             SSLEngineResult result)
         {
+//System.out.printf("\t\t\t TLS 1.updateNetworkWindow (applicationWindowBudgetAdjustment = %d",
+// applicationWindowBudgetAdjustment);
             applicationWindowBudgetAdjustment += result.bytesProduced() - result.bytesConsumed();
+//System.out.printf("\t\t\t TLS 2.updateNetworkWindow (applicationWindowBudgetAdjustment = %d",
+// applicationWindowBudgetAdjustment);
         }
 
         private void handleThrottle(
@@ -1216,18 +1227,21 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleWindow(
             final WindowFW window)
         {
+            System.out.printf("WINDOW(%d, %d) -->    TLS applicationWindowBudget=%d\n",
+                    window.credit(), window.padding(), applicationWindowBudget);
+
             final int networkWindowCredit = window.credit();
             final int networkWindowPadding = window.padding();
 
             final int applicationWindowCredit = networkWindowCredit + applicationWindowBudgetAdjustment;
-            applicationWindowPadding = networkWindowPadding + MAXIMUM_HEADER_SIZE;
+            applicationWindowPadding = networkWindowPadding + maxHeaderSize;
 
             applicationWindowBudget += Math.max(applicationWindowCredit, 0);
             applicationWindowBudgetAdjustment = Math.min(applicationWindowCredit, 0);
 
             if (applicationWindowCredit > 0)
             {
-                System.out.printf("TLS --> WINDOW(%d, %d) TLS.applicationWindowBudget=%d\n",
+                System.out.printf("\t\t\t       TLS --> WINDOW(%d, %d) applicationWindowBudget=%d\n",
                         applicationWindowCredit, applicationWindowPadding, applicationWindowBudget);
                 doWindow(applicationReplyThrottle, applicationReplyId, applicationWindowCredit, applicationWindowPadding);
             }
