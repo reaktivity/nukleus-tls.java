@@ -62,6 +62,7 @@ import org.reaktivity.nukleus.tls.internal.util.function.ObjectLongBiFunction;
 public final class ClientStreamFactory implements StreamFactory
 {
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
+    private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -235,7 +236,11 @@ public final class ClientStreamFactory implements StreamFactory
         private long networkId;
 
         private int applicationWindowBudget;
+        private int applicationWindowPadding;
         private int applicationWindowBudgetAdjustment;
+        private int applicationWindowBudgetMax;
+
+        private int maxHeaderSize;
 
         private ClientAcceptStream(
             String tlsHostname,
@@ -351,7 +356,7 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
-            applicationWindowBudget -= data.length();
+            applicationWindowBudget -= data.length() + applicationWindowPadding;
 
             try
             {
@@ -370,13 +375,18 @@ public final class ClientStreamFactory implements StreamFactory
                     payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
                     inAppByteBuffer.flip();
 
+                    int totalBytesProduced = 0;
+                    int totalBytesConsumed = 0;
                     while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                     {
                         outNetByteBuffer.rewind();
                         SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
+                        totalBytesProduced += result.bytesProduced();
+                        totalBytesConsumed += result.bytesConsumed();
                         flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId);
-                        applicationWindowBudgetAdjustment -= result.bytesProduced() - result.bytesConsumed();
                     }
+
+                    applicationWindowBudgetAdjustment += maxHeaderSize - (totalBytesProduced - totalBytesConsumed);
                 }
             }
             catch (SSLException ex)
@@ -433,11 +443,27 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleWindow(
             final WindowFW window)
         {
-            final int applicationWindowCredit = window.credit() + applicationWindowBudgetAdjustment;
-            final int applicationWindowPadding = window.padding();
+
+            final int networkWindowCredit = window.credit();
+            final int networkWindowPadding = window.padding();
+
+            final int applicationWindowCredit = networkWindowCredit + applicationWindowBudgetAdjustment;
 
             applicationWindowBudget += Math.max(applicationWindowCredit, 0);
             applicationWindowBudgetAdjustment = Math.min(applicationWindowCredit, 0);
+
+            if (applicationWindowBudget > applicationWindowBudgetMax)
+            {
+                applicationWindowBudgetMax = applicationWindowBudget;
+
+                final int tlsMaxRecordSize = tlsEngine.getSession().getPacketBufferSize();
+                final int tlsMaxRecordCount = Math.max(
+                        (int) Math.ceil((double) applicationWindowBudgetMax / tlsMaxRecordSize), 1);
+
+                this.maxHeaderSize = tlsMaxRecordCount * MAXIMUM_HEADER_SIZE;
+            }
+
+            applicationWindowPadding = networkWindowPadding + maxHeaderSize;
 
             if (applicationWindowCredit > 0)
             {
@@ -533,8 +559,7 @@ public final class ClientStreamFactory implements StreamFactory
 
             router.setThrottle(networkName, networkId, networkThrottle);
 
-            // TODO: improve heuristic to account for TLS protocol framing bytes
-            doWindow(networkThrottle, networkId, outNetworkWindowBytes * 80 / 100, 0);
+            doWindow(networkThrottle, networkId, outNetworkWindowBytes, outNetworkWindowPadding);
 
             return applicationReply;
         }

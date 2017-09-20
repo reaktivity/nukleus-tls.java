@@ -97,7 +97,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final BufferPool applicationPool;
     private final LongSupplier supplyStreamId;
     private final LongSupplier supplyCorrelationId;
-    private final int handshakeWindowBytes;
+    private final int handshakeWindowBudget;
 
     private final Long2ObjectHashMap<ServerHandshake> correlations;
     private final MessageFunction<RouteFW> wrapRoute;
@@ -124,7 +124,7 @@ public final class ServerStreamFactory implements StreamFactory
         this.supplyStreamId = requireNonNull(supplyStreamId);
         this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
         this.correlations = requireNonNull(correlations);
-        this.handshakeWindowBytes = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
+        this.handshakeWindowBudget = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
 
         this.wrapRoute = this::wrapRoute;
         this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
@@ -299,7 +299,7 @@ public final class ServerStreamFactory implements StreamFactory
                         networkReplyName, networkReply, newNetworkReplyId, networkCorrelationId,
                         this::handleStatus);
 
-                doWindow(networkThrottle, networkId, handshakeWindowBytes, networkWindowPadding);
+                doWindow(networkThrottle, networkId, handshakeWindowBudget, networkWindowPadding);
 
                 doBegin(networkReply, newNetworkReplyId, 0L, networkCorrelationId);
                 router.setThrottle(networkReplyName, newNetworkReplyId, newHandshake::handleThrottle);
@@ -349,6 +349,7 @@ public final class ServerStreamFactory implements StreamFactory
             DataFW data)
         {
             networkWindowBudget -= data.length() + networkWindowPadding;
+
             if (networkSlot == NO_SLOT)
             {
                 networkSlot = networkPool.acquire(networkId);
@@ -614,8 +615,8 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkSlotOffset = handshake.networkSlotOffset;
                 }
 
-                this.networkWindowBudget += handshakeWindowBytes;
-                this.networkWindowBudgetAdjustment -= handshakeWindowBytes;
+                this.networkWindowBudget += handshakeWindowBudget;
+                this.networkWindowBudgetAdjustment -= handshakeWindowBudget;
 
                 this.applicationTarget = applicationTarget;
                 this.applicationId = newApplicationId;
@@ -634,8 +635,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationSlot);
 
-                final int applicationWindow = applicationWindowBudget;
-                final int applicationBytesConsumed = Math.min(applicationSlotOffset, applicationWindow);
+                final int applicationBytesConsumed = Math.min(applicationSlotOffset, applicationWindowBudget);
 
                 if (applicationBytesConsumed > 0)
                 {
@@ -730,7 +730,7 @@ public final class ServerStreamFactory implements StreamFactory
 
             if (networkWindowCredit > 0)
             {
-                doWindow(networkThrottle, networkId, Math.max(networkWindowCredit, 0), networkWindowPadding);
+                doWindow(networkThrottle, networkId, networkWindowCredit, networkWindowPadding);
             }
         }
 
@@ -1197,6 +1197,7 @@ public final class ServerStreamFactory implements StreamFactory
         {
 //System.out.printf("\t\t\t TLS 1.updateNetworkWindow (applicationWindowBudgetAdjustment = %d",
 // applicationWindowBudgetAdjustment);
+            // TODO network-network protocol interaction (renegotiate key)
             applicationWindowBudgetAdjustment += result.bytesProduced() - result.bytesConsumed();
 //System.out.printf("\t\t\t TLS 2.updateNetworkWindow (applicationWindowBudgetAdjustment = %d",
 // applicationWindowBudgetAdjustment);
