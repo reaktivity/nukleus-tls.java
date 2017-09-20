@@ -1022,6 +1022,7 @@ public final class ServerStreamFactory implements StreamFactory
         private int applicationWindowBudget;
         private int applicationWindowBudgetAdjustment;
         private int applicationWindowPadding;
+        private int applicationWindowBudgetMax;
 
         private MessageConsumer networkReply;
         private long networkReplyId;
@@ -1030,8 +1031,7 @@ public final class ServerStreamFactory implements StreamFactory
         private SSLEngine tlsEngine;
         private BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler;
 
-        // TODO calculate no of frames using SSLSession#getPacketBufferSize()
-        private int maxHeaderSize = 5 * MAXIMUM_HEADER_SIZE;
+        private int maxHeaderSize;
 
         @Override
         public String toString()
@@ -1230,14 +1230,28 @@ public final class ServerStreamFactory implements StreamFactory
             System.out.printf("WINDOW(%d, %d) -->    TLS applicationWindowBudget=%d\n",
                     window.credit(), window.padding(), applicationWindowBudget);
 
+
+
             final int networkWindowCredit = window.credit();
             final int networkWindowPadding = window.padding();
 
             final int applicationWindowCredit = networkWindowCredit + applicationWindowBudgetAdjustment;
-            applicationWindowPadding = networkWindowPadding + maxHeaderSize;
 
             applicationWindowBudget += Math.max(applicationWindowCredit, 0);
             applicationWindowBudgetAdjustment = Math.min(applicationWindowCredit, 0);
+
+            if (applicationWindowBudget > applicationWindowBudgetMax)
+            {
+                applicationWindowBudgetMax = applicationWindowBudget;
+
+                final int tlsMaxRecordSize = tlsEngine.getSession().getPacketBufferSize();
+                final int tlsMaxRecordCount = Math.max(
+                        (int) Math.ceil((double) applicationWindowBudgetMax / tlsMaxRecordSize), 1);
+
+                this.maxHeaderSize = tlsMaxRecordCount * MAXIMUM_HEADER_SIZE;
+            }
+
+            applicationWindowPadding = networkWindowPadding + maxHeaderSize;
 
             if (applicationWindowCredit > 0)
             {
