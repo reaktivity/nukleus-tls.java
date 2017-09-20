@@ -1128,7 +1128,6 @@ public final class ServerStreamFactory implements StreamFactory
             DataFW data)
         {
             applicationWindowBudget -= data.length() + applicationWindowPadding;
-            //System.out.printf("\t\t\t TLS <-- DATA(%d) applicationWindowBudget=%d\n", data.length(), applicationWindowBudget);
 
             try
             {
@@ -1158,8 +1157,6 @@ public final class ServerStreamFactory implements StreamFactory
                         flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId);
                         statusHandler.accept(result.getHandshakeStatus(), this::updateNetworkWindow);
                     }
-    //System.out.printf("\t\t\t TLS totalBytesProduced=%d totalBytesConsumed=%d\n", totalBytesProduced, totalBytesConsumed);
-
                     applicationWindowBudgetAdjustment += maxHeaderSize - (totalBytesProduced - totalBytesConsumed);
                 }
             }
@@ -1195,12 +1192,8 @@ public final class ServerStreamFactory implements StreamFactory
         private void updateNetworkWindow(
             SSLEngineResult result)
         {
-//System.out.printf("\t\t\t TLS 1.updateNetworkWindow (applicationWindowBudgetAdjustment = %d",
-// applicationWindowBudgetAdjustment);
             // TODO network-network protocol interaction (renegotiate key)
             applicationWindowBudgetAdjustment += result.bytesProduced() - result.bytesConsumed();
-//System.out.printf("\t\t\t TLS 2.updateNetworkWindow (applicationWindowBudgetAdjustment = %d",
-// applicationWindowBudgetAdjustment);
         }
 
         private void handleThrottle(
@@ -1228,11 +1221,6 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleWindow(
             final WindowFW window)
         {
-            System.out.printf("WINDOW(%d, %d) -->    TLS applicationWindowBudget=%d\n",
-                    window.credit(), window.padding(), applicationWindowBudget);
-
-
-
             final int networkWindowCredit = window.credit();
             final int networkWindowPadding = window.padding();
 
@@ -1256,8 +1244,6 @@ public final class ServerStreamFactory implements StreamFactory
 
             if (applicationWindowCredit > 0)
             {
-                System.out.printf("\t\t\t       TLS --> WINDOW(%d, %d) applicationWindowBudget=%d\n",
-                        applicationWindowCredit, applicationWindowPadding, applicationWindowBudget);
                 doWindow(applicationReplyThrottle, applicationReplyId, applicationWindowCredit, applicationWindowPadding);
             }
         }
