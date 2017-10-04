@@ -17,7 +17,9 @@ package org.reaktivity.nukleus.tls.internal.stream;
 
 import static java.nio.ByteBuffer.allocateDirect;
 import static java.util.Objects.requireNonNull;
+import static javax.net.ssl.SSLEngineResult.HandshakeStatus.FINISHED;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_WRAP;
+import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING;
 import static javax.net.ssl.SSLEngineResult.Status.BUFFER_UNDERFLOW;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
@@ -556,7 +558,7 @@ public final class ServerStreamFactory implements StreamFactory
                         flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId);
                         status = result.getHandshakeStatus();
 
-                        if (status == NEED_WRAP)
+                        if (status == NEED_WRAP && result.bytesProduced() == 0)
                         {
                             break loop;
                         }
@@ -875,7 +877,14 @@ public final class ServerStreamFactory implements StreamFactory
                     while (inNetByteBuffer.hasRemaining())
                     {
                         outAppByteBuffer.rewind();
-                        SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+                        HandshakeStatus handshakeStatus = NOT_HANDSHAKING;
+                        SSLEngineResult.Status status = BUFFER_UNDERFLOW;
+                        if (tlsEngine.getHandshakeStatus() != NOT_HANDSHAKING && tlsEngine.getHandshakeStatus() != FINISHED)
+                        {
+                            SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+                            status = result.getStatus();
+                            handshakeStatus = result.getHandshakeStatus();
+                        }
 
                         if (outAppByteBuffer.position() != 0)
                         {
@@ -884,7 +893,7 @@ public final class ServerStreamFactory implements StreamFactory
                             break loop;
                         }
 
-                        switch (result.getStatus())
+                        switch (status)
                         {
                         case BUFFER_UNDERFLOW:
                             final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
@@ -894,7 +903,6 @@ public final class ServerStreamFactory implements StreamFactory
                             break loop;
                         default:
                             networkSlotOffset = 0;
-                            final HandshakeStatus handshakeStatus = result.getHandshakeStatus();
                             statusHandler.accept(handshakeStatus, this::updateNetworkWindow);
                             break;
                         }
