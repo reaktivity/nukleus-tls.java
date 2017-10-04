@@ -1,0 +1,13 @@
+<component name="libraryTable">
+  <library name="Maven: org.reaktivity:reaktor:test-jar:tests:0.26">
+    <CLASSES>
+      <root url="jar://$MAVEN_REPOSITORY$/org/reaktivity/reaktor/0.26/reaktor-0.26-tests.jar!/" />
+    </CLASSES>
+    <JAVADOC>
+      <root url="jar://$MAVEN_REPOSITORY$/org/reaktivity/reaktor/0.26/reaktor-0.26-test-javadoc.jar!/" />
+    </JAVADOC>
+    <SOURCES>
+      <root url="jar://$MAVEN_REPOSITORY$/org/reaktivity/reaktor/0.26/reaktor-0.26-test-sources.jar!/" />
+    </SOURCES>
+  </library>
+</component>
