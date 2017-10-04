@@ -365,6 +365,8 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     doCloseInbound(tlsEngine);
                     doReset(networkThrottle, networkId);
+                    doAbort(applicationTarget, applicationId);
+                    networkSlotOffset = 0;
                 }
                 else
                 {
@@ -387,6 +389,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 doReset(networkThrottle, networkId);
                 doAbort(applicationTarget, applicationId);
+                networkSlotOffset = 0;
             }
             finally
             {
@@ -414,6 +417,7 @@ public final class ServerStreamFactory implements StreamFactory
                     doCloseInbound(tlsEngine);
                     doReset(networkThrottle, networkId);
                     doAbort(applicationTarget, applicationId);
+                    networkSlotOffset = 0;
                 }
                 else
                 {
