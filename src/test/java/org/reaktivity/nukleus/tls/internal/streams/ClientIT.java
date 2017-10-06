@@ -116,6 +116,19 @@ public class ClientIT
 
     @Test
     @Specification({
+            "${route}/client/controller",
+            "${client}/server.sent.write.close.before.correlated/client",
+            "${server}/server.sent.write.close.before.correlated/server"})
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveServerSentWriteCloseBeforeCorrelated() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
         "${route}/client/controller",
         "${client}/client.sent.write.close/client",
         "${server}/client.sent.write.close/server"})
@@ -123,6 +136,19 @@ public class ClientIT
         "newServerAcceptRef ${newClientConnectRef}",
         "serverAccept \"nukleus://target/streams/tls#source\"" })
     public void shouldReceiveClientSentWriteClose() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+            "${route}/client/controller",
+            "${client}/client.sent.write.close.before.correlated/client",
+            "${server}/client.sent.write.close.before.correlated/server"})
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveClientSentWriteCloseBeforeCorrelated() throws Exception
     {
         k3po.finish();
     }
@@ -142,6 +168,19 @@ public class ClientIT
 
     @Test
     @Specification({
+            "${route}/client/controller",
+            "${client}/server.sent.write.abort.before.correlated/client",
+            "${server}/server.sent.write.abort.before.correlated/server"})
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveServerSentWriteAbortBeforeCorrelated() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
         "${route}/client/controller",
         "${client}/client.sent.write.abort/client",
         "${server}/client.sent.write.abort/server"})
@@ -149,6 +188,19 @@ public class ClientIT
         "newServerAcceptRef ${newClientConnectRef}",
         "serverAccept \"nukleus://target/streams/tls#source\"" })
     public void shouldReceiveClientSentWriteAbort() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+            "${route}/client/controller",
+            "${client}/client.sent.write.abort.before.correlated/client",
+            "${server}/client.sent.write.abort.before.correlated/server"})
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveClientSentWriteAbortBeforeCorrelated() throws Exception
     {
         k3po.finish();
     }
@@ -170,6 +222,20 @@ public class ClientIT
     @Ignore("DATA vs RESET read order not yet guaranteed to match write order")
     @Test
     @Specification({
+            "${route}/client/controller",
+            "${client}/server.sent.read.abort.before.correlated/client",
+            "${server}/server.sent.read.abort.before.correlated/server"})
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveServerSentReadAbortBeforeCorrelated() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Ignore("DATA vs RESET read order not yet guaranteed to match write order")
+    @Test
+    @Specification({
         "${route}/client/controller",
         "${client}/client.sent.read.abort/client",
         "${server}/client.sent.read.abort/server"})
@@ -177,6 +243,20 @@ public class ClientIT
         "newServerAcceptRef ${newClientConnectRef}",
         "serverAccept \"nukleus://target/streams/tls#source\"" })
     public void shouldReceiveClientSentReadAbort() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Ignore("DATA vs RESET read order not yet guaranteed to match write order")
+    @Test
+    @Specification({
+            "${route}/client/controller",
+            "${client}/client.sent.read.abort.before.correlated/client",
+            "${server}/client.sent.read.abort.before.correlated/server"})
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveClientSentReadAbortBeforeCorrelated() throws Exception
     {
         k3po.finish();
     }
