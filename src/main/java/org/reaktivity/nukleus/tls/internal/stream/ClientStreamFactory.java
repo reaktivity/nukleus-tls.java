@@ -1421,20 +1421,7 @@ public final class ClientStreamFactory implements StreamFactory
     private void doCloseInbound(
         final SSLEngine tlsEngine) throws SSLException
     {
-        try
-        {
-            tlsEngine.closeInbound();
-        }
-        catch (SSLException ex)
-        {
-            // Inbound closed before receiving peer's close_notify: possible truncation attack?
-            // this remote end-point behavior is allowed by TLS RFC
-            final String message = ex.getMessage();
-            if (!message.contains("possible truncation attack"))
-            {
-                throw ex;
-            }
-        }
+        tlsEngine.closeInbound();
     }
 
     private void doCloseOutbound(
