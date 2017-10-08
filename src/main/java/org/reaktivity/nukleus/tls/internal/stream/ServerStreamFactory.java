@@ -66,6 +66,7 @@ import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
 public final class ServerStreamFactory implements StreamFactory
 {
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
+    private static final Runnable NOP = () -> {};
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -246,7 +247,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         private long networkCorrelationId;
 
-        private Runnable applicationReplyCleaner;
+        private Runnable networkReplyDoneHandler = NOP;
 
         @Override
         public String toString()
@@ -308,7 +309,7 @@ public final class ServerStreamFactory implements StreamFactory
                 final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkThrottle, networkId,
                         networkReplyName, networkReply, newNetworkReplyId,
                         this::handleStatus, this::doAbortApplicationStream,
-                        this::doResetApplicationReplyStream, this::setApplicationReplyCleaner);
+                        this::handleNetworkReplyDone, this::setNetworkReplyDoneHandler);
 
                 doWindow(networkThrottle, networkId, handshakeWindowBytes, handshakeWindowFrames);
 
@@ -563,7 +564,7 @@ public final class ServerStreamFactory implements StreamFactory
                         outNetByteBuffer.clear();
                         SSLEngineResult result = tlsEngine.wrap(EMPTY_BYTE_BUFFER, outNetByteBuffer);
                         resultHandler.accept(result);
-                        flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId, applicationReplyCleaner);
+                        flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId, networkReplyDoneHandler);
                         status = result.getHandshakeStatus();
 
                         if (status == NEED_WRAP && result.bytesProduced() == 0)
@@ -786,7 +787,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             finally
             {
-                doResetApplicationReplyStream();
+                handleNetworkReplyDone();
             }
         }
 
@@ -795,20 +796,20 @@ public final class ServerStreamFactory implements StreamFactory
             doAbort(applicationTarget, applicationId);
         }
 
-        private void doResetApplicationReplyStream()
+        private void handleNetworkReplyDone()
         {
             correlations.remove(appCorrelationId);
 
-            if (applicationReplyCleaner != null)
+            if (networkReplyDoneHandler != null)
             {
-                applicationReplyCleaner.run();
+                networkReplyDoneHandler.run();
             }
         }
 
-        private void setApplicationReplyCleaner(
-            Runnable applicationReplyCleaner)
+        private void setNetworkReplyDoneHandler(
+            Runnable networkReplyDoneHandler)
         {
-            this.applicationReplyCleaner = applicationReplyCleaner;
+            this.networkReplyDoneHandler = networkReplyDoneHandler;
         }
     }
 
@@ -823,7 +824,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final MessageConsumer networkReply;
         private final long networkReplyId;
         private final Runnable applicationCleaner;
-        private final Runnable applicationReplyCleaner;
+        private final Runnable networkReplyDoneHandler;
         private final Consumer<Runnable> applicationInCleanerConsumer;
 
         private int networkSlot = NO_SLOT;
@@ -850,7 +851,7 @@ public final class ServerStreamFactory implements StreamFactory
             this.statusHandler = statusHandler;
             this.resetHandler = this::handleReset;
             this.applicationCleaner = applicationCleaner;
-            this.applicationReplyCleaner = applicationReplyCleaner;
+            this.networkReplyDoneHandler = applicationReplyCleaner;
 
             this.networkThrottle = networkThrottle;
             this.networkId = networkId;
@@ -903,7 +904,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 if (networkSlot == NO_SLOT)
                 {
-                    doCloseOutbound(tlsEngine, networkReply, networkReplyId, null);
+                    doCloseOutbound(tlsEngine, networkReply, networkReplyId, NOP);
                     doReset(networkThrottle, networkId);
                     doAbort(networkReply, networkReplyId);
                 }
@@ -984,7 +985,7 @@ public final class ServerStreamFactory implements StreamFactory
         {
             try
             {
-                doCloseOutbound(tlsEngine, networkReply, networkReplyId, null);
+                doCloseOutbound(tlsEngine, networkReply, networkReplyId, NOP);
             }
             catch (SSLException ex)
             {
@@ -1022,10 +1023,10 @@ public final class ServerStreamFactory implements StreamFactory
             doWindow(newNetworkThrottle, networkReplyId, outNetworkWindowBytes * 80 / 100, outNetworkWindowFrames);
         }
 
-        private void setApplicationReplyCleaner(
-            Runnable applicationReplyCleaner)
+        private void setNetworkReplyDoneHandler(
+            Runnable networkReplyDoneHandler)
         {
-            applicationInCleanerConsumer.accept(applicationReplyCleaner);
+            applicationInCleanerConsumer.accept(networkReplyDoneHandler);
         }
 
         @Override
@@ -1079,14 +1080,14 @@ public final class ServerStreamFactory implements StreamFactory
             }
             finally
             {
-                applicationReplyCleaner.run();
+                networkReplyDoneHandler.run();
             }
         }
 
         private void handleResetAfterHandshake(
             ResetFW reset)
         {
-            applicationReplyCleaner.run();
+            networkReplyDoneHandler.run();
         }
     }
 
@@ -1191,7 +1192,7 @@ public final class ServerStreamFactory implements StreamFactory
                 this.statusHandler = handshake.statusHandler;
 
                 handshake.setNetworkThrottle(this::handleThrottle);
-                handshake.setApplicationReplyCleaner(this::doResetApplicationReplyStream);
+                handshake.setNetworkReplyDoneHandler(this::handleNetworkReplyDone);
             }
             else
             {
@@ -1210,7 +1211,7 @@ public final class ServerStreamFactory implements StreamFactory
                 if (applicationWindowBytes < 0 || applicationWindowFrames < 0)
                 {
                     doReset(applicationReplyThrottle, applicationReplyId);
-                    doCloseOutbound(tlsEngine, networkReply, networkReplyId, this::doResetApplicationReplyStream);
+                    doCloseOutbound(tlsEngine, networkReply, networkReplyId, this::handleNetworkReplyDone);
                 }
                 else
                 {
@@ -1233,7 +1234,7 @@ public final class ServerStreamFactory implements StreamFactory
                         SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
                         updateNetworkWindow(result);
                         flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId,
-                                this::doResetApplicationReplyStream);
+                                this::handleNetworkReplyDone);
                         statusHandler.accept(result.getHandshakeStatus(), this::updateNetworkWindow);
                     }
 
@@ -1254,7 +1255,7 @@ public final class ServerStreamFactory implements StreamFactory
 
             try
             {
-                doCloseOutbound(tlsEngine, networkReply, networkReplyId, this::doResetApplicationReplyStream);
+                doCloseOutbound(tlsEngine, networkReply, networkReplyId, this::handleNetworkReplyDone);
             }
             catch (SSLException ex)
             {
@@ -1329,10 +1330,10 @@ public final class ServerStreamFactory implements StreamFactory
             tlsEngine.closeOutbound();
 
             // RESET is from network reply, so no need to clean that stream
-            doResetApplicationReplyStream();
+            handleNetworkReplyDone();
         }
 
-        private void doResetApplicationReplyStream()
+        private void handleNetworkReplyDone()
         {
             if (applicationReplyThrottle != null)
             {
@@ -1347,7 +1348,7 @@ public final class ServerStreamFactory implements StreamFactory
         int bytesProduced,
         MessageConsumer networkReply,
         long networkReplyId,
-        Runnable applicationReplyCleaner)
+        Runnable networkReplyDoneHandler)
     {
         if (bytesProduced > 0)
         {
@@ -1358,10 +1359,7 @@ public final class ServerStreamFactory implements StreamFactory
         if (tlsEngine.isOutboundDone())
         {
             doEnd(networkReply, networkReplyId);
-            if (applicationReplyCleaner != null)
-            {
-                applicationReplyCleaner.run();      // sends RESET to application reply stream (if not received END)
-            }
+            networkReplyDoneHandler.run();      // sends RESET to application reply stream (if not received END)
         }
     }
 
@@ -1509,12 +1507,12 @@ public final class ServerStreamFactory implements StreamFactory
         SSLEngine tlsEngine,
         MessageConsumer networkReply,
         long networkReplyId,
-        Runnable applicationReplyCleaner) throws SSLException
+        Runnable networkReplyDoneHandler) throws SSLException
     {
         tlsEngine.closeOutbound();
         outNetByteBuffer.rewind();
         SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-        flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId, applicationReplyCleaner);
+        flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId, networkReplyDoneHandler);
     }
 
 }
