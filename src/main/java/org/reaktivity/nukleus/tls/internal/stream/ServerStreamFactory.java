@@ -308,7 +308,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                 final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkThrottle, networkId,
                         networkReplyName, networkReply, newNetworkReplyId,
-                        this::handleStatus, this::doAbortApplicationStream,
+                        this::handleStatus, this::handleNetworkDone,
                         this::handleNetworkReplyDone, this::setNetworkReplyDoneHandler);
 
                 doWindow(networkThrottle, networkId, handshakeWindowBytes, handshakeWindowFrames);
@@ -791,7 +791,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void doAbortApplicationStream()
+        private void handleNetworkDone()
         {
             doAbort(applicationTarget, applicationId);
         }
@@ -823,7 +823,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final String networkReplyName;
         private final MessageConsumer networkReply;
         private final long networkReplyId;
-        private final Runnable applicationCleaner;
+        private final Runnable networkDoneHandler;
         private final Runnable networkReplyDoneHandler;
         private final Consumer<Runnable> applicationInCleanerConsumer;
 
@@ -843,15 +843,15 @@ public final class ServerStreamFactory implements StreamFactory
             MessageConsumer networkReply,
             long networkReplyId,
             BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler,
-            Runnable applicationCleaner,
-            Runnable applicationReplyCleaner,
+            Runnable networkDoneHandler,
+            Runnable networkReplyDoneHandler,
             Consumer<Runnable> applicationInCleanerConsumer)
         {
             this.tlsEngine = tlsEngine;
             this.statusHandler = statusHandler;
             this.resetHandler = this::handleReset;
-            this.applicationCleaner = applicationCleaner;
-            this.networkReplyDoneHandler = applicationReplyCleaner;
+            this.networkDoneHandler = networkDoneHandler;
+            this.networkReplyDoneHandler = networkReplyDoneHandler;
 
             this.networkThrottle = networkThrottle;
             this.networkId = networkId;
@@ -1000,7 +1000,7 @@ public final class ServerStreamFactory implements StreamFactory
             tlsEngine.closeOutbound();
 
             // Sends ABORT to application
-            applicationCleaner.run();
+            networkDoneHandler.run();
         }
 
         private void updateNetworkWindow(
