@@ -21,6 +21,7 @@ import static javax.net.ssl.SSLEngineResult.HandshakeStatus.FINISHED;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_WRAP;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING;
 import static javax.net.ssl.SSLEngineResult.Status.BUFFER_UNDERFLOW;
+import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
@@ -40,7 +41,6 @@ import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLException;
 
 import org.agrona.DirectBuffer;
-import org.agrona.LangUtil;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -328,7 +328,6 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 doReset(networkThrottle, networkId);
                 doAbort(networkReply, networkReplyId);
-                LangUtil.rethrowUnchecked(ex);
             }
         }
 
@@ -574,7 +573,8 @@ public final class ServerStreamFactory implements StreamFactory
                     }
                     catch (SSLException ex)
                     {
-                        LangUtil.rethrowUnchecked(ex);
+                        // lambda interface cannot throw checked exception
+                        rethrowUnchecked(ex);
                     }
                     break;
                 case FINISHED:
@@ -962,13 +962,6 @@ public final class ServerStreamFactory implements StreamFactory
                 networkSlotOffset = 0;
                 doReset(networkThrottle, networkId);
                 doAbort(networkReply, networkReplyId);
-
-                final String message = ex.getMessage();
-                if (!message.contains("plaintext connection?") &&
-                        !"Unsupported SSL v2.0 ClientHello".equals(message))
-                {
-                    LangUtil.rethrowUnchecked(ex);
-                }
             }
             finally
             {
@@ -990,7 +983,6 @@ public final class ServerStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 doAbort(networkReply, networkReplyId);
-                LangUtil.rethrowUnchecked(ex);
             }
         }
 
@@ -1510,5 +1502,4 @@ public final class ServerStreamFactory implements StreamFactory
         SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
         flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId, networkReplyDoneHandler);
     }
-
 }

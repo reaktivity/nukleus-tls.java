@@ -19,6 +19,7 @@ import static java.nio.ByteBuffer.allocateDirect;
 import static java.util.Arrays.asList;
 import static java.util.Objects.requireNonNull;
 import static javax.net.ssl.SSLEngineResult.Status.BUFFER_UNDERFLOW;
+import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
@@ -36,7 +37,6 @@ import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLParameters;
 
 import org.agrona.DirectBuffer;
-import org.agrona.LangUtil;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -350,7 +350,6 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 doReset(applicationThrottle, applicationId);
                 doAbort(networkTarget, networkId);
-                LangUtil.rethrowUnchecked(ex);
             }
         }
 
@@ -399,7 +398,6 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 doReset(applicationThrottle, applicationId);
                 doAbort(networkTarget, networkId);
-                LangUtil.rethrowUnchecked(ex);
             }
         }
 
@@ -415,7 +413,6 @@ public final class ClientStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 doAbort(networkTarget, networkId);
-                LangUtil.rethrowUnchecked(ex);
             }
         }
 
@@ -740,7 +737,6 @@ public final class ClientStreamFactory implements StreamFactory
                 networkReplySlotOffset = 0;
                 doReset(networkReplyThrottle, networkReplyId);
                 doAbort(networkTarget, networkId);
-                LangUtil.rethrowUnchecked(ex);
             }
             finally
             {
@@ -762,7 +758,6 @@ public final class ClientStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 doAbort(networkTarget, networkId);
-                LangUtil.rethrowUnchecked(ex);
             }
             finally
             {
@@ -1041,7 +1036,6 @@ public final class ClientStreamFactory implements StreamFactory
                 applicationReplySlotOffset = 0;
                 doReset(networkReplyThrottle, networkReplyId);
                 doAbort(applicationReply, applicationReplyId);
-                LangUtil.rethrowUnchecked(ex);
             }
             finally
             {
@@ -1118,7 +1112,8 @@ public final class ClientStreamFactory implements StreamFactory
                     }
                     catch (SSLException ex)
                     {
-                        LangUtil.rethrowUnchecked(ex);
+                        // lambda interface cannot throw checked exception
+                        rethrowUnchecked(ex);
                     }
                     break;
                 case FINISHED:
