@@ -240,7 +240,6 @@ public final class ClientStreamFactory implements StreamFactory
         private int applicationWindowBytesAdjustment;
         private int applicationWindowFrames;
         private int applicationWindowFramesAdjustment;
-        private boolean applicationEnded;
 
         private ClientAcceptStream(
             String tlsHostname,
@@ -407,7 +406,7 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            applicationEnded = true;
+            applicationWindowBytes = -1;
 
             try
             {
@@ -480,7 +479,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         private void doResetApplicationStream()
         {
-            if (!applicationEnded)
+            if (applicationWindowBytes == -1)
             {
                 doReset(applicationThrottle, applicationId);
             }
@@ -819,7 +818,6 @@ public final class ClientStreamFactory implements StreamFactory
         private int applicationWindowFrames;
         private int applicationReplySlot = NO_SLOT;
         private int applicationReplySlotOffset;
-        private boolean networkReplyEnded;
 
         private Runnable applicationCleaner;
 
@@ -1061,7 +1059,7 @@ public final class ClientStreamFactory implements StreamFactory
         {
             if (!tlsEngine.isInboundDone())
             {
-                networkReplyEnded = true;
+                networkWindowBytes = -1;
                 try
                 {
                     doCloseInbound(tlsEngine);
@@ -1181,7 +1179,7 @@ public final class ClientStreamFactory implements StreamFactory
             if (applicationReplySlotOffset == 0 && tlsEngine.isInboundDone())
             {
                 doEnd(applicationReply, applicationReplyId);
-                if (!networkReplyEnded)
+                if (networkWindowBytes == -1)
                 {
                     doReset(networkReplyThrottle, networkReplyId);
                 }
