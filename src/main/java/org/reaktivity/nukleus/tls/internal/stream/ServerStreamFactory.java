@@ -243,7 +243,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         private int applicationWindowBytes;
         private int applicationWindowFrames;
-        private long appCorrelationId;
+        private long applicationCorrelationId;
 
         private long networkCorrelationId;
 
@@ -645,7 +645,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                 this.applicationTarget = applicationTarget;
                 this.applicationId = newApplicationId;
-                this.appCorrelationId = newCorrelationId;
+                this.applicationCorrelationId = newCorrelationId;
 
                 this.streamState = this::afterHandshake;
                 this.handshake = null;
@@ -798,7 +798,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         private void handleNetworkReplyDone()
         {
-            correlations.remove(appCorrelationId);
+            correlations.remove(applicationCorrelationId);
 
             if (networkReplyDoneHandler != null)
             {
@@ -825,7 +825,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final long networkReplyId;
         private final Runnable networkDoneHandler;
         private final Runnable networkReplyDoneHandler;
-        private final Consumer<Runnable> applicationInCleanerConsumer;
+        private final Consumer<Runnable> networkReplyDoneHandlerConsumer;
 
         private int networkSlot = NO_SLOT;
         private int networkSlotOffset;
@@ -845,7 +845,7 @@ public final class ServerStreamFactory implements StreamFactory
             BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler,
             Runnable networkDoneHandler,
             Runnable networkReplyDoneHandler,
-            Consumer<Runnable> applicationInCleanerConsumer)
+            Consumer<Runnable> networkReplyDoneHandlerConsumer)
         {
             this.tlsEngine = tlsEngine;
             this.statusHandler = statusHandler;
@@ -858,7 +858,7 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkReplyName = networkReplyName;
             this.networkReply = networkReply;
             this.networkReplyId = networkReplyId;
-            this.applicationInCleanerConsumer = applicationInCleanerConsumer;
+            this.networkReplyDoneHandlerConsumer = networkReplyDoneHandlerConsumer;
         }
 
         private void onFinished()
@@ -1026,7 +1026,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void setNetworkReplyDoneHandler(
             Runnable networkReplyDoneHandler)
         {
-            applicationInCleanerConsumer.accept(networkReplyDoneHandler);
+            networkReplyDoneHandlerConsumer.accept(networkReplyDoneHandler);
         }
 
         @Override
@@ -1414,7 +1414,6 @@ public final class ServerStreamFactory implements StreamFactory
                 .source("tls")
                 .sourceRef(targetRef)
                 .correlationId(correlationId)
-                .extension(e -> e.reset())
                 .build();
 
         target.accept(begin.typeId(), begin.buffer(), begin.offset(), begin.sizeof());
@@ -1428,7 +1427,6 @@ public final class ServerStreamFactory implements StreamFactory
         final DataFW data = dataRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
                 .payload(p -> p.set(payload.buffer(), payload.offset(), payload.sizeof()))
-                .extension(e -> e.reset())
                 .build();
 
         target.accept(data.typeId(), data.buffer(), data.offset(), data.sizeof());
@@ -1440,7 +1438,6 @@ public final class ServerStreamFactory implements StreamFactory
     {
         final EndFW end = endRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
-                .extension(e -> e.reset())
                 .build();
 
         target.accept(end.typeId(), end.buffer(), end.offset(), end.sizeof());
@@ -1452,7 +1449,6 @@ public final class ServerStreamFactory implements StreamFactory
     {
         final AbortFW abort = abortRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
-                .extension(e -> e.reset())
                 .build();
 
         target.accept(abort.typeId(), abort.buffer(), abort.offset(), abort.sizeof());
