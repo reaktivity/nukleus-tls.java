@@ -103,6 +103,19 @@ public class ServerIT
 
     @Test
     @Specification({
+            "${route}/server/controller",
+            "${client}/server.sent.write.close.before.correlated/client",
+            "${server}/server.sent.write.close.before.correlated/server"})
+    @ScriptProperty({
+            "newClientAcceptRef ${newServerConnectRef}",
+            "clientAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveServerSentWriteCloseBeforeCorrelated() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
         "${route}/server/controller",
         "${client}/server.sent.write.close/client",
         "${server}/server.sent.write.close/server"})
@@ -110,6 +123,19 @@ public class ServerIT
         "newClientAcceptRef ${newServerConnectRef}",
         "clientAccept \"nukleus://target/streams/tls#source\"" })
     public void shouldReceiveServerSentWriteClose() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+            "${route}/server/controller",
+            "${client}/client.sent.write.close.before.correlated/client",
+            "${server}/client.sent.write.close.before.correlated/server"})
+    @ScriptProperty({
+            "newClientAcceptRef ${newServerConnectRef}",
+            "clientAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveClientSentWriteCloseBeforeCorrelated() throws Exception
     {
         k3po.finish();
     }
@@ -142,6 +168,19 @@ public class ServerIT
 
     @Test
     @Specification({
+            "${route}/server/controller",
+            "${client}/client.sent.write.abort.before.correlated/client",
+            "${server}/client.sent.write.abort.before.correlated/server"})
+    @ScriptProperty({
+            "newClientAcceptRef ${newServerConnectRef}",
+            "clientAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveClientSentWriteAbortBeforeCorrelated() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
         "${route}/server/controller",
         "${client}/client.sent.write.abort/client",
         "${server}/client.sent.write.abort/server"})
@@ -163,6 +202,19 @@ public class ServerIT
         "newClientAcceptRef ${newServerConnectRef}",
         "clientAccept \"nukleus://target/streams/tls#source\"" })
     public void shouldReceiveServerSentReadAbort() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+            "${route}/server/controller",
+            "${client}/client.sent.read.abort.before.correlated/client",
+            "${server}/client.sent.read.abort.before.correlated/server"})
+    @ScriptProperty({
+            "newClientAcceptRef ${newServerConnectRef}",
+            "clientAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldReceiveClientSentReadAbortBeforeCorrelated() throws Exception
     {
         k3po.finish();
     }
