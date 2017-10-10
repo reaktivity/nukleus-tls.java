@@ -62,6 +62,7 @@ import org.reaktivity.nukleus.tls.internal.util.function.ObjectLongBiFunction;
 public final class ClientStreamFactory implements StreamFactory
 {
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
+    private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -127,7 +128,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
-        this.outNetByteBuffer = allocateDirect(writeBuffer.capacity());
+        this.outNetByteBuffer = allocateDirect(Math.min(writeBuffer.capacity(), MAXIMUM_PAYLOAD_LENGTH));
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
     }
 
@@ -1149,7 +1150,8 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationReplySlot);
 
-                final int applicationWindow = applicationWindowFrames == 0 ? 0 : applicationWindowBytes;
+                final int applicationWindow =
+                        applicationWindowFrames == 0 ? 0 : Math.min(applicationWindowBytes, MAXIMUM_PAYLOAD_LENGTH);
                 final int applicationBytesConsumed = Math.min(applicationReplySlotOffset, applicationWindow);
 
                 if (applicationBytesConsumed > 0)
