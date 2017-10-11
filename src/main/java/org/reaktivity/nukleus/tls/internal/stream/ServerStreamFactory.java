@@ -650,7 +650,9 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationSlot);
 
-                final int applicationBytesConsumed = Math.min(applicationSlotOffset, applicationWindowBudget);
+                final int applicationWindow = Math.min(applicationWindowBudget, MAXIMUM_PAYLOAD_LENGTH);
+
+                final int applicationBytesConsumed = Math.min(applicationSlotOffset, applicationWindow);
 
                 if (applicationBytesConsumed > 0)
                 {

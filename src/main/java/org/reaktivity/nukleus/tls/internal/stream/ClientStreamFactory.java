@@ -1133,7 +1133,7 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationReplySlot);
 
-                final int applicationWindow = applicationWindowBudget;
+                final int applicationWindow = Math.min(applicationWindowBudget, MAXIMUM_PAYLOAD_LENGTH);
 
                 final int applicationBytesConsumed = Math.min(applicationReplySlotOffset, applicationWindow);
 
@@ -1189,6 +1189,8 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleWindow(
             WindowFW window)
         {
+            applicationWindowBudget += window.credit();
+
             if (applicationReplySlotOffset != 0)
             {
                 try
@@ -1226,8 +1228,6 @@ public final class ClientStreamFactory implements StreamFactory
 
             networkWindowBudget += Math.max(networkWindowCredit, 0);
             networkWindowBudgetAdjustment = Math.min(networkWindowCredit, 0);
-
-            applicationWindowBudget += window.credit();
 
             if (networkWindowCredit > 0)
             {
