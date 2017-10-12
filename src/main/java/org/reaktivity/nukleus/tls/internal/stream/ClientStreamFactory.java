@@ -519,7 +519,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         private int inNetworkWindowBytes;
 
-        private int outNetworkWindowBytes;
+        private int outNetworkWindowBudget;
         private int outNetworkWindowPadding;
 
         private ClientHandshake(
@@ -584,7 +584,7 @@ public final class ClientStreamFactory implements StreamFactory
 
             router.setThrottle(networkName, networkId, networkThrottle);
 
-            doWindow(networkThrottle, networkId, outNetworkWindowBytes, outNetworkWindowPadding);
+            doWindow(networkThrottle, networkId, outNetworkWindowBudget, outNetworkWindowPadding);
 
             return applicationReply;
         }
@@ -614,14 +614,14 @@ public final class ClientStreamFactory implements StreamFactory
         private void beforeNetworkReply(
             WindowFW window)
         {
-            this.outNetworkWindowBytes += window.credit();
+            this.outNetworkWindowBudget += window.credit();
             this.outNetworkWindowPadding = window.padding();
         }
 
         private void afterNetworkReply(
             WindowFW window)
         {
-            this.outNetworkWindowBytes += window.credit();
+            this.outNetworkWindowBudget += window.credit();
             this.outNetworkWindowPadding = window.padding();
 
             statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
@@ -727,7 +727,7 @@ public final class ClientStreamFactory implements StreamFactory
 
                     inNetworkWindowBytes += data.length();
 
-                    doWindow(networkReplyThrottle, networkReplyId, data.length(), 0);
+                    doWindow(networkReplyThrottle, networkReplyId, data.length(), outNetworkWindowPadding);
                 }
             }
             catch (SSLException ex)
@@ -777,7 +777,7 @@ public final class ClientStreamFactory implements StreamFactory
             final int bytesProduced = result.bytesProduced();
             if (bytesProduced != 0)
             {
-                outNetworkWindowBytes -= bytesProduced;
+                outNetworkWindowBudget -= bytesProduced;
             }
         }
     }
@@ -792,6 +792,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         private int networkWindowBudget;
         private int networkWindowBudgetAdjustment;
+        private int networkWindowPadding;
 
         private int networkReplySlot;
         private int networkReplySlotOffset;
@@ -804,7 +805,6 @@ public final class ClientStreamFactory implements StreamFactory
 
         private MessageConsumer streamState;
         private int applicationWindowBudget;
-        private int applicationWindowPadding;
         private int applicationReplySlot = NO_SLOT;
         private int applicationReplySlotOffset;
 
@@ -1000,7 +1000,8 @@ public final class ClientStreamFactory implements StreamFactory
                                     networkWindowBudget += networkWindowBytesUpdate;
                                     networkWindowBudgetAdjustment -= networkWindowBytesUpdate;
 
-                                    doWindow(networkReplyThrottle, networkReplyId, networkWindowBytesUpdate, 0);
+                                    doWindow(networkReplyThrottle, networkReplyId, networkWindowBytesUpdate,
+                                            networkWindowPadding);
                                 }
                             }
                             break loop;
@@ -1224,7 +1225,7 @@ public final class ClientStreamFactory implements StreamFactory
             }
 
             final int networkWindowCredit = window.credit() + networkWindowBudgetAdjustment;
-            final int networkWindowPadding = window.padding();
+            networkWindowPadding = window.padding();
 
             networkWindowBudget += Math.max(networkWindowCredit, 0);
             networkWindowBudgetAdjustment = Math.min(networkWindowCredit, 0);

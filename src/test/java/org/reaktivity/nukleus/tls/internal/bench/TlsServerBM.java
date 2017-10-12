@@ -259,7 +259,7 @@ public class TlsServerBM
         {
             final BeginFW begin = beginRO.wrap(buffer, index, index + length);
             final long streamId = begin.streamId();
-            doWindow(streamId, 8192);
+            doWindow(streamId, 8192, 0);
 
             this.readHandler = this::afterBegin;
         }
@@ -275,16 +275,18 @@ public class TlsServerBM
             final OctetsFW payload = data.payload();
 
             final int update = payload.sizeof();
-            doWindow(streamId, update);
+            doWindow(streamId, update, 0);
         }
 
         private boolean doWindow(
             final long streamId,
-            final int credit)
+            final int credit,
+            final int padding)
         {
             final WindowFW window = windowRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                     .streamId(streamId)
                     .credit(credit)
+                    .padding(padding)
                     .build();
 
             return throttle.test(window.typeId(), window.buffer(), window.offset(), window.sizeof());

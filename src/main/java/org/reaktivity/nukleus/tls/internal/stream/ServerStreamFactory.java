@@ -250,8 +250,8 @@ public final class ServerStreamFactory implements StreamFactory
         @Override
         public String toString()
         {
-            return String.format("%s [networkWindowBudget=%d]",
-                                 getClass().getSimpleName(), networkWindowBudget);
+            return String.format("%s [networkWindowBudget=%d networkWindowPadding=%d]",
+                                 getClass().getSimpleName(), networkWindowBudget, networkWindowPadding);
         }
 
         private ServerAcceptStream(
@@ -1004,8 +1004,8 @@ public final class ServerStreamFactory implements StreamFactory
         @Override
         public String toString()
         {
-            return String.format("%s [outNetworkWindowBudget=%d]",
-                                 getClass().getSimpleName(), outNetworkWindowBudget);
+            return String.format("%s [outNetworkWindowBudget=%d outNetworkWindowPadding=%d]",
+                                 getClass().getSimpleName(), outNetworkWindowBudget, outNetworkWindowPadding);
         }
 
         private void handleThrottle(
@@ -1085,8 +1085,8 @@ public final class ServerStreamFactory implements StreamFactory
         @Override
         public String toString()
         {
-            return String.format("%s [applicationWindowBudget=%d]",
-                                 getClass().getSimpleName(), applicationWindowBudget);
+            return String.format("%s [applicationWindowBudget=%d applicationWindowPadding=%d]",
+                                 getClass().getSimpleName(), applicationWindowBudget, applicationWindowPadding);
         }
 
         private ServerConnectReplyStream(
