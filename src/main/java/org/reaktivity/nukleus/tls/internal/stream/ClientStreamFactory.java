@@ -900,7 +900,7 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
-            networkWindowBudget -= data.length();
+            networkWindowBudget -= data.length() + networkWindowPadding;
 
             if (networkReplySlot == NO_SLOT)
             {
@@ -1132,9 +1132,11 @@ public final class ClientStreamFactory implements StreamFactory
         {
             if (applicationReplySlotOffset > 0)
             {
+
+
                 final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationReplySlot);
 
-                final int applicationWindow = Math.min(applicationWindowBudget, MAXIMUM_PAYLOAD_LENGTH);
+                final int applicationWindow = Math.min(applicationWindowBudget - networkWindowPadding, MAXIMUM_PAYLOAD_LENGTH);
 
                 final int applicationBytesConsumed = Math.min(applicationReplySlotOffset, applicationWindow);
 
@@ -1144,15 +1146,16 @@ public final class ClientStreamFactory implements StreamFactory
 
                     doData(applicationReply, applicationReplyId, outAppOctets);
 
-                    applicationWindowBudget -= applicationBytesConsumed;
+                    applicationWindowBudget -= applicationBytesConsumed + networkWindowPadding;
+
+                    applicationReplySlotOffset -= applicationBytesConsumed;
+
+                    if (applicationReplySlotOffset != 0)
+                    {
+                        alignSlotBuffer(outAppBuffer, applicationBytesConsumed, applicationReplySlotOffset);
+                    }
                 }
 
-                applicationReplySlotOffset -= applicationBytesConsumed;
-
-                if (applicationReplySlotOffset != 0)
-                {
-                    alignSlotBuffer(outAppBuffer, applicationBytesConsumed, applicationReplySlotOffset);
-                }
             }
 
             if (applicationReplySlotOffset == 0 && tlsEngine.isInboundDone())
@@ -1191,6 +1194,7 @@ public final class ClientStreamFactory implements StreamFactory
             WindowFW window)
         {
             applicationWindowBudget += window.credit();
+            networkWindowPadding = window.padding();
 
             if (applicationReplySlotOffset != 0)
             {
@@ -1225,7 +1229,6 @@ public final class ClientStreamFactory implements StreamFactory
             }
 
             final int networkWindowCredit = window.credit() + networkWindowBudgetAdjustment;
-            networkWindowPadding = window.padding();
 
             networkWindowBudget += Math.max(networkWindowCredit, 0);
             networkWindowBudgetAdjustment = Math.min(networkWindowCredit, 0);
