@@ -241,6 +241,7 @@ public final class ServerStreamFactory implements StreamFactory
         private int applicationSlotOffset;
 
         private int applicationWindowBudget;
+        private int applicationWindowPadding;
         private long applicationCorrelationId;
 
         private long networkCorrelationId;
@@ -650,7 +651,8 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationSlot);
 
-                final int applicationWindow = Math.min(applicationWindowBudget, MAXIMUM_PAYLOAD_LENGTH);
+                final int applicationWindow = Math.min(
+                        applicationWindowBudget - applicationWindowPadding, MAXIMUM_PAYLOAD_LENGTH);
 
                 final int applicationBytesConsumed = Math.min(applicationSlotOffset, applicationWindow);
 
@@ -660,10 +662,11 @@ public final class ServerStreamFactory implements StreamFactory
 
                     doData(applicationTarget, applicationId, outAppOctets);
 
-                    applicationWindowBudget -= applicationBytesConsumed;
-                }
+                    applicationWindowBudget -= applicationBytesConsumed + applicationWindowPadding;
 
-                applicationSlotOffset -= applicationBytesConsumed;
+                    applicationSlotOffset -= applicationBytesConsumed;
+
+                }
 
                 if (applicationSlotOffset != 0)
                 {
@@ -706,6 +709,7 @@ public final class ServerStreamFactory implements StreamFactory
             final int applicationWindowCredit = window.credit();
 
             applicationWindowBudget += applicationWindowCredit;
+            applicationWindowPadding = networkWindowPadding = window.padding();
 
             if (applicationSlotOffset != 0)
             {
@@ -745,7 +749,6 @@ public final class ServerStreamFactory implements StreamFactory
             }
 
             final int networkWindowCredit = window.credit() + networkWindowBudgetAdjustment;
-            networkWindowPadding = window.padding();
 
             networkWindowBudget += Math.max(networkWindowCredit, 0);
             networkWindowBudgetAdjustment = Math.min(networkWindowCredit, 0);
