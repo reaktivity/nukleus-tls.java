@@ -23,9 +23,15 @@ public class TlsConfiguration extends Configuration
 
     public static final String HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME = "nukleus.tls.handshake.window.frames";
 
+    public static final String ALPN_SERVER_PROTOCOLS_PROPERTY_NAME = "nukleus.tls.handshake.server.application.protocols";
+
+    public static final String ALPN_CLIENT_PROTOCOLS_PROPERTY_NAME = "nukleus.tls.handshake.client.application.protocols";
+
     public static final int HANDSHAKE_WINDOW_BYTES_DEFAULT = 8192;
 
     public static final int HANDSHAKE_WINDOW_FRAMES_DEFAULT = 8192;
+
+    private static final String[] NO_PROTOCOLS = new String[0];
 
     public TlsConfiguration(
         Configuration config)
@@ -41,5 +47,22 @@ public class TlsConfiguration extends Configuration
     public int handshakeWindowFrames()
     {
         return getInteger(HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME, HANDSHAKE_WINDOW_FRAMES_DEFAULT);
+    }
+
+    public String[] serverApplicationProtocols()
+    {
+        String protocols = getProperty(ALPN_SERVER_PROTOCOLS_PROPERTY_NAME, (String) null);
+        return applicationProtocols(protocols);
+    }
+
+    public String[] clientApplicationProtocols()
+    {
+        String protocols = getProperty(ALPN_CLIENT_PROTOCOLS_PROPERTY_NAME, (String) null);
+        return applicationProtocols(protocols);
+    }
+
+    private String[] applicationProtocols(String protocols)
+    {
+        return (protocols == null) ? NO_PROTOCOLS : protocols.split(",");
     }
 }

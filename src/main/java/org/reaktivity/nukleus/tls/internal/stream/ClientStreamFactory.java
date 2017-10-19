@@ -90,6 +90,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
+    private final TlsConfiguration config;
     private final SSLContext context;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -115,6 +116,7 @@ public final class ClientStreamFactory implements StreamFactory
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ClientHandshake> correlations)
     {
+        this.config = requireNonNull(config);
         this.context = requireNonNull(context);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
@@ -331,6 +333,20 @@ public final class ClientStreamFactory implements StreamFactory
                 {
                     tlsParameters.setServerNames(asList(new SNIHostName(tlsHostname)));
                 }
+
+                String[] applicationProtocols = config.clientApplicationProtocols();
+                if (applicationProtocols.length > 0)
+                {
+                    try
+                    {
+                        tlsParameters.setApplicationProtocols(applicationProtocols);
+                    }
+                    catch (Throwable e)
+                    {
+                        throw new RuntimeException("Use JDK 9 to run this program", e);
+                    }
+                }
+
                 tlsEngine.setSSLParameters(tlsParameters);
 
                 final ClientHandshake newHandshake = new ClientHandshake(tlsEngine, networkName, newNetworkId,

@@ -39,6 +39,7 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLParameters;
 
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
@@ -94,6 +95,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
+    private final TlsConfiguration config;
     private final SSLContext context;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -120,6 +122,7 @@ public final class ServerStreamFactory implements StreamFactory
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ServerHandshake> correlations)
     {
+        this.config = requireNonNull(config);
         this.context = requireNonNull(context);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
@@ -187,6 +190,21 @@ public final class ServerStreamFactory implements StreamFactory
 
             tlsEngine.setUseClientMode(false);
 //            tlsEngine.setNeedClientAuth(true);
+            final SSLParameters tlsParameters = tlsEngine.getSSLParameters();
+            String[] applicationProtocols = config.serverApplicationProtocols();
+            if (applicationProtocols.length > 0)
+            {
+                try
+                {
+                    tlsParameters.setApplicationProtocols(applicationProtocols);
+                }
+                catch (Throwable e)
+                {
+                    throw new RuntimeException("Use JDK 9 to run this program", e);
+                }
+            }
+
+            tlsEngine.setSSLParameters(tlsParameters);
 
             newStream = new ServerAcceptStream(tlsEngine, networkThrottle, networkId, networkRef)::handleStream;
         }
