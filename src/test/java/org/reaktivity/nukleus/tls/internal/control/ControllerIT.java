@@ -59,7 +59,7 @@ public class ControllerIT
         k3po.start();
 
         reaktor.controller(TlsController.class)
-                  .routeServer("source", 0L, "target", targetRef, "localhost")
+                  .routeServer("source", 0L, "target", targetRef, "localhost", "protocol")
                   .get();
 
         k3po.finish();
@@ -76,7 +76,7 @@ public class ControllerIT
         k3po.start();
 
         reaktor.controller(TlsController.class)
-                  .routeClient("source", 0L, "target", targetRef, "localhost")
+                  .routeClient("source", 0L, "target", targetRef, "localhost", "protocol")
                   .get();
 
         k3po.finish();
@@ -94,13 +94,13 @@ public class ControllerIT
         k3po.start();
 
         long sourceRef = reaktor.controller(TlsController.class)
-                  .routeServer("source", 0L, "target", targetRef, "localhost")
+                  .routeServer("source", 0L, "target", targetRef, "localhost", "protocol")
                   .get();
 
         k3po.notifyBarrier("ROUTED_SERVER");
 
         reaktor.controller(TlsController.class)
-                  .unrouteServer("source", sourceRef, "target", targetRef, "localhost")
+                  .unrouteServer("source", sourceRef, "target", targetRef, "localhost", "protocol")
                   .get();
 
         k3po.finish();
@@ -118,13 +118,13 @@ public class ControllerIT
         k3po.start();
 
         long sourceRef = reaktor.controller(TlsController.class)
-                  .routeClient("source", 0L, "target", targetRef, "localhost")
+                  .routeClient("source", 0L, "target", targetRef, "localhost", "protocol")
                   .get();
 
         k3po.notifyBarrier("ROUTED_CLIENT");
 
         reaktor.controller(TlsController.class)
-                  .unrouteClient("source", sourceRef, "target", targetRef, "localhost")
+                  .unrouteClient("source", sourceRef, "target", targetRef, "localhost", "protocol")
                   .get();
 
         k3po.finish();

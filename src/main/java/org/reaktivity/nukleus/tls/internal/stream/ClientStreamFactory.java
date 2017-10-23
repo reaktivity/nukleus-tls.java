@@ -173,10 +173,12 @@ public final class ClientStreamFactory implements StreamFactory
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
             final String tlsHostname = tlsBeginEx.hostname().asString();
+            final String applicationProtocol = tlsBeginEx.applicationProtocol().asString();
 
             return applicationRef == route.sourceRef() &&
                     applicationName.equals(route.source().asString()) &&
-                    (tlsHostname == null || Objects.equals(tlsHostname, hostname));
+                    (tlsHostname == null || Objects.equals(tlsHostname, hostname)) &&
+                    (applicationProtocol == null || applicationProtocol.equals(routeEx.applicationProtocol().asString()));
         };
 
         final RouteFW route = router.resolve(filter, this::wrapRoute);
@@ -192,12 +194,19 @@ public final class ClientStreamFactory implements StreamFactory
                 tlsHostname = routeEx.hostname().asString();
             }
 
+            String applicationProtocol = tlsBeginEx.applicationProtocol().asString();
+            if (applicationProtocol == null)
+            {
+                final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+                applicationProtocol = routeEx.applicationProtocol().asString();
+            }
+
             final String networkName = route.target().asString();
             final long networkRef = route.targetRef();
 
             final long applicationId = begin.streamId();
 
-            newStream = new ClientAcceptStream(tlsHostname, applicationThrottle, applicationId,
+            newStream = new ClientAcceptStream(tlsHostname, applicationProtocol, applicationThrottle, applicationId,
                                                networkName, networkRef)::handleStream;
         }
 
@@ -225,6 +234,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final class ClientAcceptStream
     {
         private final String tlsHostname;
+        private final String applicationProtocol;
 
         private final MessageConsumer applicationThrottle;
         private final long applicationId;
@@ -247,12 +257,14 @@ public final class ClientStreamFactory implements StreamFactory
 
         private ClientAcceptStream(
             String tlsHostname,
+            String applicationProtocol,
             MessageConsumer applicationThrottle,
             long applicationId,
             String networkName,
             long networkRef)
         {
             this.tlsHostname = tlsHostname;
+            this.applicationProtocol = applicationProtocol;
             this.applicationThrottle = applicationThrottle;
             this.applicationId = applicationId;
             this.networkName = networkName;
@@ -334,7 +346,7 @@ public final class ClientStreamFactory implements StreamFactory
                     tlsParameters.setServerNames(asList(new SNIHostName(tlsHostname)));
                 }
 
-                String[] applicationProtocols = config.clientApplicationProtocols();
+                String[] applicationProtocols = new String[] { applicationProtocol };
                 if (applicationProtocols.length > 0)
                 {
                     try
@@ -595,7 +607,7 @@ public final class ClientStreamFactory implements StreamFactory
 
             final MessageConsumer applicationReply = router.supplyTarget(applicationReplyName);
 
-            doTlsBegin(applicationReply, applicationReplyId, 0L, applicationCorrelationId, peerHost);
+            doTlsBegin(applicationReply, applicationReplyId, 0L, applicationCorrelationId, peerHost, "");
             router.setThrottle(applicationReplyName, applicationReplyId, applicationThrottle);
 
             router.setThrottle(networkName, networkId, networkThrottle);
@@ -1311,27 +1323,30 @@ public final class ClientStreamFactory implements StreamFactory
         long targetId,
         long targetRef,
         long correlationId,
-        String hostname)
+        String hostname,
+        String applicationProtocol)
     {
         final BeginFW begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                                      .streamId(targetId)
                                      .source("tls")
                                      .sourceRef(targetRef)
                                      .correlationId(correlationId)
-                                     .extension(e -> e.set(visitTlsBeginEx(hostname)))
+                                     .extension(e -> e.set(visitTlsBeginEx(hostname, applicationProtocol)))
                                      .build();
 
         target.accept(begin.typeId(), begin.buffer(), begin.offset(), begin.sizeof());
     }
 
     private Flyweight.Builder.Visitor visitTlsBeginEx(
-        String hostname)
+        String hostname,
+        String applicationProtocol)
     {
         return (buffer, offset, limit) ->
             tlsBeginExRW.wrap(buffer, offset, limit)
-                       .hostname(hostname)
-                       .build()
-                       .sizeof();
+                        .hostname(hostname)
+                        .applicationProtocol(applicationProtocol)
+                        .build()
+                        .sizeof();
     }
 
     private void doBegin(
