@@ -65,12 +65,39 @@ public class ClientIT
     @Test
     @Specification({
         "${route}/client/controller",
+        "${client}/connection.established/client",
+        "${server}/connection.established/server" })
+    @ScriptProperty({
+        "newServerAcceptRef ${newClientConnectRef}",
+        "serverAccept \"nukleus://target/streams/tls#source\"",
+        "authorization 0x0001_000000000000L"})
+    public void shouldEstablishConnectionWithAuthorization() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+        "${route}/client/controller",
         "${client}/echo.payload.length.10k/client",
         "${server}/echo.payload.length.10k/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
         "serverAccept \"nukleus://target/streams/tls#source\"" })
     public void shouldEchoPayloadLength10k() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+        "${route}/client/controller",
+        "${client}/echo.payload.length.10k/client",
+        "${server}/echo.payload.length.10k/server"})
+    @ScriptProperty({
+        "newServerAcceptRef ${newClientConnectRef}",
+        "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldEchoPayloadLength10kWithAuthorization() throws Exception
     {
         k3po.finish();
     }
