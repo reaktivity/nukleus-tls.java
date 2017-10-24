@@ -604,10 +604,12 @@ public final class ClientStreamFactory implements StreamFactory
         {
             final String applicationReplyName = applicationName;
             final String peerHost = tlsEngine.getPeerHost();
+            final String applicationProtocol = tlsEngine.getApplicationProtocol();
 
             final MessageConsumer applicationReply = router.supplyTarget(applicationReplyName);
 
-            doTlsBegin(applicationReply, applicationReplyId, 0L, applicationCorrelationId, peerHost, "");
+            doTlsBegin(applicationReply, applicationReplyId, 0L, applicationCorrelationId,
+                    peerHost, applicationProtocol);
             router.setThrottle(applicationReplyName, applicationReplyId, applicationThrottle);
 
             router.setThrottle(networkName, networkId, networkThrottle);
