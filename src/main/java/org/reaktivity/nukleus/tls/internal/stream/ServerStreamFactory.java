@@ -336,7 +336,9 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private String selectApplicationProtocol(SSLEngine tlsEngine, List<String> clientProtocols)
+        private String selectApplicationProtocol(
+            SSLEngine tlsEngine,
+            List<String> clientProtocols)
         {
             final MessagePredicate alpnFilter = (t, b, o, l) ->
             {
@@ -652,6 +654,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final String applicationName = route.target().asString();
                 final MessageConsumer applicationTarget = router.supplyTarget(applicationName);
+                final long applicationRef = route.targetRef();
 
                 final TlsRouteExFW tlsRouteEx = route.extension().get(tlsRouteExRO::wrap);
                 final String tlsHostname = tlsRouteEx.hostname().asString();
@@ -660,20 +663,19 @@ public final class ServerStreamFactory implements StreamFactory
                 correlations.put(newCorrelationId, handshake);
 
                 final long newApplicationId = supplyStreamId.getAsLong();
-                final long applicationRef = route.targetRef();
 
-                String applicationProtocol = tlsEngine.getApplicationProtocol();
-                if (applicationProtocol == null || applicationProtocol.isEmpty())
+                String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
+                if (tlsApplicationProtocol == null || tlsApplicationProtocol.isEmpty())
                 {
-                    applicationProtocol = tlsRouteEx.applicationProtocol().asString();
+                    tlsApplicationProtocol = tlsRouteEx.applicationProtocol().asString();
                 }
-                if (applicationProtocol == null || applicationProtocol.isEmpty())
+                if (tlsApplicationProtocol == null || tlsApplicationProtocol.isEmpty())
                 {
-                    applicationProtocol = "";
+                    tlsApplicationProtocol = "";
                 }
 
                 doTlsBegin(applicationTarget, newApplicationId, authorization, applicationRef, newCorrelationId,
-                    tlsHostname, applicationProtocol);
+                    tlsHostname, tlsApplicationProtocol);
                 router.setThrottle(applicationName, newApplicationId, this::handleThrottle);
 
                 handshake.onFinished();

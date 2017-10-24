@@ -260,7 +260,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         private ClientAcceptStream(
             String tlsHostname,
-            String applicationProtocol,
+            String tlsApplicationProtocol,
             MessageConsumer applicationThrottle,
             long applicationId,
             long authorization,
@@ -268,7 +268,7 @@ public final class ClientStreamFactory implements StreamFactory
             long networkRef)
         {
             this.tlsHostname = tlsHostname;
-            this.applicationProtocol = applicationProtocol;
+            this.applicationProtocol = tlsApplicationProtocol;
             this.applicationThrottle = applicationThrottle;
             this.applicationId = applicationId;
             this.authorization = authorization;
@@ -355,14 +355,7 @@ public final class ClientStreamFactory implements StreamFactory
                 String[] applicationProtocols = new String[] { applicationProtocol };
                 if (applicationProtocols.length > 0)
                 {
-                    try
-                    {
-                        tlsParameters.setApplicationProtocols(applicationProtocols);
-                    }
-                    catch (Throwable e)
-                    {
-                        throw new RuntimeException("Use JDK 9 to run this program", e);
-                    }
+                    tlsParameters.setApplicationProtocols(applicationProtocols);
                 }
 
                 tlsEngine.setSSLParameters(tlsParameters);
