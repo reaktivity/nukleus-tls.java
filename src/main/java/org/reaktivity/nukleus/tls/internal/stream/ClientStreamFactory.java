@@ -352,9 +352,9 @@ public final class ClientStreamFactory implements StreamFactory
                     tlsParameters.setServerNames(asList(new SNIHostName(tlsHostname)));
                 }
 
-                String[] applicationProtocols = new String[] { applicationProtocol };
-                if (applicationProtocols.length > 0)
+                if (applicationProtocol != null && !applicationProtocol.isEmpty())
                 {
+                    String[] applicationProtocols = new String[]{applicationProtocol};
                     tlsParameters.setApplicationProtocols(applicationProtocols);
                 }
 

@@ -669,10 +669,6 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     tlsApplicationProtocol = tlsRouteEx.applicationProtocol().asString();
                 }
-                if (tlsApplicationProtocol == null || tlsApplicationProtocol.isEmpty())
-                {
-                    tlsApplicationProtocol = "";
-                }
 
                 doTlsBegin(applicationTarget, newApplicationId, authorization, applicationRef, newCorrelationId,
                     tlsHostname, tlsApplicationProtocol);
