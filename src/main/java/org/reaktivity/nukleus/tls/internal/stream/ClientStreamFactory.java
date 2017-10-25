@@ -171,13 +171,14 @@ public final class ClientStreamFactory implements StreamFactory
             final RouteFW route = routeRO.wrap(b, o, l);
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
+            String applicationProtocol = routeEx.applicationProtocol().asString();
             final String tlsHostname = tlsBeginEx.hostname().asString();
             final String tlsApplicationProtocol = tlsBeginEx.applicationProtocol().asString();
 
             return applicationRef == route.sourceRef() &&
                     applicationName.equals(route.source().asString()) &&
                     (tlsHostname == null || Objects.equals(tlsHostname, hostname)) &&
-                    (tlsApplicationProtocol == null || tlsApplicationProtocol.equals(routeEx.applicationProtocol().asString()));
+                    (tlsApplicationProtocol == null || tlsApplicationProtocol.equals(applicationProtocol));
         };
 
         final RouteFW route = router.resolve(authorization, filter, this::wrapRoute);
@@ -603,13 +604,13 @@ public final class ClientStreamFactory implements StreamFactory
             long applicationReplyId)
         {
             final String applicationReplyName = applicationName;
-            final String peerHost = tlsEngine.getPeerHost();
+            final String tlsPeerHost = tlsEngine.getPeerHost();
             final String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
 
             final MessageConsumer applicationReply = router.supplyTarget(applicationReplyName);
 
             doTlsBegin(applicationReply, applicationReplyId, 0L, applicationCorrelationId,
-                    peerHost, tlsApplicationProtocol);
+                    tlsPeerHost, tlsApplicationProtocol);
             router.setThrottle(applicationReplyName, applicationReplyId, applicationThrottle);
 
             router.setThrottle(networkName, networkId, networkThrottle);

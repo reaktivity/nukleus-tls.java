@@ -658,13 +658,13 @@ public final class ServerStreamFactory implements StreamFactory
 
                 final TlsRouteExFW tlsRouteEx = route.extension().get(tlsRouteExRO::wrap);
                 final String tlsHostname = tlsRouteEx.hostname().asString();
+                String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
 
                 final long newCorrelationId = supplyCorrelationId.getAsLong();
                 correlations.put(newCorrelationId, handshake);
 
                 final long newApplicationId = supplyStreamId.getAsLong();
 
-                String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
                 if (tlsApplicationProtocol == null || tlsApplicationProtocol.isEmpty())
                 {
                     tlsApplicationProtocol = tlsRouteEx.applicationProtocol().asString();
