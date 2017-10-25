@@ -90,7 +90,6 @@ public final class ClientStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
-    private final TlsConfiguration config;
     private final SSLContext context;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -116,7 +115,6 @@ public final class ClientStreamFactory implements StreamFactory
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ClientHandshake> correlations)
     {
-        this.config = requireNonNull(config);
         this.context = requireNonNull(context);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
@@ -174,12 +172,12 @@ public final class ClientStreamFactory implements StreamFactory
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
             final String tlsHostname = tlsBeginEx.hostname().asString();
-            final String applicationProtocol = tlsBeginEx.applicationProtocol().asString();
+            final String tlsApplicationProtocol = tlsBeginEx.applicationProtocol().asString();
 
             return applicationRef == route.sourceRef() &&
                     applicationName.equals(route.source().asString()) &&
                     (tlsHostname == null || Objects.equals(tlsHostname, hostname)) &&
-                    (applicationProtocol == null || applicationProtocol.equals(routeEx.applicationProtocol().asString()));
+                    (tlsApplicationProtocol == null || tlsApplicationProtocol.equals(routeEx.applicationProtocol().asString()));
         };
 
         final RouteFW route = router.resolve(authorization, filter, this::wrapRoute);
@@ -195,11 +193,11 @@ public final class ClientStreamFactory implements StreamFactory
                 tlsHostname = routeEx.hostname().asString();
             }
 
-            String applicationProtocol = tlsBeginEx.applicationProtocol().asString();
-            if (applicationProtocol == null)
+            String tlsApplicationProtocol = tlsBeginEx.applicationProtocol().asString();
+            if (tlsApplicationProtocol == null)
             {
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-                applicationProtocol = routeEx.applicationProtocol().asString();
+                tlsApplicationProtocol = routeEx.applicationProtocol().asString();
             }
 
             final String networkName = route.target().asString();
@@ -207,7 +205,7 @@ public final class ClientStreamFactory implements StreamFactory
 
             final long applicationId = begin.streamId();
 
-            newStream = new ClientAcceptStream(tlsHostname, applicationProtocol, applicationThrottle, applicationId,
+            newStream = new ClientAcceptStream(tlsHostname, tlsApplicationProtocol, applicationThrottle, applicationId,
                                                authorization, networkName, networkRef)::handleStream;
         }
 
@@ -236,7 +234,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final class ClientAcceptStream
     {
         private final String tlsHostname;
-        private final String applicationProtocol;
+        private final String tlsApplicationProtocol;
 
         private final MessageConsumer applicationThrottle;
         private final long applicationId;
@@ -268,7 +266,7 @@ public final class ClientStreamFactory implements StreamFactory
             long networkRef)
         {
             this.tlsHostname = tlsHostname;
-            this.applicationProtocol = tlsApplicationProtocol;
+            this.tlsApplicationProtocol = tlsApplicationProtocol;
             this.applicationThrottle = applicationThrottle;
             this.applicationId = applicationId;
             this.authorization = authorization;
@@ -352,9 +350,9 @@ public final class ClientStreamFactory implements StreamFactory
                     tlsParameters.setServerNames(asList(new SNIHostName(tlsHostname)));
                 }
 
-                if (applicationProtocol != null && !applicationProtocol.isEmpty())
+                if (tlsApplicationProtocol != null && !tlsApplicationProtocol.isEmpty())
                 {
-                    String[] applicationProtocols = new String[]{applicationProtocol};
+                    String[] applicationProtocols = new String[]{ tlsApplicationProtocol };
                     tlsParameters.setApplicationProtocols(applicationProtocols);
                 }
 
@@ -606,12 +604,12 @@ public final class ClientStreamFactory implements StreamFactory
         {
             final String applicationReplyName = applicationName;
             final String peerHost = tlsEngine.getPeerHost();
-            final String applicationProtocol = tlsEngine.getApplicationProtocol();
+            final String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
 
             final MessageConsumer applicationReply = router.supplyTarget(applicationReplyName);
 
             doTlsBegin(applicationReply, applicationReplyId, 0L, applicationCorrelationId,
-                    peerHost, applicationProtocol);
+                    peerHost, tlsApplicationProtocol);
             router.setThrottle(applicationReplyName, applicationReplyId, applicationThrottle);
 
             router.setThrottle(networkName, networkId, networkThrottle);
