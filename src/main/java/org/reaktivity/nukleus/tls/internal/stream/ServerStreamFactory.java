@@ -371,7 +371,10 @@ public final class ServerStreamFactory implements StreamFactory
             if (route != null)
             {
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-                return routeEx.applicationProtocol().asString();
+                String applicationProtocol = routeEx.applicationProtocol().asString();
+                // If the route is default (i.e. no application protocol), need to behave as if there is no ALPN
+                // So return an empty String to opt out ALPN negotiation
+                return applicationProtocol == null ? "" : applicationProtocol;
             }
             return null;
         }
