@@ -165,6 +165,21 @@ public final class ClientStreamFactory implements StreamFactory
         final long authorization = begin.authorization();
         final OctetsFW extension = begin.extension();
         final TlsBeginExFW tlsBeginEx = extension.get(tlsBeginExRO::wrap);
+        final boolean defaultRoute;
+
+        final MessagePredicate defaultRouteFilter = (t, b, o, l) ->
+        {
+            final RouteFW route = routeRO.wrap(b, o, l);
+            final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+            final String hostname = routeEx.hostname().asString();
+            final String applicationProtocol = routeEx.applicationProtocol().asString();
+            final String tlsHostname = tlsBeginEx.hostname().asString();
+
+            return applicationRef == route.sourceRef() &&
+                    applicationName.equals(route.source().asString()) &&
+                    (hostname == null || Objects.equals(tlsHostname, hostname)) &&
+                    applicationProtocol == null;
+        };
 
         final MessagePredicate filter = (t, b, o, l) ->
         {
@@ -181,6 +196,7 @@ public final class ClientStreamFactory implements StreamFactory
                     (applicationProtocol == null || Objects.equals(tlsApplicationProtocol, applicationProtocol));
         };
 
+        defaultRoute = router.resolve(authorization, defaultRouteFilter, this::wrapRoute) != null;
         final RouteFW route = router.resolve(authorization, filter, this::wrapRoute);
 
         MessageConsumer newStream = null;
@@ -206,8 +222,8 @@ public final class ClientStreamFactory implements StreamFactory
 
             final long applicationId = begin.streamId();
 
-            newStream = new ClientAcceptStream(tlsHostname, tlsApplicationProtocol, applicationThrottle, applicationId,
-                                               authorization, networkName, networkRef)::handleStream;
+            newStream = new ClientAcceptStream(tlsHostname, tlsApplicationProtocol, defaultRoute, applicationThrottle,
+                    applicationId, authorization, networkName, networkRef)::handleStream;
         }
 
         return newStream;
@@ -236,6 +252,7 @@ public final class ClientStreamFactory implements StreamFactory
     {
         private final String tlsHostname;
         private final String tlsApplicationProtocol;
+        private final boolean defaultRoute;
 
         private final MessageConsumer applicationThrottle;
         private final long applicationId;
@@ -260,6 +277,7 @@ public final class ClientStreamFactory implements StreamFactory
         private ClientAcceptStream(
             String tlsHostname,
             String tlsApplicationProtocol,
+            boolean defaultRoute,
             MessageConsumer applicationThrottle,
             long applicationId,
             long authorization,
@@ -268,6 +286,7 @@ public final class ClientStreamFactory implements StreamFactory
         {
             this.tlsHostname = tlsHostname;
             this.tlsApplicationProtocol = tlsApplicationProtocol;
+            this.defaultRoute = defaultRoute;
             this.applicationThrottle = applicationThrottle;
             this.applicationId = applicationId;
             this.authorization = authorization;
@@ -359,9 +378,10 @@ public final class ClientStreamFactory implements StreamFactory
 
                 tlsEngine.setSSLParameters(tlsParameters);
 
-                final ClientHandshake newHandshake = new ClientHandshake(tlsEngine, networkName, newNetworkId,
-                        authorization, applicationName, applicationCorrelationId, newCorrelationId, this::handleThrottle,
-                        applicationThrottle, applicationId, this::handleNetworkReplyDone);
+                final ClientHandshake newHandshake = new ClientHandshake(tlsEngine, tlsApplicationProtocol, defaultRoute,
+                        networkName, newNetworkId, authorization, applicationName, applicationCorrelationId,
+                        newCorrelationId, this::handleThrottle, applicationThrottle, applicationId,
+                        this::handleNetworkReplyDone);
 
                 correlations.put(newCorrelationId, newHandshake);
 
@@ -520,6 +540,8 @@ public final class ClientStreamFactory implements StreamFactory
     public final class ClientHandshake
     {
         private final SSLEngine tlsEngine;
+        private final String applicationProtocol;
+        private final boolean defaultRoute;
 
         private final String networkName;
         private final MessageConsumer networkTarget;
@@ -551,6 +573,8 @@ public final class ClientStreamFactory implements StreamFactory
 
         private ClientHandshake(
             SSLEngine tlsEngine,
+            String applicationProtocol,
+            boolean defaultRoute,
             String networkName,
             long networkId,
             long authorization,
@@ -563,6 +587,8 @@ public final class ClientStreamFactory implements StreamFactory
             Runnable networkReplyDoneHandler)
         {
             this.tlsEngine = tlsEngine;
+            this.applicationProtocol = applicationProtocol;
+            this.defaultRoute = defaultRoute;
             this.networkName = networkName;
             this.networkTarget = router.supplyTarget(networkName);
             this.networkId = networkId;
@@ -848,6 +874,8 @@ public final class ClientStreamFactory implements StreamFactory
         private int applicationReplySlotOffset;
 
         private Runnable networkReplyDoneHandler;
+        private String applicationProtocol;
+        private boolean defaultRoute;
 
         private ClientConnectReplyStream(
             MessageConsumer networkReplyThrottle,
@@ -922,6 +950,8 @@ public final class ClientStreamFactory implements StreamFactory
             if (handshake != null)
             {
                 this.tlsEngine = handshake.tlsEngine;
+                this.applicationProtocol = handshake.applicationProtocol;
+                this.defaultRoute = handshake.defaultRoute;
                 this.networkTarget = handshake.networkTarget;
                 this.networkId = handshake.networkId;
                 this.networkAuthorization = handshake.networkAuthorization;
@@ -1160,15 +1190,27 @@ public final class ClientStreamFactory implements StreamFactory
 
         private void handleFinished()
         {
-            this.networkWindowBudget += handshakeWindowBytes;
-            this.networkWindowBudgetAdjustment -= handshakeWindowBytes;
+            String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
+            if ((tlsApplicationProtocol.equals("") && defaultRoute)
+                    || Objects.equals(tlsApplicationProtocol, applicationProtocol))
+            {
+                // no ALPN negotiation && default route OR
+                // negotiated protocol from ALPN matches with our route
 
-            final long newApplicationReplyId = supplyStreamId.getAsLong();
-            this.applicationReply = this.doBeginApplicationReply.apply(this::handleThrottle, newApplicationReplyId);
-            this.applicationReplyId = newApplicationReplyId;
+                this.networkWindowBudget += handshakeWindowBytes;
+                this.networkWindowBudgetAdjustment -= handshakeWindowBytes;
 
-            this.streamState = this::afterHandshake;
-            this.doBeginApplicationReply = null;
+                final long newApplicationReplyId = supplyStreamId.getAsLong();
+                this.applicationReply = this.doBeginApplicationReply.apply(this::handleThrottle, newApplicationReplyId);
+                this.applicationReplyId = newApplicationReplyId;
+
+                this.streamState = this::afterHandshake;
+                this.doBeginApplicationReply = null;
+            }
+            else
+            {
+                doReset(networkReplyThrottle, networkReplyId);
+            }
         }
 
         private void handleFlushAppData()
