@@ -171,14 +171,14 @@ public final class ClientStreamFactory implements StreamFactory
             final RouteFW route = routeRO.wrap(b, o, l);
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
-            String applicationProtocol = routeEx.applicationProtocol().asString();
+            final String applicationProtocol = routeEx.applicationProtocol().asString();
             final String tlsHostname = tlsBeginEx.hostname().asString();
             final String tlsApplicationProtocol = tlsBeginEx.applicationProtocol().asString();
 
             return applicationRef == route.sourceRef() &&
                     applicationName.equals(route.source().asString()) &&
-                    (tlsHostname == null || Objects.equals(tlsHostname, hostname)) &&
-                    (tlsApplicationProtocol == null || tlsApplicationProtocol.equals(applicationProtocol));
+                    (hostname == null || Objects.equals(tlsHostname, hostname)) &&
+                    (applicationProtocol == null || Objects.equals(tlsApplicationProtocol, applicationProtocol));
         };
 
         final RouteFW route = router.resolve(authorization, filter, this::wrapRoute);
@@ -353,7 +353,7 @@ public final class ClientStreamFactory implements StreamFactory
 
                 if (tlsApplicationProtocol != null && !tlsApplicationProtocol.isEmpty())
                 {
-                    String[] applicationProtocols = new String[]{ tlsApplicationProtocol };
+                    String[] applicationProtocols = new String[] { tlsApplicationProtocol };
                     tlsParameters.setApplicationProtocols(applicationProtocols);
                 }
 
@@ -605,7 +605,13 @@ public final class ClientStreamFactory implements StreamFactory
         {
             final String applicationReplyName = applicationName;
             final String tlsPeerHost = tlsEngine.getPeerHost();
-            final String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
+
+            String tlsApplicationProtocol0 = tlsEngine.getApplicationProtocol();
+            if (tlsApplicationProtocol0 != null && tlsApplicationProtocol0.isEmpty())
+            {
+                tlsApplicationProtocol0 = null;
+            }
+            final String tlsApplicationProtocol = tlsApplicationProtocol0;
 
             final MessageConsumer applicationReply = router.supplyTarget(applicationReplyName);
 
