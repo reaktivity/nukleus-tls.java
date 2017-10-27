@@ -108,7 +108,7 @@ public class ServerIT
      * client sends ALPN w/ protocol3
      * negotiates unsuccessfully with ALPN, so protocol == null => TLS ERROR
      */
-    @Ignore("There no way to detect connection abort in k3po")
+    @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
             "${route}/server.alpn/controller",
@@ -127,7 +127,7 @@ public class ServerIT
      * client omits ALPN
      * negotiates successfully without ALPN, but protocol != protocol2 => RESET transport
      */
-    @Ignore("There no way to detect connection abort in k3po")
+    @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
             "${route}/server.alpn/controller",

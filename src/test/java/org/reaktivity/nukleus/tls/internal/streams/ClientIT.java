@@ -102,7 +102,7 @@ public class ClientIT
      * need to reverify route still matches with negotiated protocol
      * < RESET
      */
-    @Ignore("There no way to detect connection abort in k3po")
+    @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
             "${route}/client.alpn/controller",
