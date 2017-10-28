@@ -26,6 +26,8 @@ import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -340,7 +342,10 @@ public final class ClientStreamFactory implements StreamFactory
 
                 final ClientHandshake newHandshake = new ClientHandshake(tlsEngine, networkName, newNetworkId,
                         authorization, applicationName, applicationCorrelationId, newCorrelationId, this::handleThrottle,
-                        applicationThrottle, applicationId, this::handleNetworkReplyDone);
+                        applicationThrottle, applicationId, this::handleNetworkReplyDone,
+                        this::getNetworkWindowBudget, this::getNetworkWindowPadding,
+                        this::setNetworkWindowBudget, this::setNetworkWindowPadding,
+                        this::sendApplicationWindow);
 
                 correlations.put(newCorrelationId, newHandshake);
 
@@ -447,6 +452,17 @@ public final class ClientStreamFactory implements StreamFactory
             }
         }
 
+        private void sendApplicationWindow()
+        {
+            final int applicationWindowCredit = networkWindowBudget - applicationWindowBudget;
+
+            if (applicationWindowCredit > 0)
+            {
+                applicationWindowBudget += applicationWindowCredit;
+                doWindow(applicationThrottle, applicationId, applicationWindowCredit, applicationWindowPadding);
+            }
+        }
+
         private void handleWindow(
             final WindowFW window)
         {
@@ -474,6 +490,26 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 doReset(applicationThrottle, applicationId);
             }
+        }
+
+        int getNetworkWindowBudget()
+        {
+            return networkWindowBudget;
+        }
+
+        int getNetworkWindowPadding()
+        {
+            return networkWindowPadding;
+        }
+
+        void setNetworkWindowBudget(int networkWindowBudget)
+        {
+            this.networkWindowBudget = networkWindowBudget;
+        }
+
+        void setNetworkWindowPadding(int networkWindowPadding)
+        {
+            this.networkWindowPadding = networkWindowPadding;
         }
     }
 
@@ -504,12 +540,15 @@ public final class ClientStreamFactory implements StreamFactory
         private Consumer<WindowFW> windowHandler;
         private BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler;
 
-        private int networkWindowBudget;
-        private int networkWindowPadding;
+        IntSupplier networkReplyWindowBudgetSupplier;
+        IntSupplier networkReplyWindowPaddingSupplier;
+        IntConsumer networkReplyWindowBudgetConsumer;
 
-        Supplier<Integer> networkReplyWindowBudgetSupplier;
-        Supplier<Integer> networkReplyWindowPaddingSupplier;
-        Consumer<Integer> networkReplyWindowBudgetConsumer;
+        IntSupplier networkWindowBudgetSupplier;
+        IntSupplier networkWindowPaddingSupplier;
+        IntConsumer networkWindowBudgetConsumer;
+        IntConsumer networkWindowPaddingConsumer;
+        Runnable sendApplicationWindow;
 
         private ClientHandshake(
             SSLEngine tlsEngine,
@@ -522,7 +561,12 @@ public final class ClientStreamFactory implements StreamFactory
             MessageConsumer networkThrottle,
             MessageConsumer applicationThrottle,
             long applicationId,
-            Runnable networkReplyDoneHandler)
+            Runnable networkReplyDoneHandler,
+            IntSupplier networkWindowBudgetSupplier,
+            IntSupplier networkWindowPaddingSupplier,
+            IntConsumer networkWindowBudgetConsumer,
+            IntConsumer networkWindowPaddingConsumer,
+            Runnable sendApplicationWindow)
         {
             this.tlsEngine = tlsEngine;
             this.networkName = networkName;
@@ -537,6 +581,11 @@ public final class ClientStreamFactory implements StreamFactory
             this.applicationThrottle = applicationThrottle;
             this.applicationId = applicationId;
             this.networkReplyDoneHandler = networkReplyDoneHandler;
+            this.networkWindowBudgetSupplier = networkWindowBudgetSupplier;
+            this.networkWindowPaddingSupplier = networkWindowPaddingSupplier;
+            this.networkWindowBudgetConsumer = networkWindowBudgetConsumer;
+            this.networkWindowPaddingConsumer = networkWindowPaddingConsumer;
+            this.sendApplicationWindow = sendApplicationWindow;
         }
 
         @Override
@@ -549,9 +598,9 @@ public final class ClientStreamFactory implements StreamFactory
             MessageConsumer networkReplyThrottle,
             long networkReplyId,
             BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler,
-            Supplier<Integer> networkReplyWindowBudgetSupplier,
-            Supplier<Integer> networkReplyWindowPaddingSupplier,
-            Consumer<Integer> networkReplyWindowBudgetConsumer)
+            IntSupplier networkReplyWindowBudgetSupplier,
+            IntSupplier networkReplyWindowPaddingSupplier,
+            IntConsumer networkReplyWindowBudgetConsumer)
         {
             this.networkReplyThrottle = networkReplyThrottle;
             this.networkReplyId = networkReplyId;
@@ -562,11 +611,13 @@ public final class ClientStreamFactory implements StreamFactory
             this.networkReplyWindowBudgetConsumer = networkReplyWindowBudgetConsumer;
 
             statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
-            System.out.printf("3.window(%d, %d)\n", networkReplyWindowBudgetSupplier.get(),
-                    networkReplyWindowPaddingSupplier.get());
+//            System.out.printf("3.window(%d, %d)\n", networkReplyWindowBudgetSupplier.getAsInt(),
+//                    networkReplyWindowPaddingSupplier.getAsInt());
 
-            doWindow(networkReplyThrottle, networkReplyId, networkReplyWindowBudgetSupplier.get(),
-                    networkReplyWindowPaddingSupplier.get());
+//            networkReplyWindowBudgetConsumer.accept(networkReplyWindowBudgetSupplier.getAsInt() + handshakeWindowBytes);
+//
+//            doWindow(networkReplyThrottle, networkReplyId, networkReplyWindowBudgetSupplier.getAsInt(),
+//                    networkReplyWindowPaddingSupplier.getAsInt());
         }
 
         private MessageConsumer doBeginApplicationReply(
@@ -583,7 +634,8 @@ public final class ClientStreamFactory implements StreamFactory
 
             router.setThrottle(networkName, networkId, networkThrottle);
 
-            doWindow(networkThrottle, networkId, networkWindowBudget, networkWindowPadding);
+            //doWindow(networkThrottle, networkId, networkWindowBudgetSupplier.getAsInt(), networkWindowPaddingSupplier.getAsInt());
+            sendApplicationWindow.run();
 
             return applicationReply;
         }
@@ -613,15 +665,15 @@ public final class ClientStreamFactory implements StreamFactory
         private void beforeNetworkReply(
             WindowFW window)
         {
-            this.networkWindowBudget += window.credit();
-            this.networkWindowPadding = window.padding();
+            networkWindowBudgetConsumer.accept(networkWindowBudgetSupplier.getAsInt()+window.credit());
+            networkWindowPaddingConsumer.accept(window.padding());
         }
 
         private void afterNetworkReply(
             WindowFW window)
         {
-            this.networkWindowBudget += window.credit();
-            this.networkWindowPadding = window.padding();
+            networkWindowBudgetConsumer.accept(networkWindowBudgetSupplier.getAsInt()+window.credit());
+            networkWindowPaddingConsumer.accept(window.padding());
 
             statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
         }
@@ -680,9 +732,9 @@ public final class ClientStreamFactory implements StreamFactory
             try
             {
 System.out.printf("DATA (length=%d budget=%d padding=%d\n", data.length(),
-        networkReplyWindowBudgetSupplier.get(), networkReplyWindowPaddingSupplier.get());
+        networkReplyWindowBudgetSupplier.getAsInt(), networkReplyWindowPaddingSupplier.getAsInt());
                 if (networkReplySlot == NO_SLOT
-                        || data.length() + networkReplyWindowPaddingSupplier.get() > networkReplyWindowBudgetSupplier.get())
+                        || data.length() + networkReplyWindowPaddingSupplier.getAsInt() > networkReplyWindowBudgetSupplier.getAsInt())
                 {
                     doReset(networkReplyThrottle, networkReplyId);
                     doCloseOutbound(tlsEngine, networkTarget, networkId, networkAuthorization, networkReplyDoneHandler);
@@ -690,7 +742,7 @@ System.out.printf("DATA (length=%d budget=%d padding=%d\n", data.length(),
                 else
                 {
                     networkReplyWindowBudgetConsumer.accept(
-                            networkReplyWindowBudgetSupplier.get() - data.length() - networkReplyWindowPaddingSupplier.get());
+                            networkReplyWindowBudgetSupplier.getAsInt() - data.length() - networkReplyWindowPaddingSupplier.getAsInt());
                     final OctetsFW payload = data.payload();
                     final int payloadSize = payload.sizeof();
 
@@ -728,13 +780,13 @@ System.out.printf("DATA (length=%d budget=%d padding=%d\n", data.length(),
                     }
 
                     networkReplyWindowBudgetConsumer.accept(
-                            networkReplyWindowBudgetSupplier.get() + data.length() + networkReplyWindowPaddingSupplier.get());
+                            networkReplyWindowBudgetSupplier.getAsInt() + data.length() + networkReplyWindowPaddingSupplier.getAsInt());
 
 System.out.printf("4.window(%d, %d)\n",
-        data.length() + networkReplyWindowPaddingSupplier.get(), networkReplyWindowPaddingSupplier.get());
+        data.length() + networkReplyWindowPaddingSupplier.getAsInt(), networkReplyWindowPaddingSupplier.getAsInt());
 
                     doWindow(networkReplyThrottle, networkReplyId,
-                            data.length() + networkReplyWindowPaddingSupplier.get(), networkReplyWindowPaddingSupplier.get());
+                            data.length() + networkReplyWindowPaddingSupplier.getAsInt(), networkReplyWindowPaddingSupplier.getAsInt());
                 }
             }
             catch (SSLException ex)
@@ -784,7 +836,7 @@ System.out.printf("4.window(%d, %d)\n",
             final int bytesProduced = result.bytesProduced();
             if (bytesProduced != 0)
             {
-                networkWindowBudget -= bytesProduced + networkWindowPadding;
+                networkWindowBudgetConsumer.accept(networkWindowBudgetSupplier.getAsInt() - bytesProduced - networkWindowPaddingSupplier.getAsInt() );
             }
         }
     }
@@ -902,6 +954,8 @@ System.out.printf("4.window(%d, %d)\n",
                 this.networkReplyDoneHandler = handshake.networkReplyDoneHandler;
 
                 networkReplyWindowBudget += handshakeWindowBytes;
+                doWindow(networkReplyThrottle, networkReplyId, networkReplyWindowBudget, networkReplyWindowPadding);
+
                 handshake.onNetworkReply(networkReplyThrottle, networkReplyId, this::handleStatus,
                         this::getNetworkReplyWindowBudget, this::getNetworkReplyWindowPadding,
                         this::setNetworkReplyWindowBudget);
