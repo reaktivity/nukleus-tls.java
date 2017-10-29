@@ -56,7 +56,7 @@
     <nukleus.plugin.version>0.14</nukleus.plugin.version>
     <nukleus.version>0.12</nukleus.version>
 
-    <nukleus.tls.spec.version>develop-SNAPSHOT</nukleus.tls.spec.version>
+    <nukleus.tls.spec.version>0.14</nukleus.tls.spec.version>
     <reaktor.version>0.31</reaktor.version>
   </properties>
 
