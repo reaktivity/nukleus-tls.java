@@ -64,6 +64,80 @@ public class ClientIT
 
     @Test
     @Specification({
+            "${route}/client.alpn/controller",
+            "${client}/connection.established.with.alpn/client",
+            "${server}/connection.established.with.alpn/server" })
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldEstablishConnectionWithAlpn() throws Exception
+    {
+        k3po.finish();
+    }
+
+    /*
+     * No route for protocol2, route for null protocol
+     * > BEGIN=protocol2
+     * negotiates successfully without ALPN, so protocol == "" => null
+     * need to reverify route still matches with negotiated protocol
+     * < BEGIN=null
+     */
+    @Test
+    @Specification({
+            "${route}/client/controller",
+            "${client}/connection.established.with.alpn/client",
+            "${server}/connection.established/server" })
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldNegotiateWithNoALPNAsNoProtocolRouteExists() throws Exception
+    {
+        k3po.finish();
+    }
+
+    /*
+     * only one route, for protocol2
+     * > BEGIN=protocol2
+     * negotiates successfully without ALPN, so protocol == "" => null
+     * need to reverify route still matches with negotiated protocol
+     * < RESET
+     */
+    @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
+    @Test
+    @Specification({
+            "${route}/client.alpn/controller",
+            "${client}/connection.established.with.alpn/client",
+            "${server}/connection.established/server" })
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldFailNoALPNNoDefaultRoute() throws Exception
+    {
+        k3po.finish();
+    }
+
+    /*
+     * two routes, one for protocol2, one for null, both to same target + targetRef
+     * > BEGIN=protocol2
+     * negotiates successfully without ALPN, so protocol == "" => null
+     * need to reverify route target + targetRef still matches with negotiated protocol
+     * < BEGIN=null
+     */
+    @Test
+    @Specification({
+            "${route}/client.alpn.default/controller",
+            "${client}/connection.established.with.alpn/client",
+            "${server}/connection.established/server" })
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldSucceedNoALPNDefaultRoute() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
         "${route}/client/controller",
         "${client}/connection.established/client",
         "${server}/connection.established/server" })

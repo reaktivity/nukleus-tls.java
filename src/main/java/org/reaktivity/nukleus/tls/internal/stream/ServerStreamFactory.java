@@ -329,6 +329,8 @@ public final class ServerStreamFactory implements StreamFactory
                 this.networkReplyId = newNetworkReplyId;
                 this.handshake = newHandshake;
 
+                tlsEngine.setHandshakeApplicationProtocolSelector(this::selectApplicationProtocol);
+
                 tlsEngine.beginHandshake();
             }
             catch (SSLException ex)
@@ -336,6 +338,49 @@ public final class ServerStreamFactory implements StreamFactory
                 doReset(networkThrottle, networkId);
                 doAbort(networkReply, networkReplyId, 0L);
             }
+        }
+
+        private String selectApplicationProtocol(
+            SSLEngine tlsEngine,
+            List<String> clientProtocols)
+        {
+            final MessagePredicate alpnFilter = (t, b, o, l) ->
+            {
+                final RouteFW route = routeRO.wrap(b, o, l);
+                if (networkRef == route.sourceRef() && networkReplyName.equals(route.source().asString()))
+                {
+                    ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getHandshakeSession();
+
+                    List<SNIServerName> sniServerNames = tlsSession.getRequestedServerNames();
+                    String peerHost = null;
+                    if (sniServerNames.size() > 0)
+                    {
+                        SNIHostName sniHostName = (SNIHostName) sniServerNames.get(0);
+                        peerHost = sniHostName.getAsciiName();
+                    }
+
+                    final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+                    final String routeHostname = routeEx.hostname().asString();
+                    final String routeProtocol = routeEx.applicationProtocol().asString();
+
+                    if (routeHostname == null || Objects.equals(peerHost, routeHostname))
+                    {
+                        return routeProtocol == null || clientProtocols.contains(routeProtocol);
+                    }
+                }
+                return false;
+            };
+
+            RouteFW route = router.resolve(authorization, alpnFilter, wrapRoute);
+            if (route != null)
+            {
+                final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+                String applicationProtocol = routeEx.applicationProtocol().asString();
+                // If the route is default (i.e. no application protocol), need to behave as if there is no ALPN
+                // So return an empty String to opt out ALPN negotiation
+                return applicationProtocol == null ? "" : applicationProtocol;
+            }
+            return null;
         }
 
         private void afterHandshake(
@@ -588,23 +633,32 @@ public final class ServerStreamFactory implements StreamFactory
             ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getSession();
             List<SNIServerName> sniServerNames = tlsSession.getRequestedServerNames();
 
-            String peerHost0 = null;
+            String tlsHostname0 = null;
             if (sniServerNames.size() > 0)
             {
                 SNIHostName sniHostName = (SNIHostName) sniServerNames.get(0);
-                peerHost0 = sniHostName.getAsciiName();
+                tlsHostname0 = sniHostName.getAsciiName();
             }
-            String peerHost = peerHost0;
+            String tlsHostname = tlsHostname0;
+
+            String tlsApplicationProtocol0 = tlsEngine.getApplicationProtocol();
+            if (tlsApplicationProtocol0 != null && tlsApplicationProtocol0.isEmpty())
+            {
+                tlsApplicationProtocol0 = null;
+            }
+            final String tlsApplicationProtocol = tlsApplicationProtocol0;
 
             final MessagePredicate filter = (t, b, o, l) ->
             {
                 final RouteFW route = routeRO.wrap(b, o, l);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 final String hostname = routeEx.hostname().asString();
+                final String applicationProtocol = routeEx.applicationProtocol().asString();
 
                 return networkRef == route.sourceRef() &&
                         networkReplyName.equals(route.source().asString()) &&
-                        (hostname == null || Objects.equals(peerHost, hostname));
+                        (hostname == null || Objects.equals(tlsHostname, hostname)) &&
+                        (applicationProtocol == null || Objects.equals(tlsApplicationProtocol, applicationProtocol));
             };
 
             final RouteFW route = router.resolve(authorization, filter, wrapRoute);
@@ -613,17 +667,15 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final String applicationName = route.target().asString();
                 final MessageConsumer applicationTarget = router.supplyTarget(applicationName);
-
-                final TlsRouteExFW tlsRouteEx = route.extension().get(tlsRouteExRO::wrap);
-                final String tlsHostname = tlsRouteEx.hostname().asString();
+                final long applicationRef = route.targetRef();
 
                 final long newCorrelationId = supplyCorrelationId.getAsLong();
                 correlations.put(newCorrelationId, handshake);
 
                 final long newApplicationId = supplyStreamId.getAsLong();
-                final long applicationRef = route.targetRef();
 
-                doTlsBegin(applicationTarget, newApplicationId, authorization, applicationRef, newCorrelationId, tlsHostname);
+                doTlsBegin(applicationTarget, newApplicationId, authorization, applicationRef, newCorrelationId,
+                    tlsHostname, tlsApplicationProtocol);
                 router.setThrottle(applicationName, newApplicationId, this::handleThrottle);
 
                 handshake.onFinished();
@@ -1395,7 +1447,8 @@ public final class ServerStreamFactory implements StreamFactory
         long authorization,
         long connectRef,
         long correlationId,
-        String hostname)
+        String hostname,
+        String applicationProtocol)
     {
         final BeginFW begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                                      .streamId(connectId)
@@ -1403,20 +1456,22 @@ public final class ServerStreamFactory implements StreamFactory
                                      .source("tls")
                                      .sourceRef(connectRef)
                                      .correlationId(correlationId)
-                                     .extension(e -> e.set(visitTlsBeginEx(hostname)))
+                                     .extension(e -> e.set(visitTlsBeginEx(hostname, applicationProtocol)))
                                      .build();
 
         connect.accept(begin.typeId(), begin.buffer(), begin.offset(), begin.sizeof());
     }
 
     private Flyweight.Builder.Visitor visitTlsBeginEx(
-        String hostname)
+        String hostname,
+        String applicationProtocol)
     {
         return (buffer, offset, limit) ->
             tlsBeginExRW.wrap(buffer, offset, limit)
-                       .hostname(hostname)
-                       .build()
-                       .sizeof();
+                        .hostname(hostname)
+                        .applicationProtocol(applicationProtocol)
+                        .build()
+                        .sizeof();
     }
 
     private void doBegin(
