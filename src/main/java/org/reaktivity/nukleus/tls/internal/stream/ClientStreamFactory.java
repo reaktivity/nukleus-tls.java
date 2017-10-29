@@ -611,13 +611,6 @@ public final class ClientStreamFactory implements StreamFactory
             this.networkReplyWindowBudgetConsumer = networkReplyWindowBudgetConsumer;
 
             statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
-//            System.out.printf("3.window(%d, %d)\n", networkReplyWindowBudgetSupplier.getAsInt(),
-//                    networkReplyWindowPaddingSupplier.getAsInt());
-
-//            networkReplyWindowBudgetConsumer.accept(networkReplyWindowBudgetSupplier.getAsInt() + handshakeWindowBytes);
-//
-//            doWindow(networkReplyThrottle, networkReplyId, networkReplyWindowBudgetSupplier.getAsInt(),
-//                    networkReplyWindowPaddingSupplier.getAsInt());
         }
 
         private MessageConsumer doBeginApplicationReply(
@@ -731,8 +724,6 @@ public final class ClientStreamFactory implements StreamFactory
 
             try
             {
-System.out.printf("DATA (length=%d budget=%d padding=%d\n", data.length(),
-        networkReplyWindowBudgetSupplier.getAsInt(), networkReplyWindowPaddingSupplier.getAsInt());
                 if (networkReplySlot == NO_SLOT
                         || data.length() + networkReplyWindowPaddingSupplier.getAsInt() > networkReplyWindowBudgetSupplier.getAsInt())
                 {
@@ -781,9 +772,6 @@ System.out.printf("DATA (length=%d budget=%d padding=%d\n", data.length(),
 
                     networkReplyWindowBudgetConsumer.accept(
                             networkReplyWindowBudgetSupplier.getAsInt() + data.length() + networkReplyWindowPaddingSupplier.getAsInt());
-
-System.out.printf("4.window(%d, %d)\n",
-        data.length() + networkReplyWindowPaddingSupplier.getAsInt(), networkReplyWindowPaddingSupplier.getAsInt());
 
                     doWindow(networkReplyThrottle, networkReplyId,
                             data.length() + networkReplyWindowPaddingSupplier.getAsInt(), networkReplyWindowPaddingSupplier.getAsInt());
@@ -954,6 +942,7 @@ System.out.printf("4.window(%d, %d)\n",
                 this.networkReplyDoneHandler = handshake.networkReplyDoneHandler;
 
                 networkReplyWindowBudget += handshakeWindowBytes;
+                networkReplyWindowPadding = handshakeWindowBytes/2;
                 doWindow(networkReplyThrottle, networkReplyId, networkReplyWindowBudget, networkReplyWindowPadding);
 
                 handshake.onNetworkReply(networkReplyThrottle, networkReplyId, this::handleStatus,
@@ -992,8 +981,6 @@ System.out.printf("4.window(%d, %d)\n",
 
             try
             {
-                System.out.printf("length=%d networkReplyWindowPadding=%d networkReplyWindowBudget=%d\n",
-                        data.length(), networkReplyWindowPadding, networkReplyWindowBudget);
                 if (networkReplySlot == NO_SLOT || data.length() + networkReplyWindowPadding > networkReplyWindowBudget)
                 {
                     tlsEngine.closeInbound();
@@ -1084,7 +1071,6 @@ System.out.printf("4.window(%d, %d)\n",
                                 if (networkWindowBytesUpdate > 0)
                                 {
                                     networkReplyWindowBudget += networkWindowBytesUpdate;
-                                    System.out.printf("window (%d, %d)\n", networkWindowBytesUpdate, networkReplyWindowPadding);
                                     doWindow(networkReplyThrottle, networkReplyId, networkWindowBytesUpdate,
                                             networkReplyWindowPadding);
                                 }
@@ -1178,10 +1164,6 @@ System.out.printf("4.window(%d, %d)\n",
                         outNetByteBuffer.rewind();
                         SSLEngineResult result = tlsEngine.wrap(EMPTY_BYTE_BUFFER, outNetByteBuffer);
                         resultHandler.accept(result);
-//                        if (result.bytesProduced() > 0)
-//                        {
-//                        networkWindowBudget -= result.bytesProduced() + networkWindowPadding;
-//                        }
                         flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId, networkAuthorization,
                                 networkReplyDoneHandler);
                         status = result.getHandshakeStatus();
@@ -1319,7 +1301,6 @@ System.out.printf("4.window(%d, %d)\n",
 
             final int networkWindowCredit = applicationReplyWindowBudget - networkReplyWindowBudget;
 
-            System.out.printf("2.window(%d, %d)\n", networkWindowCredit, networkReplyWindowPadding);
             if (networkWindowCredit > 0)
             {
                 networkReplyWindowBudget += Math.max(networkWindowCredit, 0);
@@ -1504,7 +1485,7 @@ System.out.printf("4.window(%d, %d)\n",
         SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
         if (result.bytesProduced() > 0)
         {
-//            networkWindowBudget -= result.bytesProduced() + networkWindowPadding;
+            // networkWindowBudget -= result.bytesProduced() + networkWindowPadding;
         }
         flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId, authorization,
                 networkReplyDoneHandler);
