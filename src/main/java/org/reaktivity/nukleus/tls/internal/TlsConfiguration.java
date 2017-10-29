@@ -23,9 +23,7 @@ public class TlsConfiguration extends Configuration
 
     public static final String HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME = "nukleus.tls.handshake.window.frames";
 
-    public static final int HANDSHAKE_WINDOW_BYTES_DEFAULT = 8192;
-
-    public static final int HANDSHAKE_WINDOW_FRAMES_DEFAULT = 8192;
+    public static final int HANDSHAKE_WINDOW_BYTES_DEFAULT = 65536;
 
     public TlsConfiguration(
         Configuration config)
@@ -38,8 +36,4 @@ public class TlsConfiguration extends Configuration
         return getInteger(HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME, HANDSHAKE_WINDOW_BYTES_DEFAULT);
     }
 
-    public int handshakeWindowFrames()
-    {
-        return getInteger(HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME, HANDSHAKE_WINDOW_FRAMES_DEFAULT);
-    }
 }
