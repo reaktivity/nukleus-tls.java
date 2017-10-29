@@ -29,7 +29,6 @@ import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
-import java.util.function.Supplier;
 
 import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SSLContext;
@@ -627,7 +626,6 @@ public final class ClientStreamFactory implements StreamFactory
 
             router.setThrottle(networkName, networkId, networkThrottle);
 
-            //doWindow(networkThrottle, networkId, networkWindowBudgetSupplier.getAsInt(), networkWindowPaddingSupplier.getAsInt());
             sendApplicationWindow.run();
 
             return applicationReply;
@@ -724,8 +722,11 @@ public final class ClientStreamFactory implements StreamFactory
 
             try
             {
+                final int networkReplyWindowPadding = networkReplyWindowPaddingSupplier.getAsInt();
+                final int networkReplyWindowBudget = networkReplyWindowBudgetSupplier.getAsInt();
+
                 if (networkReplySlot == NO_SLOT
-                        || data.length() + networkReplyWindowPaddingSupplier.getAsInt() > networkReplyWindowBudgetSupplier.getAsInt())
+                        || data.length() + networkReplyWindowPadding > networkReplyWindowBudget)
                 {
                     doReset(networkReplyThrottle, networkReplyId);
                     doCloseOutbound(tlsEngine, networkTarget, networkId, networkAuthorization, networkReplyDoneHandler);
@@ -733,7 +734,7 @@ public final class ClientStreamFactory implements StreamFactory
                 else
                 {
                     networkReplyWindowBudgetConsumer.accept(
-                            networkReplyWindowBudgetSupplier.getAsInt() - data.length() - networkReplyWindowPaddingSupplier.getAsInt());
+                            networkReplyWindowBudget - data.length() - networkReplyWindowPadding);
                     final OctetsFW payload = data.payload();
                     final int payloadSize = payload.sizeof();
 
@@ -770,11 +771,11 @@ public final class ClientStreamFactory implements StreamFactory
                         }
                     }
 
-                    networkReplyWindowBudgetConsumer.accept(
-                            networkReplyWindowBudgetSupplier.getAsInt() + data.length() + networkReplyWindowPaddingSupplier.getAsInt());
+                    networkReplyWindowBudgetConsumer.accept(networkReplyWindowBudgetSupplier.getAsInt() +
+                            data.length() + networkReplyWindowPaddingSupplier.getAsInt());
 
-                    doWindow(networkReplyThrottle, networkReplyId,
-                            data.length() + networkReplyWindowPaddingSupplier.getAsInt(), networkReplyWindowPaddingSupplier.getAsInt());
+                    doWindow(networkReplyThrottle, networkReplyId, data.length() +
+                            networkReplyWindowPaddingSupplier.getAsInt(), networkReplyWindowPaddingSupplier.getAsInt());
                 }
             }
             catch (SSLException ex)
@@ -824,7 +825,9 @@ public final class ClientStreamFactory implements StreamFactory
             final int bytesProduced = result.bytesProduced();
             if (bytesProduced != 0)
             {
-                networkWindowBudgetConsumer.accept(networkWindowBudgetSupplier.getAsInt() - bytesProduced - networkWindowPaddingSupplier.getAsInt() );
+                final int networkWindowBudget = networkWindowBudgetSupplier.getAsInt();
+                final int networkWindowPadding = networkWindowPaddingSupplier.getAsInt();
+                networkWindowBudgetConsumer.accept(networkWindowBudget - bytesProduced - networkWindowPadding);
             }
         }
     }
