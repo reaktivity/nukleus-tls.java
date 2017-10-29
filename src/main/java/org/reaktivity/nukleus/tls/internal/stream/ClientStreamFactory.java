@@ -945,7 +945,7 @@ public final class ClientStreamFactory implements StreamFactory
                 this.networkReplyDoneHandler = handshake.networkReplyDoneHandler;
 
                 networkReplyWindowBudget += handshakeWindowBytes;
-                networkReplyWindowPadding = handshakeWindowBytes/2;
+                networkReplyWindowPadding = handshakeWindowBytes/3;
                 doWindow(networkReplyThrottle, networkReplyId, networkReplyWindowBudget, networkReplyWindowPadding);
 
                 handshake.onNetworkReply(networkReplyThrottle, networkReplyId, this::handleStatus,
