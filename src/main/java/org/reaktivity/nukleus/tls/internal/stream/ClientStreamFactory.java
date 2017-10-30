@@ -179,7 +179,7 @@ public final class ClientStreamFactory implements StreamFactory
 
             return applicationRef == route.sourceRef() &&
                     applicationName.equals(route.source().asString()) &&
-                    (hostname == null || Objects.equals(tlsHostname, hostname)) &&
+                    (tlsHostname == null || Objects.equals(tlsHostname, hostname)) &&
                     applicationProtocol == null;
         };
 
