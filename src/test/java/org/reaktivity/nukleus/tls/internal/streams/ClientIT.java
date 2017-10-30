@@ -75,6 +75,19 @@ public class ClientIT
         k3po.finish();
     }
 
+    @Test
+    @Specification({
+            "${route}/client/controller",
+            "${client}/connection.established.no.hostname.no.alpn/client",
+            "${server}/connection.established.no.hostname.no.alpn/server" })
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldEstablishConnectionWithNoHostnameNoAlpn() throws Exception
+    {
+        k3po.finish();
+    }
+
     /*
      * No route for protocol2, route for null protocol
      * > BEGIN=protocol2
