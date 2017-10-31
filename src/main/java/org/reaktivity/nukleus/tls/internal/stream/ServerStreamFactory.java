@@ -1257,6 +1257,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                 this.networkReplyWindowBudget = handshake.networkReplyWindowBudget;
                 this.networkReplyWindowPadding = handshake.networkReplyWindowPadding;
+                this.applicationReplyWindowPadding = networkReplyWindowPadding + MAXIMUM_HEADER_SIZE;
                 handshake.setNetworkThrottle(this::handleThrottle);
                 sendApplicationReplyWindow();
                 handshake.setNetworkReplyDoneHandler(this::handleNetworkReplyDone);
