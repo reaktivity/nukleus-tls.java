@@ -482,7 +482,7 @@ public final class ServerStreamFactory implements StreamFactory
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset);
 
                     loop:
-                    while (inNetByteBuffer.hasRemaining())
+                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
                         final ByteBuffer outAppByteBuffer = applicationPool.byteBuffer(applicationSlot);
                         outAppByteBuffer.position(outAppByteBuffer.position() + applicationSlotOffset);
@@ -989,7 +989,7 @@ public final class ServerStreamFactory implements StreamFactory
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset + payloadSize);
 
                     loop:
-                    while (inNetByteBuffer.hasRemaining())
+                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
                         outAppByteBuffer.rewind();
                         HandshakeStatus handshakeStatus = NOT_HANDSHAKING;

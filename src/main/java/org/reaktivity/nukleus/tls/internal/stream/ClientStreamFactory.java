@@ -799,7 +799,7 @@ public final class ClientStreamFactory implements StreamFactory
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset + payloadSize);
 
                     loop:
-                    while (inNetByteBuffer.hasRemaining())
+                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
                         outAppByteBuffer.rewind();
                         SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
@@ -1101,7 +1101,7 @@ public final class ClientStreamFactory implements StreamFactory
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset);
 
                     loop:
-                    while (inNetByteBuffer.hasRemaining())
+                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
                         final ByteBuffer outAppByteBuffer = applicationPool.byteBuffer(applicationReplySlot);
                         outAppByteBuffer.position(outAppByteBuffer.position() + applicationReplySlotOffset);
