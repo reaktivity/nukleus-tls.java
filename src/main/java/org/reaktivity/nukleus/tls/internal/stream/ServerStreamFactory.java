@@ -823,7 +823,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             finally
             {
-                handleNetworkReplyDone();
+                doReset(networkThrottle, networkId);
             }
         }
 
