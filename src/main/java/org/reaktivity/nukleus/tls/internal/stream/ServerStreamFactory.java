@@ -482,7 +482,7 @@ public final class ServerStreamFactory implements StreamFactory
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset);
 
                     loop:
-                    while (inNetByteBuffer.hasRemaining())
+                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
                         final ByteBuffer outAppByteBuffer = applicationPool.byteBuffer(applicationSlot);
                         outAppByteBuffer.position(outAppByteBuffer.position() + applicationSlotOffset);
@@ -823,7 +823,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             finally
             {
-                handleNetworkReplyDone();
+                doReset(networkThrottle, networkId);
             }
         }
 
@@ -989,7 +989,7 @@ public final class ServerStreamFactory implements StreamFactory
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset + payloadSize);
 
                     loop:
-                    while (inNetByteBuffer.hasRemaining())
+                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
                         outAppByteBuffer.rewind();
                         HandshakeStatus handshakeStatus = NOT_HANDSHAKING;
@@ -1257,6 +1257,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                 this.networkReplyWindowBudget = handshake.networkReplyWindowBudget;
                 this.networkReplyWindowPadding = handshake.networkReplyWindowPadding;
+                this.applicationReplyWindowPadding = networkReplyWindowPadding + MAXIMUM_HEADER_SIZE;
                 handshake.setNetworkThrottle(this::handleThrottle);
                 sendApplicationReplyWindow();
                 handshake.setNetworkReplyDoneHandler(this::handleNetworkReplyDone);
