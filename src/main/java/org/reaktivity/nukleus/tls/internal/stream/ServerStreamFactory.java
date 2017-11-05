@@ -1017,7 +1017,7 @@ public final class ServerStreamFactory implements StreamFactory
                             networkSlotOffset = totalBytesRemaining;
                             break loop;
                         default:
-                            networkSlotOffset = 0;
+                            networkSlotOffset = inNetByteBuffer.remaining();
                             statusHandler.accept(handshakeStatus, this::updateNetworkWindow);
                             break;
                         }
