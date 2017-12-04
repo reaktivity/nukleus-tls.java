@@ -507,13 +507,7 @@ public final class ClientStreamFactory implements StreamFactory
         {
             networkWindowBudget += window.credit();
             networkWindowPadding = applicationWindowPadding = window.padding();
-            final int applicationWindowCredit = networkWindowBudget - applicationWindowBudget;
-
-            if (applicationWindowCredit > 0)
-            {
-                applicationWindowBudget += applicationWindowCredit;
-                doWindow(applicationThrottle, applicationId, applicationWindowCredit, applicationWindowPadding);
-            }
+            sendApplicationWindow();
         }
 
         private void handleReset(
@@ -1371,7 +1365,7 @@ public final class ClientStreamFactory implements StreamFactory
                 }
             }
 
-            final int networkWindowCredit = applicationReplyWindowBudget - networkReplyWindowBudget;
+            final int networkWindowCredit = applicationReplyWindowBudget - networkReplyWindowBudget - networkReplySlotOffset;
 
             if (networkWindowCredit > 0)
             {
