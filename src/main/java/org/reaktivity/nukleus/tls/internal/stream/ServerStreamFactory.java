@@ -1294,7 +1294,10 @@ public final class ServerStreamFactory implements StreamFactory
                     {
                         outNetByteBuffer.rewind();
                         SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                        networkReplyWindowBudget -= result.bytesProduced() + networkReplyWindowPadding;
+                        if (result.bytesProduced() > 0)
+                        {
+                            networkReplyWindowBudget -= result.bytesProduced() + networkReplyWindowPadding;
+                        }
                         flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId,
                                 data.authorization(), this::handleNetworkReplyDone);
 
@@ -1380,14 +1383,7 @@ public final class ServerStreamFactory implements StreamFactory
             networkReplyWindowBudget += window.credit();
             networkReplyWindowPadding = window.padding();
             applicationReplyWindowPadding = networkReplyWindowPadding + MAXIMUM_HEADER_SIZE;
-
-            int applicationReplyWindowCredit = networkReplyWindowBudget - applicationReplyWindowBudget;
-            if (applicationReplyWindowCredit > 0)
-            {
-                applicationReplyWindowBudget += applicationReplyWindowCredit;
-                doWindow(applicationReplyThrottle, applicationReplyId, applicationReplyWindowCredit,
-                        applicationReplyWindowPadding);
-            }
+            sendApplicationReplyWindow();
         }
 
         private void handleReset(
