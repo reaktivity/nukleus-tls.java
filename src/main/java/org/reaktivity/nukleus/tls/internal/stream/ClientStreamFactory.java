@@ -1484,6 +1484,8 @@ public final class ClientStreamFactory implements StreamFactory
         final DataFW data = dataRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
                 .authorization(authorization)
+                .groupId(0)
+                .claimed(0)
                 .payload(p -> p.set(payload.buffer(), payload.offset(), payload.sizeof()))
                 .build();
 
@@ -1526,6 +1528,7 @@ public final class ClientStreamFactory implements StreamFactory
                 .streamId(throttleId)
                 .credit(credit)
                 .padding(padding)
+                .groupId(0)
                 .build();
 
         throttle.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
