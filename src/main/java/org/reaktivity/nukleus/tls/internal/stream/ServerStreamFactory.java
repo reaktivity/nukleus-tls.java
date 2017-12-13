@@ -1503,7 +1503,7 @@ public final class ServerStreamFactory implements StreamFactory
                 .streamId(targetId)
                 .authorization(authorization)
                 .groupId(0)
-                .claimed(0)
+                .padding(0)
                 .payload(p -> p.set(payload.buffer(), payload.offset(), payload.sizeof()))
                 .build();
 
