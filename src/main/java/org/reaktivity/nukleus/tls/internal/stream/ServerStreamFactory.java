@@ -442,6 +442,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             catch (SSLException ex)
             {
+                ex.printStackTrace();
                 doReset(networkThrottle, networkId);
                 doAbort(applicationTarget, applicationId, authorization);
                 networkSlotOffset = 0;
