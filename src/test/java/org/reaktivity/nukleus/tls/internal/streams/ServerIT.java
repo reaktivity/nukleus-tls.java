@@ -209,6 +209,7 @@ public class ServerIT
     @ScriptProperty({
         "newClientAcceptRef ${newServerConnectRef}",
         "clientAccept \"nukleus://target/streams/tls#source\"" })
+    @Ignore("Race due to switch between padding=0 and padding > 0")
     public void shouldEchoPayloadLength1000k() throws Exception
     {
         k3po.finish();
