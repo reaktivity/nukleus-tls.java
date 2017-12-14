@@ -801,7 +801,7 @@ public final class ServerStreamFactory implements StreamFactory
                 }
             }
 
-            final int networkWindowCredit = applicationWindowBudget - networkWindowBudget;
+            final int networkWindowCredit = applicationWindowBudget - networkWindowBudget - networkSlotOffset;
 
             if (networkWindowCredit > 0)
             {
@@ -1498,6 +1498,8 @@ public final class ServerStreamFactory implements StreamFactory
         final DataFW data = dataRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
                 .authorization(authorization)
+                .groupId(0)
+                .padding(0)
                 .payload(p -> p.set(payload.buffer(), payload.offset(), payload.sizeof()))
                 .build();
 
@@ -1540,6 +1542,7 @@ public final class ServerStreamFactory implements StreamFactory
                 .streamId(throttleId)
                 .credit(credit)
                 .padding(padding)
+                .groupId(0)
                 .build();
 
         throttle.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
