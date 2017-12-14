@@ -1524,6 +1524,7 @@ public final class ServerStreamFactory implements StreamFactory
         final long targetId,
         final long authorization)
     {
+        Thread.dumpStack();
         final AbortFW abort = abortRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
                 .authorization(authorization)
