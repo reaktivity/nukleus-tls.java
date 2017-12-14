@@ -442,7 +442,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             catch (SSLException ex)
             {
-                ex.printStackTrace();
+new RuntimeException("networkSlot = " + networkSlot + " networkWindowBudget = " + networkWindowBudget, ex).printStackTrace();
                 doReset(networkThrottle, networkId);
                 doAbort(applicationTarget, applicationId, authorization);
                 networkSlotOffset = 0;
@@ -802,7 +802,7 @@ public final class ServerStreamFactory implements StreamFactory
                 }
             }
 
-            final int networkWindowCredit = applicationWindowBudget - networkWindowBudget;
+            final int networkWindowCredit = applicationWindowBudget - networkWindowBudget - networkSlotOffset;
 
             if (networkWindowCredit > 0)
             {
@@ -1525,7 +1525,6 @@ public final class ServerStreamFactory implements StreamFactory
         final long targetId,
         final long authorization)
     {
-        Thread.dumpStack();
         final AbortFW abort = abortRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
                 .authorization(authorization)
