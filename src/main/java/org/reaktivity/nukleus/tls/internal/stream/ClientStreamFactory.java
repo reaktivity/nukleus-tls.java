@@ -1371,9 +1371,8 @@ public final class ClientStreamFactory implements StreamFactory
 
             if (networkWindowCredit > 0)
             {
-                networkReplyWindowBudget += Math.max(networkWindowCredit, 0);
-                doWindow(networkReplyThrottle, networkReplyId,
-                         Math.max(networkWindowCredit, 0), networkReplyWindowPadding);
+                networkReplyWindowBudget += networkWindowCredit;
+                doWindow(networkReplyThrottle, networkReplyId, networkWindowCredit, networkReplyWindowPadding);
             }
         }
 
