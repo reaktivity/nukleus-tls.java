@@ -495,12 +495,12 @@ public final class ClientStreamFactory implements StreamFactory
 
         private void sendApplicationWindow()
         {
-            final int applicationWindowCredit = networkBudget - applicationBudget;
+            final int applicationCredit = networkBudget - applicationBudget;
 
-            if (applicationWindowCredit > 0)
+            if (applicationCredit > 0)
             {
-                applicationBudget += applicationWindowCredit;
-                doWindow(applicationThrottle, applicationId, applicationWindowCredit, applicationPadding);
+                applicationBudget += applicationCredit;
+                doWindow(applicationThrottle, applicationId, applicationCredit, applicationPadding);
             }
         }
 
@@ -1367,12 +1367,12 @@ public final class ClientStreamFactory implements StreamFactory
                 }
             }
 
-            final int networkWindowCredit = applicationReplyBudget - networkReplyBudget - networkReplySlotOffset;
+            final int networkCredit = applicationReplyBudget - networkReplyBudget - networkReplySlotOffset;
 
-            if (networkWindowCredit > 0)
+            if (networkCredit > 0)
             {
-                networkReplyBudget += networkWindowCredit;
-                doWindow(networkReplyThrottle, networkReplyId, networkWindowCredit, networkReplyPadding);
+                networkReplyBudget += networkCredit;
+                doWindow(networkReplyThrottle, networkReplyId, networkCredit, networkReplyPadding);
             }
         }
 

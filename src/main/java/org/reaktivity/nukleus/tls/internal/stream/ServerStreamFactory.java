@@ -507,13 +507,13 @@ public final class ServerStreamFactory implements StreamFactory
                             }
                             else
                             {
-                                final int networkWindowCredit =
+                                final int networkCredit =
                                         Math.max(networkPool.slotCapacity() - networkSlotOffset - networkBudget, 0);
 
-                                if (networkWindowCredit > 0)
+                                if (networkCredit > 0)
                                 {
-                                    networkBudget += networkWindowCredit;
-                                    doWindow(networkThrottle, networkId, networkWindowCredit, networkPadding);
+                                    networkBudget += networkCredit;
+                                    doWindow(networkThrottle, networkId, networkCredit, networkPadding);
                                 }
                             }
                             break loop;
@@ -800,12 +800,12 @@ public final class ServerStreamFactory implements StreamFactory
                 }
             }
 
-            final int networkWindowCredit = applicationBudget - networkBudget - networkSlotOffset;
+            final int networkCredit = applicationBudget - networkBudget - networkSlotOffset;
 
-            if (networkWindowCredit > 0)
+            if (networkCredit > 0)
             {
-                networkBudget += networkWindowCredit;
-                doWindow(networkThrottle, networkId, networkWindowCredit, networkPadding);
+                networkBudget += networkCredit;
+                doWindow(networkThrottle, networkId, networkCredit, networkPadding);
             }
         }
 
@@ -1372,11 +1372,11 @@ public final class ServerStreamFactory implements StreamFactory
 
         private void sendApplicationReplyWindow()
         {
-            int applicationReplyWindowCredit = networkReplyBudget - applicationReplyBudget;
-            if (applicationReplyWindowCredit > 0)
+            int applicationReplyCredit = networkReplyBudget - applicationReplyBudget;
+            if (applicationReplyCredit > 0)
             {
-                applicationReplyBudget += applicationReplyWindowCredit;
-                doWindow(applicationReplyThrottle, applicationReplyId, applicationReplyWindowCredit,
+                applicationReplyBudget += applicationReplyCredit;
+                doWindow(applicationReplyThrottle, applicationReplyId, applicationReplyCredit,
                         applicationReplyPadding);
             }
         }
