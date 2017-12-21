@@ -876,8 +876,8 @@ public final class ClientStreamFactory implements StreamFactory
             if (bytesProduced != 0)
             {
                 final int networkBudget = networkBudgetSupplier.getAsInt();
-                final int networkWindowPadding = networkPaddingSupplier.getAsInt();
-                networkBudgetConsumer.accept(networkBudget - bytesProduced - networkWindowPadding);
+                final int networkPadding = networkPaddingSupplier.getAsInt();
+                networkBudgetConsumer.accept(networkBudget - bytesProduced - networkPadding);
             }
         }
     }
@@ -913,7 +913,7 @@ public final class ClientStreamFactory implements StreamFactory
         private Runnable networkReplyDoneHandler;
         private String applicationProtocol;
         private boolean defaultRoute;
-        private IntSupplier networkWindowPaddingSupplier;
+        private IntSupplier networkPaddingSupplier;
 
         private ClientConnectReplyStream(
             MessageConsumer networkReplyThrottle,
@@ -992,7 +992,7 @@ public final class ClientStreamFactory implements StreamFactory
                 this.defaultRoute = handshake.defaultRoute;
                 this.networkTarget = handshake.networkTarget;
                 this.networkId = handshake.networkId;
-                this.networkWindowPaddingSupplier = handshake.networkPaddingSupplier;
+                this.networkPaddingSupplier = handshake.networkPaddingSupplier;
                 this.networkAuthorization = handshake.networkAuthorization;
                 this.networkReplySlot = handshake.networkReplySlot;
                 this.networkReplySlotOffset = handshake.networkReplySlotOffset;
@@ -1223,7 +1223,7 @@ public final class ClientStreamFactory implements StreamFactory
                         SSLEngineResult result = tlsEngine.wrap(EMPTY_BYTE_BUFFER, outNetByteBuffer);
                         resultHandler.accept(result);
                         flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId,
-                                networkWindowPaddingSupplier.getAsInt(), networkAuthorization, networkReplyDoneHandler);
+                                networkPaddingSupplier.getAsInt(), networkAuthorization, networkReplyDoneHandler);
                         status = result.getHandshakeStatus();
                     }
                     catch (SSLException ex)
@@ -1552,7 +1552,7 @@ public final class ClientStreamFactory implements StreamFactory
         SSLEngine tlsEngine,
         MessageConsumer networkTarget,
         long networkId,
-        int networkWindowPadding,
+        int networkPadding,
         long authorization,
         Runnable networkReplyDoneHandler) throws SSLException
     {
@@ -1563,7 +1563,7 @@ public final class ClientStreamFactory implements StreamFactory
         {
             // networkWindowBudget -= result.bytesProduced() + networkWindowPadding;
         }
-        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId, networkWindowPadding, authorization,
+        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId, networkPadding, authorization,
                 networkReplyDoneHandler);
     }
 }
