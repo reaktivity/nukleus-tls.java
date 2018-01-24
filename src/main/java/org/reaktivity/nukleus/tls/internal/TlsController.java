@@ -196,4 +196,9 @@ public final class TlsController implements Controller
                      .build()
                      .sizeof();
     }
+
+    public long count(String name)
+    {
+        return controllerSpi.doCount(name);
+    }
 }
