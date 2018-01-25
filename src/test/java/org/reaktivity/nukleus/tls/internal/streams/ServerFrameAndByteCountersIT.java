@@ -28,7 +28,7 @@ import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.nukleus.tls.internal.TlsController;
-import org.reaktivity.nukleus.tls.test.TlsCountersRule;
+import org.reaktivity.nukleus.tls.internal.test.TlsCountersRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
 
 public class ServerFrameAndByteCountersIT
