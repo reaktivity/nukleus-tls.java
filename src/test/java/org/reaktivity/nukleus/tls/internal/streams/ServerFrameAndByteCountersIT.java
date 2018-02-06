@@ -66,15 +66,15 @@ public class ServerFrameAndByteCountersIT
     {
         k3po.finish();
         long bytesRead = counters.bytesRead(0);
-        long bytesWrote = counters.bytesWrote(0);
+        long bytesWritten = counters.bytesWritten(0);
         long framesRead = counters.framesRead(0);
-        long framesWrote = counters.framesWrote(0);
+        long framesWritten = counters.framesWritten(0);
 
         // Values are not consistent across JVMs/Machines
         assertTrue(bytesRead > 10000);
-        assertTrue(bytesWrote > 10000);
+        assertTrue(bytesWritten > 10000);
         assertTrue(framesRead > 3);
-        assertTrue(framesWrote > 3);
+        assertTrue(framesWritten > 3);
     }
 
 }

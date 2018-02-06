@@ -136,7 +136,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
                 final long routeId = r.correlationId();
                 return perRouteWriteFrameCounter.computeIfAbsent(
                         routeId,
-                        t -> supplyCounter.apply(String.format("%d.frames.wrote", t)));
+                        t -> supplyCounter.apply(String.format("%d.frames.written", t)));
             };
             this.supplyReadFrameCounter = r ->
             {
@@ -160,7 +160,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
                 final long routeId = r.correlationId();
                 return perRouteWriteBytesAccumulator.computeIfAbsent(
                         routeId,
-                        t -> supplyAccumulator.apply(String.format("%d.bytes.wrote", t)));
+                        t -> supplyAccumulator.apply(String.format("%d.bytes.written", t)));
             };
             this.supplyReadBytesAccumulator = r ->
             {
