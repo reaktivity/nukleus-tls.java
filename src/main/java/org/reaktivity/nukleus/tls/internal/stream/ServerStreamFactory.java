@@ -1025,7 +1025,7 @@ public final class ServerStreamFactory implements StreamFactory
                     doWindow(networkThrottle, networkId, data.length(), networkPaddingSupplier.getAsInt());
                 }
             }
-            catch (SSLException ex)
+            catch (SSLException | UnsupportedOperationException ex)
             {
                 networkSlotOffset = 0;
                 doReset(networkThrottle, networkId);
