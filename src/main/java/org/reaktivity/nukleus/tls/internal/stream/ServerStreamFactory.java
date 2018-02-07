@@ -82,7 +82,8 @@ public final class ServerStreamFactory implements StreamFactory
     private final AckFW.Builder ackRW = new AckFW.Builder();
 
     private final DirectBuffer view = new UnsafeBuffer(new byte[0]);
-    private final ByteBuffer inNetBuffer = allocateDirect(1000); // TODO more than 1000
+    private final ByteBuffer inNetBuffer = allocateDirect(10000); // TODO more than 1000
+    private final ByteBuffer outNetBuffer = allocateDirect(10000); // TODO more than 1000
 
     private final TlsBeginExFW.Builder tlsBeginExRW = new TlsBeginExFW.Builder();
 
