@@ -206,6 +206,7 @@ public class ServerIT
         "${route}/server/controller",
         "${client}/echo.payload.length.1000k/client",
         "${server}/echo.payload.length.1000k/server"})
+    @Ignore
     @ScriptProperty({
         "newClientAcceptRef ${newServerConnectRef}",
         "clientAccept \"nukleus://target/streams/tls#source\"" })
