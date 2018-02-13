@@ -22,6 +22,7 @@ import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_WRAP;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING;
 import static javax.net.ssl.SSLEngineResult.Status.BUFFER_UNDERFLOW;
 import static org.agrona.LangUtil.rethrowUnchecked;
+import static org.reaktivity.nukleus.tls.internal.FrameFlags.EMPTY;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.FIN;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.RST;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isEmpty;
@@ -74,8 +75,8 @@ import org.reaktivity.reaktor.internal.buffer.DefaultDirectBufferBuilder;
 
 public final class ServerStreamFactory implements StreamFactory
 {
+    public static final int TLS_MAX_HANDSHAKE_LENGTH = 0x10000;  // TODO extract to configuration
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
-    private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
     private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
     private static final Runnable NOP = () -> {};
 
@@ -235,13 +236,8 @@ public final class ServerStreamFactory implements StreamFactory
 
         private Runnable networkReplyDoneHandler = NOP;
 
-        private final int outAppMemorySlotCapacity = 100000; // TODO
-        private final long outAppMemorySlotAddress;
-        private int outAppMemorySlotUsedOffset;
-
-        private final IntArrayList regionLengths = new IntArrayList();
-        private final LongArrayList regionAddresses = new LongArrayList();
-        private final LongArrayList regionIds = new LongArrayList();
+        private final IntArrayList regionLengths = new IntArrayList(2, -2);
+        private final LongArrayList regionAddresses = new LongArrayList(2, -2);
 
         private ServerAcceptStream(
             SSLEngine tlsEngine,
@@ -256,8 +252,6 @@ public final class ServerStreamFactory implements StreamFactory
             this.authorization = authorization;
             this.networkRef = networkRef;
             this.streamState = this::beforeBegin;
-            this.outAppMemorySlotAddress = memoryManager.acquire(outAppMemorySlotCapacity);  // DPW TODO late initiation
-            this.outAppMemorySlotUsedOffset = 0;
         }
 
         private void handleStream(
@@ -311,7 +305,6 @@ public final class ServerStreamFactory implements StreamFactory
                             this::setNetworkReplyDoneHandler,
                             this.regionAddresses,
                             this.regionLengths,
-                            this.regionIds,
                             this::consumedRegions);
 
                     doBegin(networkReply, newNetworkReplyId, 0L, 0L, networkCorrelationId);
@@ -395,14 +388,6 @@ public final class ServerStreamFactory implements StreamFactory
                 final TransferFW transfer = transferRO.wrap(buffer, index, index + length);
                 handleTransfer(transfer);
                 break;
-//            case EndFW.TYPE_ID:
-//                final EndFW end = endRO.wrap(buffer, index, index + length);
-//                handleEnd(end);
-//                break;
-//            case AbortFW.TYPE_ID:
-//                final AbortFW abort = abortRO.wrap(buffer, index, index + length);
-//                handleAbort(abort);
-//                break;
             default:
                 throw new RuntimeException("Not implemented yet"); // DPW
 //                doReset(networkThrottle, networkId);
@@ -418,10 +403,9 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 regionAddresses.add(r.address());
                 regionLengths.add(r.length());
-                regionIds.add(r.streamId());
             });
 
-            processData();
+            processNetwork();
 
             final int flags = transfer.flags();
             if (isReset(flags))
@@ -434,7 +418,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void processData()
+        private void processNetwork()
         {
             if (regionAddresses.isEmpty())
             {
@@ -449,6 +433,7 @@ public final class ServerStreamFactory implements StreamFactory
                 this.regionLengths);
                 try
                 {
+                    int bytesConsumerIter = 0;
                     loop:
                     while (inNetBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
@@ -465,11 +450,12 @@ public final class ServerStreamFactory implements StreamFactory
                             break;
                         }
 
-                        handleFlushAppData(bytesProduced);
+                        int totalBytesConsumed = inNetBuffer.position();
+                        handleFlushAppData(bytesProduced, totalBytesConsumed - bytesConsumerIter);
+                        bytesConsumerIter = totalBytesConsumed;
                     }
-                    int totalBytesConsumed = inNetBuffer.position();
 
-                    doAck(networkThrottle, networkId, FrameFlags.EMPTY, consumedRegions(totalBytesConsumed));
+//                    doAck(networkThrottle, networkId, FrameFlags.EMPTY, consumedRegions(totalBytesConsumed));
                 }
                 catch (SSLException ex)
                 {
@@ -496,7 +482,7 @@ public final class ServerStreamFactory implements StreamFactory
                         b.item(r ->
                             r.address(regionAddresses.remove(0))
                              .length(regionLengths.remove(0))
-                             .streamId(regionIds.remove(0)));
+                             .streamId(networkId));
                     }
                     else
                     {
@@ -504,7 +490,7 @@ public final class ServerStreamFactory implements StreamFactory
                         int length = regionLengths.get(0);
                         b.item(r -> r.address(regionAddresses.get(0))
                                      .length(length)
-                                     .streamId(regionIds.get(0)));
+                                     .streamId(networkId));
                     }
                     toAck -= nextLength;
                 }
@@ -659,53 +645,85 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void handleFlushAppData(int bytesProduced)
+        // rewrites in place
+        // [encrpyted                              ]
+        // [emply-data-length][encrpyted][empty-data]
+        private void handleFlushAppData(
+            final int bytesProduced,
+            final int bytesConsumed)
         {
-            long unresolvedAddr = outAppMemorySlotAddress + outAppMemorySlotUsedOffset;
-            long memoryAddress = memoryManager.resolve(unresolvedAddr);
-            if (bytesProduced > 0)
+            if (bytesConsumed <= 0)
             {
-                stageInto(outAppByteBuffer, memoryAddress, 0, bytesProduced);
-                doTransfer(
-                        applicationTarget,
-                        applicationId,
-                        0L,
-                        unresolvedAddr,
-                        bytesProduced);
-                outAppMemorySlotUsedOffset += bytesProduced;
+                assert bytesProduced == 0;
+                return;
             }
-//            if (applicationSlotOffset > 0)
-//            {
-//                final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationSlot);
-//
-//                final int applicationWindow = Math.min(
-//                        applicationBudget - applicationPadding, MAXIMUM_PAYLOAD_LENGTH);
-//
-//                final int applicationBytesConsumed = Math.min(applicationSlotOffset, applicationWindow);
-//
-//                if (applicationBytesConsumed > 0)
-//                {
-//                    final OctetsFW outAppOctets = outAppOctetsRO.wrap(outAppBuffer, 0, applicationBytesConsumed);
-//
-//                    doData(applicationTarget, applicationId, applicationPadding, authorization, outAppOctets);
-//
-//                    applicationBudget -= applicationBytesConsumed + applicationPadding;
-//
-//                    applicationSlotOffset -= applicationBytesConsumed;
-//
-//                }
-//
-//                if (applicationSlotOffset != 0)
-//                {
-//                    alignSlotBuffer(outAppBuffer, applicationBytesConsumed, applicationSlotOffset);
-//                }
-//
-//            }
 
-            if (tlsEngine.isInboundDone())
+            final int metaDataLength = Short.SIZE;
+
+            final long unresolvedRegionAddr = regionAddresses.remove(0);
+            int availableLength = regionLengths.remove(0);
+
+            if (bytesConsumed < availableLength)
             {
-                doTransfer(applicationTarget, applicationId, authorization, FIN);
+                regionAddresses.add(0, unresolvedRegionAddr + bytesConsumed);
+                regionLengths.add(0, availableLength - bytesConsumed);
+                availableLength -= bytesConsumed;
             }
+
+            final long resolvedAddr = memoryManager.resolve(unresolvedRegionAddr);
+            final int toWriteTotal = Math.min(availableLength, bytesProduced + metaDataLength);
+            final int bytesToWrite = toWriteTotal - metaDataLength;
+            final short padding = (short) (availableLength - toWriteTotal);
+
+            outAppByteBuffer.flip();
+            directBufferRW.wrap(resolvedAddr, availableLength);
+            directBufferRW.putShort(0, padding);
+            directBufferRW.putBytes(metaDataLength, outAppByteBuffer, bytesToWrite);
+
+            final int remainingBytesConsumed = bytesConsumed - availableLength;
+            if (remainingBytesConsumed > 0 && bytesToWrite < bytesProduced) // wrap over
+            {
+                handleFlushAppData(bytesProduced - bytesToWrite, remainingBytesConsumed);
+            }
+            else if(remainingBytesConsumed > 0) // wrap over but only empty-data, so send as empty region
+            {
+                final long wrapAroundAddr = regionAddresses.remove(0);
+                int wrapAroundLength = regionLengths.remove(0);
+
+                if (remainingBytesConsumed < wrapAroundLength)
+                {
+                    regionAddresses.add(0, wrapAroundAddr + remainingBytesConsumed);
+                    regionLengths.add(0, wrapAroundLength - remainingBytesConsumed);
+                    wrapAroundLength -= remainingBytesConsumed;
+                }
+
+                directBufferRW.wrap(memoryManager.resolve(wrapAroundAddr), wrapAroundLength);
+                directBufferRW.putShort(0, (short) (wrapAroundLength - metaDataLength));
+
+                doTransfer(
+                    applicationTarget,
+                    applicationId,
+                    0L,
+                    b -> b.item(b2 -> b2.address(unresolvedRegionAddr + metaDataLength)
+                                        .length(bytesToWrite)
+                                        .streamId(networkId))
+                          .item(b2 -> b2.address(unresolvedRegionAddr + metaDataLength)
+                                        .length(bytesToWrite)
+                                        .streamId(networkId)));
+            }
+            else
+            {
+                doTransfer(
+                    applicationTarget,
+                    applicationId,
+                    0L,
+                    b -> b.item(b2 -> b2.address(unresolvedRegionAddr + metaDataLength)
+                            .length(bytesToWrite)
+                            .streamId(networkId)));
+            }
+
+            // TODO combine into one transfer ??
+
         }
 
         private void handleThrottle(
@@ -718,10 +736,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
             case AckFW.TYPE_ID:
                 final AckFW ack = ackRO.wrap(buffer, index, index + length);
-                if (!ack.regions().isEmpty())
-                {
-                    ackRegions(ack);
-                }
+                handleRegions(ack.regions());
                 if (isReset(ack.flags()))
                 {
                     handleReset();
@@ -734,61 +749,11 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void ackRegions(AckFW ack)
+        private void handleRegions(ListFW<RegionFW> regions)
         {
-            // TODO
+
         }
 
-        private void handleWindow()
-        {
-//            applicationBudget += window.credit();
-//            applicationPadding = networkPadding = window.padding();
-//
-//            if (applicationSlotOffset != 0)
-//            {
-//                try
-//                {
-//                    handleFlushAppData();
-//                }
-//                finally
-//                {
-//                    if (applicationSlotOffset == 0)
-//                    {
-//                        applicationPool.release(applicationSlot);
-//                        applicationSlot = NO_SLOT;
-//                    }
-//                }
-//            }
-//
-//            if (networkSlotOffset != 0)
-//            {
-//                try
-//                {
-//                    unwrapNetworkBufferData();
-//                }
-//                catch (SSLException ex)
-//                {
-//                    doReset(networkThrottle, networkId);
-//                    doAbort(applicationTarget, applicationId, authorization);
-//                }
-//                finally
-//                {
-//                    if (networkSlotOffset == 0)
-//                    {
-//                        networkPool.release(networkSlot);
-//                        networkSlot = NO_SLOT;
-//                    }
-//                }
-//            }
-//
-//            final int networkCredit = applicationBudget - networkBudget - networkSlotOffset;
-//
-//            if (networkCredit > 0)
-//            {
-//                networkBudget += networkCredit;
-//                doWindow(networkThrottle, networkId, networkCredit, networkPadding);
-//            }
-        }
 
         private void handleReset()
         {
@@ -841,16 +806,17 @@ public final class ServerStreamFactory implements StreamFactory
         private final long networkReplyId;
         private final Runnable networkReplyDoneHandler;
         private final Consumer<Runnable> networkReplyDoneHandlerConsumer;
-        private final int outNetworkMemorySlotCapacity;
         private final long outNetworkMemorySlotAddress;
         private int outNetworkMemorySlotUsedOffset;
 
         private final LongArrayList regionAddresses;
         private final IntArrayList regionLengths;
-        private final LongArrayList regionIds;
         private final AckedRegionBuilder ackRegionBuilder;
 
+        private int outstandingNetworkBytes = 0;
+
         private Consumer<AckFW> resetHandler;
+        private Consumer<RegionFW> ackRegionHandler;
 
         private ServerHandshake(
             SSLEngine tlsEngine,
@@ -864,7 +830,6 @@ public final class ServerStreamFactory implements StreamFactory
             Consumer<Runnable> networkReplyDoneHandlerConsumer,
             LongArrayList regionAddresses,
             IntArrayList regionLengths,
-            LongArrayList regionIds,
             AckedRegionBuilder ackRegionBuilder)
         {
             this.tlsEngine = tlsEngine;
@@ -879,20 +844,46 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkReplyId = networkReplyId;
             this.networkReplyDoneHandlerConsumer = networkReplyDoneHandlerConsumer;
 
-            this.outNetworkMemorySlotCapacity = 100000; // DPW TODO
-            this.outNetworkMemorySlotAddress = memoryManager.acquire(outNetworkMemorySlotCapacity);
+            this.outNetworkMemorySlotAddress = memoryManager.acquire(TLS_MAX_HANDSHAKE_LENGTH);
             this.outNetworkMemorySlotUsedOffset = 0;
 
             this.regionAddresses = regionAddresses;
             this.regionLengths = regionLengths;
-            this.regionIds = regionIds;
             this.ackRegionBuilder = ackRegionBuilder;
+            this.ackRegionHandler = r ->
+            {
+                if (r.streamId() == networkId)
+                {
+                    outstandingNetworkBytes -= r.length();
+                }
+            };
         }
 
         private void onFinished()
         {
-            // DPW TODO, need to be acked first...
-            memoryManager.release(outNetworkMemorySlotAddress, outNetworkMemorySlotCapacity);
+            if (outstandingNetworkBytes != 0)
+            {
+                this.ackRegionHandler = r ->
+                {
+                    outstandingNetworkBytes -= r.length();
+                    if (outstandingNetworkBytes == 0)
+                    {
+                        memoryManager.release(outNetworkMemorySlotAddress, TLS_MAX_HANDSHAKE_LENGTH);
+                        this.ackRegionHandler = i ->
+                        {
+                            /*NOOP*/
+                        };
+                    }
+                };
+            }
+            else
+            {
+                memoryManager.release(outNetworkMemorySlotAddress, TLS_MAX_HANDSHAKE_LENGTH);
+                this.ackRegionHandler = i ->
+                {
+                    /*NOOP*/
+                };
+            }
             this.resetHandler = this::handleResetAfterHandshake;
         }
 
@@ -920,11 +911,29 @@ public final class ServerStreamFactory implements StreamFactory
             transfer.regions().forEach(
             r ->
             {
-                regionAddresses.add(r.address());
-                regionLengths.add(r.length());
-                regionIds.add(r.streamId());
+                int numStored = regionAddresses.size();
+                if (numStored > 0)
+                {
+                    int lastIndex = numStored - 1;
+                    long lastAddress = regionAddresses.get(lastIndex);
+                    int lastLength = regionLengths.get(lastIndex);
+                    if (lastAddress + lastLength == r.address())
+                    {
+                        regionLengths.set(lastIndex, lastLength + r.length());
+                    }
+                    else
+                    {
+                        regionAddresses.add(r.address());
+                        regionLengths.add(r.length());
+                    }
+                }
+                else
+                {
+                    regionAddresses.add(r.address());
+                    regionLengths.add(r.length());
+                }
             });
-            processData();
+            processNetwork();
 
             int flags = transfer.flags();
             if (isReset(flags))
@@ -937,7 +946,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void processData()
+        private void processNetwork()
         {
             if (regionAddresses.isEmpty())
             {
@@ -951,6 +960,7 @@ public final class ServerStreamFactory implements StreamFactory
             final ByteBuffer inNetBuffer = stageInNetBuffer(
                 this.regionAddresses,
                 this.regionLengths);
+
             try
             {
                 loop:
@@ -984,11 +994,11 @@ public final class ServerStreamFactory implements StreamFactory
                     }
                 }
                 int totalBytesConsumed = inNetBuffer.position();
-                doAck(networkThrottle, networkId, FrameFlags.EMPTY, ackRegionBuilder.ackRegions(totalBytesConsumed));
+                doAck(networkThrottle, networkId, EMPTY, ackRegionBuilder.ackRegions(totalBytesConsumed));
             }
             catch (Exception e)
             {
-                e.printStackTrace();
+                throw new RuntimeException("Not Implemented: " + e);
 //                doAck(networkThrottle, networkId, RST, null); //DPW TODO
 //                doAbort(target, targetId, authorization); TODO?
             }
@@ -1013,6 +1023,7 @@ public final class ServerStreamFactory implements StreamFactory
                     0L,
                     unresolvedAddr,
                     bytesProduced);
+                outstandingNetworkBytes += bytesProduced;
                 outNetworkMemorySlotUsedOffset += bytesProduced;
             }
         }
@@ -1067,14 +1078,10 @@ public final class ServerStreamFactory implements StreamFactory
             int index,
             int length)
         {
-                switch (msgTypeId)
-                {
+            switch (msgTypeId)
+            {
                 case AckFW.TYPE_ID:
                     final AckFW ack = ackRO.wrap(buffer, index, index + length);
-                    if (!ack.regions().isEmpty())
-                    {
-                        ackRegions(ack);
-                    }
                     if (isReset(ack.flags()))
                     {
                         resetHandler.accept(ack);
@@ -1083,13 +1090,9 @@ public final class ServerStreamFactory implements StreamFactory
                 default:
                     // ignore
                     break;
-                }
+            }
         }
 
-        private void ackRegions(AckFW ack)
-        {
-            // TODO Auto-generated method stub
-        }
 
         private void handleReset(
             AckFW reset)
@@ -1113,6 +1116,11 @@ public final class ServerStreamFactory implements StreamFactory
         {
             networkReplyDoneHandler.run();
         }
+
+        private void ackRegions(AckFW ack)
+        {
+            ack.regions().forEach(ackRegionHandler);
+        }
     }
 
     private final class ServerConnectReplyStream
@@ -1134,6 +1142,8 @@ public final class ServerStreamFactory implements StreamFactory
         private final IntArrayList regionLengths = new IntArrayList();
         private final LongArrayList regionAddresses = new LongArrayList();
         private final LongArrayList regionIds = new LongArrayList();
+
+        private Consumer<RegionFW> handshakeThrottle;
 
         private ServerConnectReplyStream(
             MessageConsumer applicationReplyThrottle,
@@ -1202,8 +1212,9 @@ public final class ServerStreamFactory implements StreamFactory
                 this.networkReply = handshake.networkReply;
                 this.networkReplyId = handshake.networkReplyId;
                 this.statusHandler = handshake.statusHandler;
+                this.handshakeThrottle = handshake.ackRegionHandler;
 
-                this.outNetworkMemorySlotAddress = handshake.outNetworkMemorySlotCapacity;
+//                this.outNetworkMemorySlotAddress = memoryManager; TODO
                 this.outNetworkMemorySlotUsedOffset = handshake.outNetworkMemorySlotUsedOffset;
 
                 doAck(applicationReplyThrottle, applicationReplyId, 0);
@@ -1226,7 +1237,7 @@ public final class ServerStreamFactory implements StreamFactory
                 regionLengths.add(r.length());
                 regionIds.add(r.streamId());
             });
-            processData();
+            processApplication();
 
             final int flags = transfer.flags();
             if (FrameFlags.isFin(flags))
@@ -1239,7 +1250,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void processData()
+        private void processApplication()
         {
             if (regionAddresses.isEmpty())
             {
@@ -1351,7 +1362,7 @@ public final class ServerStreamFactory implements StreamFactory
                 final AckFW ack = ackRO.wrap(buffer, index, index + length);
                 if (!ack.regions().isEmpty())
                 {
-                    ackRegions(ack);
+                    processAckedRegions(ack.regions());
                 }
                 if (isReset(ack.flags()))
                 {
@@ -1364,20 +1375,20 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void ackRegions(AckFW ack)
+        private void processAckedRegions(ListFW<RegionFW> regions)
         {
-            // DPW TODO
-        }
+            regions.forEach(r -> handshakeThrottle.accept(r));
 
-        private void sendApplicationReplyWindow()
-        {
-//            int applicationReplyCredit = networkReplyBudget - applicationReplyBudget;
-//            if (applicationReplyCredit > 0)
-//            {
-//                applicationReplyBudget += applicationReplyCredit;
-//                doWindow(applicationReplyThrottle, applicationReplyId, applicationReplyCredit,
-//                        applicationReplyPadding);
-//            }
+            if (regions.anyMatch(r -> r.streamId() != this.networkReplyId))
+            {
+                doAck(
+                    applicationReplyThrottle,
+                    applicationReplyId,
+                    EMPTY,
+                    b -> regions.forEach(r -> b.item(rb -> rb.address(r.address())
+                                               .length(r.length())
+                                               .streamId(r.streamId()))));
+            }
         }
 
         private void handleReset()
@@ -1493,6 +1504,20 @@ public final class ServerStreamFactory implements StreamFactory
         final MessageConsumer target,
         final long targetId,
         final long authorization,
+        Consumer<Builder<RegionFW.Builder, RegionFW>> mutator)
+    {
+        final TransferFW transfer = transferRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+            .streamId(targetId)
+            .authorization(authorization)
+            .regions(mutator)
+            .build();
+        target.accept(transfer.typeId(), transfer.buffer(), transfer.offset(), transfer.sizeof());
+    }
+
+    private void doTransfer(
+        final MessageConsumer target,
+        final long targetId,
+        final long authorization,
         final int flags)
     {
         final TransferFW transfer = transferRW.wrap(writeBuffer, 0, writeBuffer.capacity())
@@ -1503,21 +1528,6 @@ public final class ServerStreamFactory implements StreamFactory
         target.accept(transfer.typeId(), transfer.buffer(), transfer.offset(), transfer.sizeof());
     }
 
-    private void doWindow(
-        final MessageConsumer throttle,
-        final long throttleId,
-        final int credit,
-        final int padding)
-    {
-//        final WindowFW window = windowRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-//                .streamId(throttleId)
-//                .credit(credit)
-//                .padding(padding)
-//                .groupId(0)
-//                .build();
-//
-//        throttle.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
-    }
 
     private void doAck(
             final MessageConsumer throttle,
