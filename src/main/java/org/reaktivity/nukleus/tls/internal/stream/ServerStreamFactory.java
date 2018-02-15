@@ -452,7 +452,7 @@ public final class ServerStreamFactory implements StreamFactory
             final ByteBuffer inNetBuffer = stageInNetBuffer(
                 this.networkPendingRegionAddresses,
                 this.networkPendingRegionLengths);
-                try
+            try
             {
                 int bytesConsumerIter = 0;
                 loop:
@@ -725,7 +725,8 @@ public final class ServerStreamFactory implements StreamFactory
                         {
                             int availableLength = networkPendingRegionLengths.get(0);
                             final boolean ackWholeRegion = bytesToAck > availableLength;
-                            final long uAddress = networkPendingRegionAddresses.remove(0);
+                            final long uAddress = ackWholeRegion ? networkPendingRegionAddresses.remove(0):
+                                                                   networkPendingRegionAddresses.get(0);
                             if (ackWholeRegion)
                             {
                                 networkPendingRegionLengths.remove(0);
@@ -742,6 +743,7 @@ public final class ServerStreamFactory implements StreamFactory
                     }
                 );
             }
+
             doTransfer(
                 applicationTarget,
                 applicationId,
@@ -767,7 +769,7 @@ public final class ServerStreamFactory implements StreamFactory
                         directBufferRW.wrap(
                             memoryManager.resolve(uAddress),
                             availableLength);
-                        directBufferRW.putBytes(0, outNetByteBuffer, bytesProduced - bytesToWrite, availableLength);
+                        directBufferRW.putBytes(0, outAppByteBuffer, bytesProduced - bytesToWrite, availableLength);
                         final int lengthWritten = availableLength;
                         rb.item(r -> r.address(uAddress).length(lengthWritten).streamId(networkId));
                         bytesToWrite -= lengthWritten;
@@ -810,17 +812,13 @@ public final class ServerStreamFactory implements StreamFactory
                             networkThrottle,
                             networkId,
                             EMPTY,
-                            rb ->
+                            rsb ->
                             {
                                 regions.forEach(r ->
                                 {
-                                    final long uAddress = r.address() - APP_TRANSFER_METADATA_SIZE;
-                                    final long rAddress = memoryManager.resolve(uAddress);
-                                    view.wrap(rAddress, APP_TRANSFER_METADATA_SIZE);
-                                    final int regionLength = view.getShort(0) + r.length();
-                                    rb.item(r2 -> r2.address(uAddress)
-                                            .length(regionLength + APP_TRANSFER_METADATA_SIZE)
-                                            .streamId(r.streamId()));
+                                    rsb.item(rb -> rb.address(r.address())
+                                                      .length(r.length())
+                                                      .streamId(r.streamId()));
                                 });
                             });
                     }
