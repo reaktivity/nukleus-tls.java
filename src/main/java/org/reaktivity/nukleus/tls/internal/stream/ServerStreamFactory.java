@@ -15,12 +15,14 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
+import static java.lang.String.format;
 import static java.nio.ByteBuffer.allocateDirect;
 import static java.util.Objects.requireNonNull;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.FINISHED;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_WRAP;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING;
 import static javax.net.ssl.SSLEngineResult.Status.BUFFER_UNDERFLOW;
+import static org.agrona.BitUtil.isPowerOfTwo;
 import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.EMPTY;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.FIN;
@@ -28,6 +30,7 @@ import static org.reaktivity.nukleus.tls.internal.FrameFlags.RST;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isEmpty;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isFin;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isReset;
+import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TRANSFER_CAPACITY;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -75,7 +78,10 @@ import org.reaktivity.reaktor.internal.buffer.DefaultDirectBufferBuilder;
 
 public final class ServerStreamFactory implements StreamFactory
 {
-    public static final ListFW<RegionFW> EMPTY_REGION_RO;
+    private static final ListFW<RegionFW> EMPTY_REGION_RO;
+    private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
+    private static final Runnable RUNNABLE_NOP = () -> {};
+    private static final Consumer<SSLEngineResult> HANDSHAKE_NOOP = (r) -> {};
 
     static
     {
@@ -84,11 +90,6 @@ public final class ServerStreamFactory implements StreamFactory
                 new RegionFW());
         EMPTY_REGION_RO = regionsRW.wrap(new UnsafeBuffer(new byte[100]), 0, 100).build();
     }
-
-    public static final int TRANSFER_CAPACITY = 0x10000;  // TODO: configurable
-    private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
-    private static final Runnable RUNNABLE_NOP = () -> {};
-    private static final Consumer<SSLEngineResult> HANDSHAKE_NOOP = (r) -> {};
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -102,13 +103,9 @@ public final class ServerStreamFactory implements StreamFactory
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
     private final TransferFW.Builder transferRW = new TransferFW.Builder();
     private final AckFW.Builder ackRW = new AckFW.Builder();
-    private final ListFW.Builder<RegionFW.Builder, RegionFW> regionsRW = new Builder<RegionFW.Builder, RegionFW>(
-            new RegionFW.Builder(),
-            new RegionFW());
 
     private final DirectBuffer view = new UnsafeBuffer(new byte[0]);
     private final MutableDirectBuffer directBufferRW = new UnsafeBuffer(new byte[0]);
-    private final ByteBuffer inNetBuffer = allocateDirect(100000); // TODO: configurable
 
     private final TlsBeginExFW.Builder tlsBeginExRW = new TlsBeginExFW.Builder();
 
@@ -121,11 +118,11 @@ public final class ServerStreamFactory implements StreamFactory
 
     private final Long2ObjectHashMap<ServerHandshake> correlations;
     private final MessageFunction<RouteFW> wrapRoute;
+    private final int transferCapacity;
     private final ByteBuffer inAppByteBuffer;
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
-
-    private final ByteBuffer emptyRegion;
+    private final ByteBuffer inNetByteBuffer;
 
     public ServerStreamFactory(
         TlsConfiguration config,
@@ -145,15 +142,17 @@ public final class ServerStreamFactory implements StreamFactory
         this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
         this.correlations = requireNonNull(correlations);
 
-        this.wrapRoute = this::wrapRoute;
-        this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
-        this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
-        this.outNetByteBuffer = allocateDirect(Math.min(writeBuffer.capacity(), TRANSFER_CAPACITY));
+        this.transferCapacity = config.transferCapacity();
+        if (!isPowerOfTwo(transferCapacity))
+        {
+            throw new IllegalArgumentException(format("%s is not a power of 2", TRANSFER_CAPACITY));
+        }
 
-        final ListFW<RegionFW> emptyRegionRO = regionsRW.wrap(new UnsafeBuffer(new byte[100]), 0, 100).build();
-        byte[] emptyRegionArray = new byte[emptyRegionRO.sizeof()];
-        emptyRegionRO.buffer().getBytes(0, emptyRegionArray);
-        this.emptyRegion = ByteBuffer.wrap(emptyRegionArray);
+        this.wrapRoute = this::wrapRoute;
+        this.inAppByteBuffer = allocateDirect(transferCapacity);
+        this.outAppByteBuffer = allocateDirect(transferCapacity);
+        this.outNetByteBuffer = allocateDirect(transferCapacity);
+        this.inNetByteBuffer = allocateDirect(transferCapacity);
     }
 
     @Override
@@ -330,7 +329,7 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkReply = router.supplyTarget(networkReplyName);
                     this.networkReplyId = supplyStreamId.getAsLong();
 
-                    this.networkReplyMemoryManager = new NetworkReplyMemoryManager(TRANSFER_CAPACITY, networkReplyId);
+                    this.networkReplyMemoryManager = new NetworkReplyMemoryManager(transferCapacity, networkReplyId);
 
                     final ServerHandshake newHandshake = new ServerHandshake(
                             tlsEngine,
@@ -467,7 +466,7 @@ public final class ServerStreamFactory implements StreamFactory
                 return;
             }
 
-            inNetBuffer.clear();
+            inNetByteBuffer.clear();
             outAppByteBuffer.clear();
 
             final ByteBuffer inNetBuffer = stageInNetBuffer(
@@ -526,10 +525,6 @@ public final class ServerStreamFactory implements StreamFactory
                 doAck(networkThrottle, networkId, RST);
                 doTransfer(applicationTarget, applicationId, authorization, RST);
             }
-            finally
-            {
-                //
-            }
         }
 
         private Consumer<Builder<RegionFW.Builder, RegionFW>> consumedRegions(
@@ -574,7 +569,8 @@ public final class ServerStreamFactory implements StreamFactory
                 final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION_RO);
                 if (maxPayloadSize < bytesProduced)
                 {
-                    throw new RuntimeException("NOT IMPLEMENTED: exceeded TLS maximum");
+                    throw new IllegalArgumentException("transfer capacity exceeded");
+                    // TODO: reset stream instead
                 }
                 doTransfer(
                         networkReply,
@@ -871,7 +867,7 @@ public final class ServerStreamFactory implements StreamFactory
         {
             correlations.remove(applicationCorrelationId);
 
-            networkReplyMemoryManager.releaseHard();
+            networkReplyMemoryManager.release();
 
             if (networkReplyDoneHandler != null)
             {
@@ -910,10 +906,6 @@ public final class ServerStreamFactory implements StreamFactory
         private final AckedRegionBuilder ackRegionBuilder;
 
         private Consumer<AckFW> resetHandler;
-
-//        private final LongArrayList applicationReplyPendingRegionAddresses = new LongArrayList(2, -2);
-//        private final LongArrayList applicationReplyPendingRegionIds = new LongArrayList(2, -2);
-//        private final IntArrayList applicationReplyPendingRegionLengths = new IntArrayList(2, -2);
 
         private ServerHandshake(
             SSLEngine tlsEngine,
@@ -1023,7 +1015,7 @@ public final class ServerStreamFactory implements StreamFactory
                 return;
             }
 
-            inNetBuffer.clear();
+            inNetByteBuffer.clear();
             outNetByteBuffer.clear();
 
             final ByteBuffer inNetBuffer = stageInNetBuffer(
@@ -1076,7 +1068,8 @@ public final class ServerStreamFactory implements StreamFactory
                 final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION_RO);
                 if (maxPayloadSize < bytesProduced)
                 {
-                    throw new RuntimeException("NOT IMPLEMENTED: exceeded TLS maximum");
+                    throw new IllegalArgumentException("transfer capacity exceeded");
+                    // TODO: reset stream instead
                 }
 
                 doTransfer(
@@ -1297,7 +1290,8 @@ public final class ServerStreamFactory implements StreamFactory
 
                     if (maxPayloadSize < bytesProduced)
                     {
-                        throw new RuntimeException("NOT IMPLEMENTED: exceeded TLS maximum");
+                        throw new IllegalArgumentException("transfer capacity exceeded");
+                        // TODO: reset stream instead
                     }
                     outNetByteBuffer.flip();
 
@@ -1344,7 +1338,7 @@ public final class ServerStreamFactory implements StreamFactory
                     final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION_RO);
                     if (maxPayloadSize < bytesProduced)
                     {
-                        throw new RuntimeException("NOT IMPLEMENTED: exceeded TLS maximum");
+                        throw new IllegalArgumentException("transfer capacity exceeded");
                     }
 
                     doTransfer(
@@ -1422,7 +1416,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 doAck(applicationReplyThrottle, applicationReplyId, RST);
             }
-            networkReplyMemoryManager.releaseHard();
+            networkReplyMemoryManager.release();
         }
 
     }
@@ -1549,15 +1543,15 @@ public final class ServerStreamFactory implements StreamFactory
         // TODO better loop
         for (int i = 0; i < regionAddresses.size(); i++)
         {
-            int position = inNetBuffer.position();
+            int position = inNetByteBuffer.position();
             long addr = regionAddresses.get(i);
             int length = regionLengths.get(i);
             view.wrap(memoryManager.resolve(addr), length);
-            view.getBytes(0, inNetBuffer, position, length);
-            inNetBuffer.position(position + length);
+            view.getBytes(0, inNetByteBuffer, position, length);
+            inNetByteBuffer.position(position + length);
         }
-        inNetBuffer.flip();
-        return inNetBuffer;
+        inNetByteBuffer.flip();
+        return inNetByteBuffer;
     }
 
     class NetworkReplyMemoryManager
@@ -1574,12 +1568,10 @@ public final class ServerStreamFactory implements StreamFactory
         private final int transferCapacity;
         private final long memoryAddress;
         private final long resolvedAddress;
-//        private final int indexMask;
+        private final int indexMask;
 
         private long writeIndex;
         private long ackIndex;
-
-//        private IntArrayList marks = new IntArrayList(2, -2);
 
         NetworkReplyMemoryManager(
             int transferCapacity,
@@ -1596,7 +1588,7 @@ public final class ServerStreamFactory implements StreamFactory
             this.writeIndex = 0;
             this.ackIndex = 0;
 
-//            this.indexMask = transferCapacity + 1;
+            this.indexMask = transferCapacity - 1;
         }
 
         // Returns the payload size you can accept
@@ -1617,10 +1609,8 @@ public final class ServerStreamFactory implements StreamFactory
             ListFW.Builder<RegionFW.Builder, RegionFW> regionBuilders)
         {
             final int sizeOfRegions = consumedRegions.isEmpty() ? TAG_SIZE_PER_CHUNK : consumedRegions.sizeof();
-//            int wIndex = (int) (indexMask & writeIndex);
-//            final int rIndex = (int) (indexMask & ackIndex);
-            int wIndex = (int) (writeIndex % TRANSFER_CAPACITY);
-            final int rIndex = (int) (ackIndex % TRANSFER_CAPACITY);
+            int wIndex = (int) (indexMask & writeIndex);
+            final int rIndex = (int) (indexMask & ackIndex);
 
             final int blockSizeAvailable = ((wIndex >= rIndex ? transferCapacity - wIndex: rIndex - wIndex))
                                            - TAG_SIZE_PER_CHUNK;
@@ -1630,7 +1620,6 @@ public final class ServerStreamFactory implements StreamFactory
             directBufferRW.putBytes(0, src, srcIndex, writeInLength);
 
             final long regionAddress = memoryAddress + wIndex;
-            System.out.println("Sending: " + regionAddress + ", length: " + writeInLength + ", writeIndex: " + wIndex);
             regionBuilders.item(rb -> rb.address(regionAddress).length(writeInLength).streamId(networkReplyId));
             wIndex += writeInLength;
             writeIndex += writeInLength;
@@ -1696,7 +1685,6 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final long length = region.length();
                 final long regionAddress = memoryManager.resolve(region.address());
-                System.out.println("Acking: " + regionAddress + ", length: " + length);
                 directBufferRW.wrap(regionAddress + length, TAG_SIZE_PER_CHUNK);
                 ackIndex += length + TAG_SIZE_PER_CHUNK;
 
@@ -1729,19 +1717,13 @@ public final class ServerStreamFactory implements StreamFactory
                         break;
                     }
                     default:
-                        throw new RuntimeException("Invalid state");
+                        throw new IllegalArgumentException("Invalid state");
                 }
             });
         }
 
-        public void releaseHard()
-        {
-            memoryManager.release(memoryAddress, transferCapacity);
-        }
-
         public void release()
         {
-//            assert writeIndex == ackIndex;
             memoryManager.release(memoryAddress, transferCapacity);
         }
     }

@@ -19,13 +19,9 @@ import org.reaktivity.nukleus.Configuration;
 
 public class TlsConfiguration extends Configuration
 {
-    public static final String APPLICATION_TRANSFER_CAPACITY = "nukleus.tls.application.transfer.capacity";
+    public static final String TRANSFER_CAPACITY = "nukleus.tls.transfer.capacity";
 
-    public static final int APPLICATION_TRANSFER_CAPACITY_DEFAULT = 1 << 16;
-
-    public static final String NETWORK_TRANSFER_CAPACITY = "nukleus.tls.network.transfer.capacity";
-
-    public static final int NETWORK_TRANSFER_CAPACITY_DEFAULT = 1 << 16;
+    public static final int TRANSFER_CAPACITY_DEFAULT = 1 << 16;
 
     public TlsConfiguration(
         Configuration config)
@@ -33,13 +29,9 @@ public class TlsConfiguration extends Configuration
         super(config);
     }
 
-    public int applicationTransferCapacity()
+    public int transferCapacity()
     {
-        return getInteger(APPLICATION_TRANSFER_CAPACITY, APPLICATION_TRANSFER_CAPACITY_DEFAULT);
+        return getInteger(TRANSFER_CAPACITY, TRANSFER_CAPACITY_DEFAULT);
     }
 
-    public int networkTransferCapacity()
-    {
-        return getInteger(NETWORK_TRANSFER_CAPACITY, NETWORK_TRANSFER_CAPACITY_DEFAULT);
-    }
 }

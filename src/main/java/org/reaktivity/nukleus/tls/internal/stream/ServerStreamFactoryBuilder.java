@@ -91,7 +91,14 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     @Override
     public StreamFactory build()
     {
-        return new ServerStreamFactory(config, context, router, writeBuffer,
-                memoryManager, supplyStreamId, supplyCorrelationId, correlations);
+        return new ServerStreamFactory(
+            config,
+            context,
+            router,
+            writeBuffer,
+            memoryManager,
+            supplyStreamId,
+            supplyCorrelationId,
+            correlations);
     }
 }
