@@ -28,6 +28,7 @@ import static org.reaktivity.nukleus.tls.internal.FrameFlags.RST;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isEmpty;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isFin;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isReset;
+import static org.reaktivity.nukleus.tls.internal.stream.NetworkReplyMemoryManager2.EMPTY_REGION_RO;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -113,6 +114,8 @@ public final class ServerStreamFactory implements StreamFactory
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
 
+    private final ByteBuffer emptyRegion;
+
     public ServerStreamFactory(
         TlsConfiguration config,
         SSLContext context,
@@ -135,6 +138,11 @@ public final class ServerStreamFactory implements StreamFactory
         this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outNetByteBuffer = allocateDirect(Math.min(writeBuffer.capacity(), MAXIMUM_PAYLOAD_LENGTH));
+
+        final ListFW<RegionFW> emptyRegionRO = regionsRW.wrap(new UnsafeBuffer(new byte[100]), 0, 100).build();
+        byte[] emptyRegionArray = new byte[emptyRegionRO.sizeof()];
+        emptyRegionRO.buffer().getBytes(0, emptyRegionArray);
+        this.emptyRegion = ByteBuffer.wrap(emptyRegionArray);
     }
 
     @Override
@@ -240,7 +248,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final LongArrayList networkPendingRegionAddresses = new LongArrayList(2, -2);
         private final IntArrayList networkPendingRegionLengths = new IntArrayList(2, -2);
 
-        private NetworkReplyMemoryManager networkReplyMemoryManger;
+        private NetworkReplyMemoryManager2 networkReplyMemoryManger;
 
         private MessageConsumer networkReply;
         private long networkReplyId;
@@ -310,7 +318,7 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkReply = router.supplyTarget(networkReplyName);
                     this.networkReplyId = supplyStreamId.getAsLong();
 
-                    this.networkReplyMemoryManger = new NetworkReplyMemoryManager();
+                    this.networkReplyMemoryManger = new NetworkReplyMemoryManager2();
 
                     final ServerHandshake newHandshake = new ServerHandshake(
                             tlsEngine,
@@ -542,22 +550,21 @@ public final class ServerStreamFactory implements StreamFactory
 
         private void doApplicationClosingHandshake(SSLEngineResult r)
         {
-            final int bytesToWrite = r.bytesProduced();
-            if (bytesToWrite > 0)
+            final int bytesProduced = r.bytesProduced();
+            if (bytesProduced > 0)
             {
-                final long address = networkReplyMemoryManger.address();
-                final long rAddress = networkReplyMemoryManger.resolvedAddress();
-                directBufferRW.wrap(rAddress, bytesToWrite);
-                directBufferRW.putBytes(0, outNetByteBuffer, 0, outNetByteBuffer.position());
-                networkReplyMemoryManger.consumeBytes(bytesToWrite);
-                networkReplyMemoryManger.markEmptyRegions();
+                outNetByteBuffer.flip();
+
+                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION_RO);
+                if (maxPayloadSize < bytesProduced)
+                {
+                    throw new RuntimeException("NOT IMPLEMENTED: exceeded TLS maximum");
+                }
                 doTransfer(
                         networkReply,
                         networkReplyId,
                         0L, // TODO proper authorization
-                        rb -> rb.item(r2 -> r2.address(address)
-                                              .length(bytesToWrite)
-                                              .streamId(networkReplyId)),
+                        this.networkReplyMemoryManger.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION_RO),
                         EMPTY);
             }
         };
@@ -873,7 +880,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final Runnable networkReplyDoneHandler;
         private final Consumer<Runnable> networkReplyDoneHandlerConsumer;
         private final Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
-        private NetworkReplyMemoryManager networkReplyMemoryManager;
+        private NetworkReplyMemoryManager2 networkReplyMemoryManager;
 
         private final LongArrayList networkPendingRegions;
         private final IntArrayList networkPendingLengths;
@@ -899,7 +906,7 @@ public final class ServerStreamFactory implements StreamFactory
             LongArrayList networkPendingRegions,
             IntArrayList networkPendingLengths,
             AckedRegionBuilder ackRegionBuilder,
-            NetworkReplyMemoryManager networkReplyMemoryManager,
+            NetworkReplyMemoryManager2 networkReplyMemoryManager,
             Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler)
         {
             this.tlsEngine = tlsEngine;
@@ -1043,23 +1050,20 @@ public final class ServerStreamFactory implements StreamFactory
             final int bytesProduced = result.bytesProduced();
             if (bytesProduced != 0)
             {
-                long uAddress = networkReplyMemoryManager.address();
-                long rAddress = networkReplyMemoryManager.resolvedAddress();
-
                 outNetByteBuffer.flip();
-                directBufferRW.wrap(rAddress, bytesProduced);
-                directBufferRW.putBytes(0, outNetByteBuffer, bytesProduced);
+
+                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION_RO);
+                if (maxPayloadSize < bytesProduced)
+                {
+                    throw new RuntimeException("NOT IMPLEMENTED: exceeded TLS maximum");
+                }
 
                 doTransfer(
                     networkReply,
                     networkReplyId,
                     0L,
-                    uAddress,
+                    networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION_RO),
                     bytesProduced);
-
-                directBufferRW.wrap(rAddress + bytesProduced, 100); // TODO magic variable (just needs to be emply list)
-                final int metaDataSize = regionsRW.wrap(directBufferRW, 0, 100).build().sizeof(); //append empty list
-                networkReplyMemoryManager.consumeBytes(bytesProduced + metaDataSize);
             }
         }
 
@@ -1085,16 +1089,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 case AckFW.TYPE_ID:
                     final AckFW ack = ackRO.wrap(buffer, index, index + length);
-                    ack.regions().forEach(r ->
-                    {
-                        final long rAddress = memoryManager.resolve(r.address());
-                        view.wrap(rAddress + r.length(), 100); // TODO magic number
-                        assert r.streamId() == networkReplyId;
-                        final ListFW<RegionFW> regions = regionsRO.wrap(view, 0, 100);
-                        assert regions.isEmpty();
-                        final int ackedBytes = regions.sizeof() + r.length();
-                        networkReplyMemoryManager.releaseBytes(ackedBytes);
-                    });
+                    networkReplyMemoryManager.buildAckedRegions(null, ack.regions());
                     if (isReset(ack.flags()))
                     {
                         resetHandler.accept(ack);
@@ -1144,7 +1139,7 @@ public final class ServerStreamFactory implements StreamFactory
         private MessageConsumer streamState;
         private SSLEngine tlsEngine;
 
-        private NetworkReplyMemoryManager networkReplyMemoryManager;
+        private NetworkReplyMemoryManager2 networkReplyMemoryManager;
         private Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
 
         private ServerConnectReplyStream(
@@ -1270,35 +1265,40 @@ public final class ServerStreamFactory implements StreamFactory
             try
             {
                 outNetByteBuffer.clear();
-                final long uAddressMark = networkReplyMemoryManager.address();
                 while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                 {
                     outNetByteBuffer.rewind();
+                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(regions);
+                    //    outNetByteBuffer.limit(maxPayloadSize);  TODO, need to check for buffer OVERFLOW,
+                    // instead we are checking bytesProduced < maxPayload Size (if we do TODO need bookkeeping)
+
                     SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
                     final int bytesProduced = result.bytesProduced();
 
-                    final long rAddress = networkReplyMemoryManager.resolvedAddress();
-
-                    directBufferRW.wrap(rAddress, bytesProduced);
+                    if (maxPayloadSize < bytesProduced)
+                    {
+                        throw new RuntimeException("NOT IMPLEMENTED: exceeded TLS maximum");
+                    }
                     outNetByteBuffer.flip();
-                    directBufferRW.putBytes(0, outNetByteBuffer, bytesProduced);
 
-                    networkReplyMemoryManager.consumeBytes(bytesProduced);
+                    if (inAppByteBuffer.hasRemaining()) {
+                        doTransfer(
+                            networkReply,
+                            networkReplyId,
+                            authorization,
+                            networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION_RO),
+                            EMPTY);
+                    }
+                    else
+                    {
+                        doTransfer(
+                            networkReply,
+                            networkReplyId,
+                            authorization,
+                            networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, regions),
+                            EMPTY);
+                    }
                 }
-
-                final long uAddressPos = networkReplyMemoryManager.address();
-                final int payloadLength = (int) (uAddressPos - uAddressMark);
-                networkReplyMemoryManager.markRegions(regions);
-
-                doTransfer(
-                        networkReply,
-                        networkReplyId,
-                        authorization,
-                        rb -> rb.item(r -> r
-                                .address(uAddressMark)
-                                .length(payloadLength)
-                                .streamId(networkReplyId)),
-                        flags);
             }
             catch (SSLException ex)
             {
@@ -1318,23 +1318,20 @@ public final class ServerStreamFactory implements StreamFactory
                     outNetByteBuffer.clear();
                     SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
                     outNetByteBuffer.flip();
-
-                    final long uAddress = networkReplyMemoryManager.address();
-                    final long rAddress = networkReplyMemoryManager.resolvedAddress();
-
                     final int bytesProduced = result.bytesProduced();
-                    directBufferRW.wrap(rAddress, bytesProduced);
-                    directBufferRW.putBytes(0, outNetByteBuffer, bytesProduced);
+
+                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION_RO);
+                    if (maxPayloadSize < bytesProduced)
+                    {
+                        throw new RuntimeException("NOT IMPLEMENTED: exceeded TLS maximum");
+                    }
 
                     doTransfer(
                         networkReply,
                         networkReplyId,
                         0L,
-                        uAddress,
-                        bytesProduced);
-
-                    networkReplyMemoryManager.consumeBytes(bytesProduced);
-                    networkReplyMemoryManager.markEmptyRegions();
+                        networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION_RO),
+                        FIN);
                 }
                 catch (SSLException ex)
                 {
@@ -1367,18 +1364,11 @@ public final class ServerStreamFactory implements StreamFactory
                 final AckFW ack = ackRO.wrap(buffer, index, index + length);
                 if (!ack.regions().isEmpty())
                 {
-                    ack.regions().forEach(r ->
-                    {
-                        assert r.streamId() == networkReplyId;
-                        final ListFW<RegionFW> regions = networkReplyMemoryManager.getRegionsAndAckFrom(r.address(), r.length());
-                        if (!regions.isEmpty())
-                        {
-                            // TODO very unlikely we get multiple regions in ack but would
-                            // be better to send one ack back
-                            ackApplicationReplyRegions(regions);
-                        }
-                        networkReplyMemoryManager.releaseBytes(r.length());
-                    });
+                    doAck(
+                        applicationReplyThrottle,
+                        applicationReplyId,
+                        EMPTY,
+                        b -> networkReplyMemoryManager.buildAckedRegions(b, ack.regions())); // TODO, possibility of empty ack
                 }
                 if (isReset(ack.flags()))
                 {
@@ -1394,19 +1384,6 @@ public final class ServerStreamFactory implements StreamFactory
                 // ignore
                 break;
             }
-        }
-
-        private void ackApplicationReplyRegions(
-            final ListFW<RegionFW> regions)
-        {
-            doAck(
-                applicationReplyThrottle,
-                applicationReplyId,
-                EMPTY,
-                rb ->
-                regions.forEach(r -> rb.item(r2 -> r2.address(r.address())
-                                                     .length(r.length())
-                                                     .streamId(r.streamId()))));
         }
 
         private void handleReset()
@@ -1575,97 +1552,5 @@ public final class ServerStreamFactory implements StreamFactory
         }
         inNetBuffer.flip();
         return inNetBuffer;
-    }
-
-    class NetworkReplyMemoryManager
-    {
-        // TODO handle loop around
-        private final long memoryAddress;
-        private int networkReplyMemoryPosition;
-        private int networkReplyNotAckedBytes;
-
-        NetworkReplyMemoryManager()
-        {
-            this.memoryAddress = memoryManager.acquire(TRANSFER_CAPACITY);
-            if (this.memoryAddress == -1)
-            {
-                throw new IllegalStateException("Unable to allocate memory block: " + TRANSFER_CAPACITY);
-            }
-            this.networkReplyMemoryPosition = 0;
-            this.networkReplyNotAckedBytes = 0;
-        }
-
-        public ListFW<RegionFW> getRegionsAndAckFrom(
-            long address,
-            int length)
-        {
-            long raddr = memoryManager.resolve(address + length);
-            view.wrap(raddr, availableLength());
-            ListFW<RegionFW> regions = regionsRO.wrap(view, 0, availableLength());
-            releaseBytes(regions.sizeof());
-            return regions;
-        }
-
-        public long markRegions(ListFW<RegionFW> regions)
-        {
-            final int sizeOfRegions = regions.sizeof();
-            directBufferRW.wrap(resolvedAddress(), sizeOfRegions);
-            directBufferRW.putBytes(0, regions.buffer(), regions.offset(), sizeOfRegions);
-            consumeBytes(sizeOfRegions);
-            return address();
-        }
-
-        private int availableLength()
-        {
-            return TRANSFER_CAPACITY - networkReplyMemoryPosition;
-        }
-
-        public long markEmptyRegions()
-        {
-            directBufferRW.wrap(resolvedAddress(), availableLength());
-            regionsRW.wrap(directBufferRW, 0, availableLength());
-            ListFW<RegionFW> regions = regionsRW.build();
-            consumeBytes(regions.sizeof());
-            return address();
-        }
-
-        public long address()
-        {
-            return memoryAddress + networkReplyMemoryPosition;
-        }
-
-        public long resolvedAddress()
-        {
-            return memoryManager.resolve(address());
-        }
-
-        public void consumeBytes(int numOfBytes)
-        {
-            System.out.println("consumed " + numOfBytes);
-            assert networkReplyNotAckedBytes < TRANSFER_CAPACITY;
-            networkReplyNotAckedBytes += numOfBytes;
-            networkReplyMemoryPosition += numOfBytes;
-        }
-
-        public void releaseBytes(int numOfBytes)
-        {
-            System.out.println("released " + numOfBytes);
-            networkReplyNotAckedBytes -= numOfBytes;
-            if (networkReplyNotAckedBytes == 0)
-            {
-                networkReplyMemoryPosition = 0;
-            }
-        }
-
-        public void release()
-        {
-            assert networkReplyNotAckedBytes == 0 && networkReplyMemoryPosition == 0;
-            releaseHard();
-        }
-
-        public void releaseHard()
-        {
-            memoryManager.release(memoryAddress, TRANSFER_CAPACITY);
-        }
     }
 }
