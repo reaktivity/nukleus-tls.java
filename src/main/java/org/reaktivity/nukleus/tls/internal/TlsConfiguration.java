@@ -19,11 +19,13 @@ import org.reaktivity.nukleus.Configuration;
 
 public class TlsConfiguration extends Configuration
 {
-    public static final String HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME = "nukleus.tls.handshake.window.bytes";
+    public static final String APPLICATION_TRANSFER_CAPACITY = "nukleus.tls.application.transfer.capacity";
 
-    public static final String HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME = "nukleus.tls.handshake.window.frames";
+    public static final int APPLICATION_TRANSFER_CAPACITY_DEFAULT = 1 << 16;
 
-    public static final int HANDSHAKE_WINDOW_BYTES_DEFAULT = 65536;
+    public static final String NETWORK_TRANSFER_CAPACITY = "nukleus.tls.network.transfer.capacity";
+
+    public static final int NETWORK_TRANSFER_CAPACITY_DEFAULT = 1 << 16;
 
     public TlsConfiguration(
         Configuration config)
@@ -31,9 +33,13 @@ public class TlsConfiguration extends Configuration
         super(config);
     }
 
-    public int handshakeWindowBytes()
+    public int applicationTransferCapacity()
     {
-        return getInteger(HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME, HANDSHAKE_WINDOW_BYTES_DEFAULT);
+        return getInteger(APPLICATION_TRANSFER_CAPACITY, APPLICATION_TRANSFER_CAPACITY_DEFAULT);
     }
 
+    public int networkTransferCapacity()
+    {
+        return getInteger(NETWORK_TRANSFER_CAPACITY, NETWORK_TRANSFER_CAPACITY_DEFAULT);
+    }
 }
