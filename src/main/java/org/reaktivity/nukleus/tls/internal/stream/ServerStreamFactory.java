@@ -73,11 +73,11 @@ import org.reaktivity.nukleus.tls.internal.types.stream.TransferFW;
 
 public final class ServerStreamFactory implements StreamFactory
 {
-    private static final int APP_TRANSFER_METADATA_SIZE = Short.BYTES;
     public static final int NETWORK_REPLY_MEMORY_SLOT_SIZE = 0x10000;  // TODO extract to configuration
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
     private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
-    private static final Runnable NOP = () -> {};
+    private static final Runnable RUNNABLE_NOP = () -> {};
+    private static final Consumer<SSLEngineResult> HANDSHAKE_NOOP = (r) -> {};
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -222,8 +222,6 @@ public final class ServerStreamFactory implements StreamFactory
         private final long networkRef;
 
         private String networkReplyName;
-//        private MessageConsumer networkReply;
-//        private long networkReplyId;
 
         private MessageConsumer applicationTarget;
         private long applicationId;
@@ -236,7 +234,8 @@ public final class ServerStreamFactory implements StreamFactory
 
         private long networkCorrelationId;
 
-        private Runnable networkReplyDoneHandler = NOP;
+        private Runnable networkReplyDoneHandler = RUNNABLE_NOP;
+        private Consumer<SSLEngineResult> closingHandshakeHandler = HANDSHAKE_NOOP;
 
         private final LongArrayList networkPendingRegionAddresses = new LongArrayList(2, -2);
         private final IntArrayList networkPendingRegionLengths = new IntArrayList(2, -2);
@@ -326,32 +325,36 @@ public final class ServerStreamFactory implements StreamFactory
                             this.networkPendingRegionAddresses,
                             this.networkPendingRegionLengths,
                             this::consumedRegions,
-                            networkReplyMemoryManger);
+                            networkReplyMemoryManger,
+                            this::setOnNetworkClosingHandshakeHandler);
 
                     doBegin(networkReply, networkReplyId, 0L, 0L, networkCorrelationId);
                     router.setThrottle(networkReplyName, networkReplyId, newHandshake::handleThrottle);
 
                     this.streamState = newHandshake::afterBegin;
                     this.networkReplyName = networkReplyName;
-//                    this.networkReply = networkReply;
-//                    this.networkReplyId = newNetworkReplyId;
                     this.handshake = newHandshake;
 
                     tlsEngine.setHandshakeApplicationProtocolSelector(this::selectApplicationProtocol);
 
                     tlsEngine.beginHandshake();
-//                    doAck(networkThrottle, networkId, FrameFlags.FIN);
                 }
                 catch (SSLException ex)
                 {
-                    doAck(networkThrottle, networkId, RST);
-//                    doTransfer(networkReply, networkReplyId, 0L, RST);
+                    // TODO testing
+                    doTransfer(applicationTarget, applicationId, authorization, RST);
                 }
             }
             else
             {
                 doAck(networkThrottle, networkId, RST);
             }
+        }
+
+        public void setOnNetworkClosingHandshakeHandler(
+            Consumer<SSLEngineResult> closingHandshakeHandler)
+        {
+            this.closingHandshakeHandler = closingHandshakeHandler;
         }
 
         private String selectApplicationProtocol(
@@ -410,9 +413,7 @@ public final class ServerStreamFactory implements StreamFactory
                 handleTransfer(transfer);
                 break;
             default:
-                throw new RuntimeException("Not implemented yet"); // DPW
-//                doReset(networkThrottle, networkId);
-//                break;
+                doAck(networkThrottle, networkId, RST);
             }
         }
 
@@ -454,6 +455,11 @@ public final class ServerStreamFactory implements StreamFactory
                 this.networkPendingRegionLengths);
             try
             {
+                if (tlsEngine.isOutboundDone())
+                {
+                    this.closingHandshakeHandler = r -> {};
+                }
+
                 int bytesConsumerIter = 0;
                 loop:
                 while (inNetBuffer.hasRemaining() && !tlsEngine.isInboundDone())
@@ -467,27 +473,7 @@ public final class ServerStreamFactory implements StreamFactory
                     case BUFFER_UNDERFLOW:
                          break loop;
                     default:
-                        handleStatus(result.getHandshakeStatus(), r ->
-                        {
-                            final int bytesToWrite = r.bytesProduced();
-                            if (bytesToWrite > 0)
-                            {
-                                final long address = networkReplyMemoryManger.address();
-                                final long rAddress = networkReplyMemoryManger.resolvedAddress();
-                                directBufferRW.wrap(rAddress, bytesToWrite);
-                                directBufferRW.putBytes(0, outNetByteBuffer, 0, outNetByteBuffer.position());
-                                networkReplyMemoryManger.consumeBytes(bytesToWrite);
-                                networkReplyMemoryManger.markEmptyRegions();
-                                doTransfer(
-                                        networkReply,
-                                        networkReplyId,
-                                        authorization,
-                                        rb -> rb.item(r2 -> r2.address(address)
-                                                              .length(bytesToWrite)
-                                                              .streamId(networkReplyId)),
-                                        EMPTY);
-                            }
-                        });
+                        handleStatus(result.getHandshakeStatus(), closingHandshakeHandler);
                         break;
                     }
 
@@ -553,6 +539,28 @@ public final class ServerStreamFactory implements StreamFactory
                 }
             };
         }
+
+        private void doApplicationClosingHandshake(SSLEngineResult r)
+        {
+            final int bytesToWrite = r.bytesProduced();
+            if (bytesToWrite > 0)
+            {
+                final long address = networkReplyMemoryManger.address();
+                final long rAddress = networkReplyMemoryManger.resolvedAddress();
+                directBufferRW.wrap(rAddress, bytesToWrite);
+                directBufferRW.putBytes(0, outNetByteBuffer, 0, outNetByteBuffer.position());
+                networkReplyMemoryManger.consumeBytes(bytesToWrite);
+                networkReplyMemoryManger.markEmptyRegions();
+                doTransfer(
+                        networkReply,
+                        networkReplyId,
+                        0L, // TODO proper authorization
+                        rb -> rb.item(r2 -> r2.address(address)
+                                              .length(bytesToWrite)
+                                              .streamId(networkReplyId)),
+                        EMPTY);
+            }
+        };
 
         private void handleEnd()
         {
@@ -632,6 +640,7 @@ public final class ServerStreamFactory implements StreamFactory
                 case FINISHED:
                     handleFinished();
                     status = tlsEngine.getHandshakeStatus();
+                    this.setOnNetworkClosingHandshakeHandler(this::doApplicationClosingHandshake);
                     break;
                 default:
                     break loop;
@@ -700,9 +709,8 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                // DPW TODO
-//                doReset(networkThrottle, networkId);
-//                doAbort(networkReply, networkReplyId, 0L);
+                doTransfer(networkReply, networkReplyId, authorization, RST);
+                doAck(networkThrottle, networkId, RST);
             }
         }
 
@@ -800,6 +808,7 @@ public final class ServerStreamFactory implements StreamFactory
                         {
                             // NOOP
                         }
+                        doAck(networkThrottle, networkId, RST);
                     }
                     else if (isFin(flags))
                     {
@@ -833,10 +842,14 @@ public final class ServerStreamFactory implements StreamFactory
         {
             correlations.remove(applicationCorrelationId);
 
+            networkReplyMemoryManger.releaseHard();
+
             if (networkReplyDoneHandler != null)
             {
                 networkReplyDoneHandler.run();
             }
+
+            doTransfer(applicationTarget, applicationId, authorization, RST);
         }
 
         private void setNetworkReplyDoneHandler(
@@ -859,6 +872,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final long networkReplyId;
         private final Runnable networkReplyDoneHandler;
         private final Consumer<Runnable> networkReplyDoneHandlerConsumer;
+        private final Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
         private NetworkReplyMemoryManager networkReplyMemoryManager;
 
         private final LongArrayList networkPendingRegions;
@@ -881,7 +895,8 @@ public final class ServerStreamFactory implements StreamFactory
             LongArrayList networkPendingRegions,
             IntArrayList networkPendingLengths,
             AckedRegionBuilder ackRegionBuilder,
-            NetworkReplyMemoryManager networkReplyMemoryManager)
+            NetworkReplyMemoryManager networkReplyMemoryManager,
+            Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler)
         {
             this.tlsEngine = tlsEngine;
             this.statusHandler = statusHandler;
@@ -900,6 +915,7 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkPendingRegions = networkPendingRegions;
             this.networkPendingLengths = networkPendingLengths;
             this.ackRegionBuilder = ackRegionBuilder;
+            this.setOnNetworkClosingHandshakeHandler = setOnNetworkClosingHandshakeHandler;
         }
 
         private void onFinished()
@@ -962,7 +978,8 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else if(isFin(flags))
             {
-                handleEnd();
+                doTransfer(networkReply, networkReplyId, transfer.authorization(), RST);
+                doAck(networkThrottle, networkId, FIN);
             }
         }
 
@@ -1010,9 +1027,9 @@ public final class ServerStreamFactory implements StreamFactory
             }
             catch (Exception e)
             {
-                throw new RuntimeException("Not Implemented: " + e);
-//                doAck(networkThrottle, networkId, RST, null); //DPW TODO
-//                doAbort(target, targetId, authorization); TODO?
+                // TODO no testing
+                doAck(networkThrottle, networkId, RST);
+                doTransfer(networkReply, networkReplyId, 0L, RST);
             }
         }
 
@@ -1040,19 +1057,6 @@ public final class ServerStreamFactory implements StreamFactory
                 final int metaDataSize = regionsRW.wrap(directBufferRW, 0, 100).build().sizeof(); //append empty list
                 networkReplyMemoryManager.consumeBytes(bytesProduced + metaDataSize);
             }
-        }
-
-        private void handleEnd()
-        {
-            throw new RuntimeException("Not implemented");
-//            try
-//            {
-//                doCloseOutbound(tlsEngine, networkReply, networkReplyId, networkReplyPadding, end.authorization(), NOP);
-//            }
-//            catch (SSLException ex)
-//            {
-//                doAbort(networkReply, networkReplyId, 0L);
-//            }
         }
 
         private void setNetworkThrottle(
@@ -1138,6 +1142,8 @@ public final class ServerStreamFactory implements StreamFactory
 
         private NetworkReplyMemoryManager networkReplyMemoryManager;
 
+        private Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
+
         private ServerConnectReplyStream(
             MessageConsumer applicationReplyThrottle,
             long applicationReplyId)
@@ -1204,7 +1210,7 @@ public final class ServerStreamFactory implements StreamFactory
                 this.tlsEngine = handshake.tlsEngine;
                 this.networkReply = handshake.networkReply;
                 this.networkReplyId = handshake.networkReplyId;
-//                this.statusHandler = handshake.statusHandler;
+                this.setOnNetworkClosingHandshakeHandler = handshake.setOnNetworkClosingHandshakeHandler;
 
                 this.networkReplyMemoryManager = handshake.networkReplyMemoryManager;
                 doAck(applicationReplyThrottle, applicationReplyId, 0);
@@ -1293,10 +1299,8 @@ public final class ServerStreamFactory implements StreamFactory
             }
             catch (SSLException ex)
             {
-                throw new RuntimeException("not implemented");
-                // DPW TODO
-//                    doReset(applicationReplyThrottle, applicationReplyId);
-//                    doAbort(networkReply, networkReplyId, 0L);
+                // TODO testing
+                doTransfer(networkReply, networkReplyId, authorization, RST);
             }
         }
 
@@ -1341,7 +1345,8 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleAbort()
         {
             tlsEngine.closeOutbound();
-//
+
+            setOnNetworkClosingHandshakeHandler.accept(HANDSHAKE_NOOP);
 //            // ABORT is from application reply, so no need to clean that stream
             doTransfer(networkReply, networkReplyId, 0L, RST);
         }
@@ -1404,9 +1409,10 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleReset()
         {
             tlsEngine.closeOutbound();
-
+            setOnNetworkClosingHandshakeHandler.accept(HANDSHAKE_NOOP);
             // RESET is from network reply, so no need to clean that stream
             handleNetworkReplyDone();
+
         }
 
         private void handleNetworkReplyDone()
@@ -1415,6 +1421,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 doAck(applicationReplyThrottle, applicationReplyId, RST);
             }
+            networkReplyMemoryManager.releaseHard();
         }
 
     }
@@ -1694,6 +1701,11 @@ public final class ServerStreamFactory implements StreamFactory
         public void release()
         {
             assert networkReplyNotAckedBytes == 0 && networkReplyMemoryPosition == 0;
+            releaseHard();
+        }
+
+        public void releaseHard()
+        {
             memoryManager.release(networkReplyMemoryAddress, NETWORK_REPLY_MEMORY_SLOT_SIZE);
         }
     }
