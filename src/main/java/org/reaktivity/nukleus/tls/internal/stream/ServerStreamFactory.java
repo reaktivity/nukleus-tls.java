@@ -98,6 +98,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final TransferFW transferRO = new TransferFW();
     private final AckFW ackRO = new AckFW();
     private final ListFW<RegionFW> regionsRO = new ListFW<RegionFW>(new RegionFW());
+    private final DirectBufferBuilder directBufferBuilderRO = new DefaultDirectBufferBuilder();
 
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
     private final TransferFW.Builder transferRW = new TransferFW.Builder();
@@ -1607,7 +1608,7 @@ public final class ServerStreamFactory implements StreamFactory
             return transferCapacity - (unAcked + metaDataReserve);
         }
 
-        // know you have room for meta data
+        // know we have room for meta data cause must call maxPayloadSize
         public void packRegions(
             ByteBuffer src,
             int srcIndex,
@@ -1615,11 +1616,14 @@ public final class ServerStreamFactory implements StreamFactory
             ListFW<RegionFW> consumedRegions,
             ListFW.Builder<RegionFW.Builder, RegionFW> regionBuilders)
         {
+            final int sizeOfRegions = consumedRegions.isEmpty() ? TAG_SIZE_PER_CHUNK : consumedRegions.sizeof();
 //            int wIndex = (int) (indexMask & writeIndex);
 //            final int rIndex = (int) (indexMask & ackIndex);
             int wIndex = (int) (writeIndex % TRANSFER_CAPACITY);
             final int rIndex = (int) (ackIndex % TRANSFER_CAPACITY);
-            final int blockSizeAvailable = ((wIndex >= rIndex ? transferCapacity + (wIndex - rIndex): rIndex - wIndex))
+
+            System.out.println("wIndex: " + wIndex + ", rIndex: " + rIndex + ", ");
+            final int blockSizeAvailable = ((wIndex >= rIndex ? transferCapacity - wIndex: rIndex - wIndex))
                                            - TAG_SIZE_PER_CHUNK;
 
             final int writeInLength = Math.min(blockSizeAvailable, length);
@@ -1627,12 +1631,11 @@ public final class ServerStreamFactory implements StreamFactory
             directBufferRW.putBytes(0, src, srcIndex, writeInLength);
 
             final long regionAddress = memoryAddress + writeIndex;
-            System.out.println("Sending: " + regionAddress + ", length: " + writeInLength);
+            System.out.println("Sending: " + regionAddress + ", length: " + writeInLength + ", writeIndex: " + wIndex);
             regionBuilders.item(rb -> rb.address(regionAddress).length(writeInLength).streamId(networkReplyId));
             wIndex += writeInLength;
             writeIndex += writeInLength;
 
-            final int sizeOfRegions = consumedRegions.isEmpty() ? TAG_SIZE_PER_CHUNK : consumedRegions.sizeof();
 
             if (length != writeInLength) // append tag and then write more
             {
@@ -1651,7 +1654,29 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else if(sizeOfRegions + TAG_SIZE_PER_CHUNK > transferCapacity - wIndex) // append tags on wrap and return
             {
-                throw new RuntimeException("NOT IMPLEMENTED");
+                final int metaDataSize = sizeOfRegions + TAG_SIZE_PER_CHUNK;
+                directBufferRW.wrap(resolvedAddress + wIndex, TAG_SIZE_PER_CHUNK);
+                directBufferRW.putByte(0, WRAP_AROUND_REGION_TAG);
+
+                int leftOverToWrite = transferCapacity - wIndex - TAG_SIZE_PER_CHUNK;
+                if (leftOverToWrite > 0)
+                {
+                    directBufferRW.wrap(resolvedAddress + wIndex + TAG_SIZE_PER_CHUNK, leftOverToWrite);
+                    directBufferRW.putBytes(
+                        TAG_SIZE_PER_CHUNK,
+                        consumedRegions.buffer(),
+                        consumedRegions.offset(),
+                        leftOverToWrite);
+                }
+                int rollOverToWrite = consumedRegions.sizeof() - leftOverToWrite;
+                directBufferRW.wrap(resolvedAddress, rollOverToWrite);
+                directBufferRW.putBytes(
+                        TAG_SIZE_PER_CHUNK,
+                        consumedRegions.buffer(),
+                        consumedRegions.offset() + leftOverToWrite,
+                        rollOverToWrite);
+
+                writeIndex += metaDataSize + consumedRegions.sizeof();
             }
             else // append tags and return
             {
@@ -1681,6 +1706,7 @@ public final class ServerStreamFactory implements StreamFactory
                     case EMPTY_REGION_TAG:
                         break;
                     case FULL_REGION_TAG:
+                    {
                         final int remainingCapacity = (int) (resolvedAddress - regionAddress + transferCapacity);
                         directBufferRW.wrap(regionAddress + length + TAG_SIZE_PER_CHUNK, remainingCapacity);
                         regionsRO.wrap(directBufferRW, 0, remainingCapacity)
@@ -1689,8 +1715,20 @@ public final class ServerStreamFactory implements StreamFactory
                                                                               .streamId(ackedRegion.streamId())));
                         ackIndex += regionsRO.sizeof();
                         break;
+                    }
                     case WRAP_AROUND_REGION_TAG:
-                        throw new RuntimeException("NOT IMPLEMENTED");
+                    {
+                        final int remainingCapacity = (int) (resolvedAddress - regionAddress + transferCapacity);
+                        directBufferBuilderRO.wrap(regionAddress + length + TAG_SIZE_PER_CHUNK, remainingCapacity);
+                        directBufferBuilderRO.wrap(memoryAddress, 1000); // TODO magic value;
+                        DirectBuffer directBufferRO = directBufferBuilderRO.build();
+                        regionsRO.wrap(directBufferRO, 0, remainingCapacity)
+                            .forEach(ackedRegion -> builder.item(rb -> rb.address(ackedRegion.address())
+                                                                     .length(ackedRegion.length())
+                                                                     .streamId(ackedRegion.streamId())));
+                        ackIndex += regionsRO.sizeof();
+                        break;
+                    }
                     default:
                         throw new RuntimeException("Invalid state");
                 }
