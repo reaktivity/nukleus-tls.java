@@ -87,7 +87,6 @@ public final class ServerStreamFactory implements StreamFactory
 
     public static final int TRANSFER_CAPACITY = 0x10000;  // TODO: configurable
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
-    private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
     private static final Runnable RUNNABLE_NOP = () -> {};
     private static final Consumer<SSLEngineResult> HANDSHAKE_NOOP = (r) -> {};
 
@@ -149,7 +148,7 @@ public final class ServerStreamFactory implements StreamFactory
         this.wrapRoute = this::wrapRoute;
         this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
-        this.outNetByteBuffer = allocateDirect(Math.min(writeBuffer.capacity(), MAXIMUM_PAYLOAD_LENGTH));
+        this.outNetByteBuffer = allocateDirect(Math.min(writeBuffer.capacity(), TRANSFER_CAPACITY));
 
         final ListFW<RegionFW> emptyRegionRO = regionsRW.wrap(new UnsafeBuffer(new byte[100]), 0, 100).build();
         byte[] emptyRegionArray = new byte[emptyRegionRO.sizeof()];
@@ -331,7 +330,7 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkReply = router.supplyTarget(networkReplyName);
                     this.networkReplyId = supplyStreamId.getAsLong();
 
-                    this.networkReplyMemoryManager = new NetworkReplyMemoryManager(MAXIMUM_PAYLOAD_LENGTH, networkReplyId);
+                    this.networkReplyMemoryManager = new NetworkReplyMemoryManager(TRANSFER_CAPACITY, networkReplyId);
 
                     final ServerHandshake newHandshake = new ServerHandshake(
                             tlsEngine,
@@ -474,6 +473,7 @@ public final class ServerStreamFactory implements StreamFactory
             final ByteBuffer inNetBuffer = stageInNetBuffer(
                 this.networkPendingRegionAddresses,
                 this.networkPendingRegionLengths);
+
             try
             {
                 if (tlsEngine.isOutboundDone())
@@ -792,7 +792,7 @@ public final class ServerStreamFactory implements StreamFactory
                     while (bytesToWrite > 0)
                     {
                         int availableLength = networkPendingRegionLengths.get(0);
-                        final boolean useWholeRegion = availableLength < bytesToWrite;
+                        final boolean useWholeRegion = availableLength <= bytesToWrite;
                         final Long uAddress = useWholeRegion ? networkPendingRegionAddresses.remove(0):
                                                                networkPendingRegionAddresses.get(0);
                         if (useWholeRegion)
@@ -1622,7 +1622,6 @@ public final class ServerStreamFactory implements StreamFactory
             int wIndex = (int) (writeIndex % TRANSFER_CAPACITY);
             final int rIndex = (int) (ackIndex % TRANSFER_CAPACITY);
 
-            System.out.println("wIndex: " + wIndex + ", rIndex: " + rIndex + ", ");
             final int blockSizeAvailable = ((wIndex >= rIndex ? transferCapacity - wIndex: rIndex - wIndex))
                                            - TAG_SIZE_PER_CHUNK;
 
@@ -1631,7 +1630,7 @@ public final class ServerStreamFactory implements StreamFactory
             directBufferRW.putBytes(0, src, srcIndex, writeInLength);
 
             final long regionAddress = memoryAddress + writeIndex;
-            System.out.println("Sending: " + regionAddress + ", length: " + writeInLength + ", writeIndex: " + wIndex);
+//            System.out.println("Sending: " + regionAddress + ", length: " + writeInLength + ", writeIndex: " + wIndex);
             regionBuilders.item(rb -> rb.address(regionAddress).length(writeInLength).streamId(networkReplyId));
             wIndex += writeInLength;
             writeIndex += writeInLength;
@@ -1697,7 +1696,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final long length = region.length();
                 final long regionAddress = memoryManager.resolve(region.address());
-                System.out.println("Acking: " + regionAddress + ", length: " + length);
+//                System.out.println("Acking: " + regionAddress + ", length: " + length);
                 directBufferRW.wrap(regionAddress + length, TAG_SIZE_PER_CHUNK);
                 ackIndex += length + TAG_SIZE_PER_CHUNK;
 
@@ -1742,7 +1741,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         public void release()
         {
-            assert writeIndex == ackIndex;
+//            assert writeIndex == ackIndex;
             memoryManager.release(memoryAddress, transferCapacity);
         }
     }
