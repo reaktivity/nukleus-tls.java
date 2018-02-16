@@ -73,7 +73,7 @@ import org.reaktivity.nukleus.tls.internal.types.stream.TransferFW;
 
 public final class ServerStreamFactory implements StreamFactory
 {
-    public static final int NETWORK_REPLY_MEMORY_SLOT_SIZE = 0x10000;  // TODO extract to configuration
+    public static final int TRANSFER_CAPACITY = 0x10000;  // TODO: configurable
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
     private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
     private static final Runnable RUNNABLE_NOP = () -> {};
@@ -96,7 +96,7 @@ public final class ServerStreamFactory implements StreamFactory
 
     private final DirectBuffer view = new UnsafeBuffer(new byte[0]);
     private final MutableDirectBuffer directBufferRW = new UnsafeBuffer(new byte[0]);
-    private final ByteBuffer inNetBuffer = allocateDirect(100000); // DPW TODO
+    private final ByteBuffer inNetBuffer = allocateDirect(100000); // TODO: configurable
 
     private final TlsBeginExFW.Builder tlsBeginExRW = new TlsBeginExFW.Builder();
 
@@ -812,7 +812,7 @@ public final class ServerStreamFactory implements StreamFactory
                     }
                     else if (isFin(flags))
                     {
-                        // TODO ?
+                        doAck(networkThrottle, networkId, FIN);
                     }
 
                     if (!(regions.isEmpty() && FrameFlags.isEmpty(flags)))
@@ -881,6 +881,10 @@ public final class ServerStreamFactory implements StreamFactory
         private final AckedRegionBuilder ackRegionBuilder;
 
         private Consumer<AckFW> resetHandler;
+
+        private final LongArrayList applicationReplyPendingRegionAddresses = new LongArrayList(2, -2);
+        private final LongArrayList applicationReplyPendingRegionIds = new LongArrayList(2, -2);
+        private final IntArrayList applicationReplyPendingRegionLengths = new IntArrayList(2, -2);
 
         private ServerHandshake(
             SSLEngine tlsEngine,
@@ -1141,7 +1145,6 @@ public final class ServerStreamFactory implements StreamFactory
         private SSLEngine tlsEngine;
 
         private NetworkReplyMemoryManager networkReplyMemoryManager;
-
         private Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
 
         private ServerConnectReplyStream(
@@ -1426,32 +1429,6 @@ public final class ServerStreamFactory implements StreamFactory
 
     }
 
-//    private void flushNetwork(
-//        SSLEngine tlsEngine,
-//        int bytesProduced,
-//        MessageConsumer networkReply,
-//        long networkReplyId,
-//        long authorization,
-//        Runnable networkReplyDoneHandler,
-//        long outNetworkMemorySlotAddress,
-//        int outNetworkMemorySlotUsedOffset)
-//    {
-//        if (bytesProduced > 0)
-//        {
-//            long unresolvedAddr = outNetworkMemorySlotAddress + outNetworkMemorySlotUsedOffset;
-//            long memoryAddress = memoryManager.resolve(unresolvedAddr);
-//            stageInto(outNetByteBuffer, memoryAddress, 0, bytesProduced);
-//            doTransfer(networkReply, networkReplyId, authorization, unresolvedAddr, bytesProduced);
-//        }
-//
-//        // TODO combine with above
-//        if (tlsEngine.isOutboundDone())
-//        {
-//            doTransfer(networkReply, networkReplyId, authorization, FIN);
-//            networkReplyDoneHandler.run();      // sends RESET to application reply stream (if not received END)
-//        }
-//    }
-
     private void doTlsBegin(
         MessageConsumer connect,
         long connectId,
@@ -1582,28 +1559,6 @@ public final class ServerStreamFactory implements StreamFactory
         tlsEngine.closeInbound();
     }
 
-//    private void doCloseOutbound(
-//        SSLEngine tlsEngine,
-//        MessageConsumer networkReply,
-//        long networkReplyId,
-//        long authorization,
-//        Runnable networkReplyDoneHandler,
-//        long outNetworkMemorySlotAddress,
-//        int outNetworkMemorySlotUsedOffset) throws SSLException
-//    {
-//        tlsEngine.closeOutbound();
-//        SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-//        flushNetwork(
-//            tlsEngine,
-//            result.bytesProduced(),
-//            networkReply,
-//            networkReplyId,
-//            authorization,
-//            networkReplyDoneHandler,
-//            outNetworkMemorySlotAddress,
-//            outNetworkMemorySlotUsedOffset);
-//    }
-
     private ByteBuffer stageInNetBuffer(
         LongArrayList regionAddresses,
         IntArrayList regionLengths)
@@ -1625,13 +1580,17 @@ public final class ServerStreamFactory implements StreamFactory
     class NetworkReplyMemoryManager
     {
         // TODO handle loop around
-        private final long networkReplyMemoryAddress;
+        private final long memoryAddress;
         private int networkReplyMemoryPosition;
         private int networkReplyNotAckedBytes;
 
         NetworkReplyMemoryManager()
         {
-            this.networkReplyMemoryAddress =  memoryManager.acquire(NETWORK_REPLY_MEMORY_SLOT_SIZE);
+            this.memoryAddress = memoryManager.acquire(TRANSFER_CAPACITY);
+            if (this.memoryAddress == -1)
+            {
+                throw new IllegalStateException("Unable to allocate memory block: " + TRANSFER_CAPACITY);
+            }
             this.networkReplyMemoryPosition = 0;
             this.networkReplyNotAckedBytes = 0;
         }
@@ -1658,7 +1617,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         private int availableLength()
         {
-            return NETWORK_REPLY_MEMORY_SLOT_SIZE - networkReplyMemoryPosition;
+            return TRANSFER_CAPACITY - networkReplyMemoryPosition;
         }
 
         public long markEmptyRegions()
@@ -1672,7 +1631,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         public long address()
         {
-            return networkReplyMemoryAddress + networkReplyMemoryPosition;
+            return memoryAddress + networkReplyMemoryPosition;
         }
 
         public long resolvedAddress()
@@ -1683,7 +1642,7 @@ public final class ServerStreamFactory implements StreamFactory
         public void consumeBytes(int numOfBytes)
         {
             System.out.println("consumed " + numOfBytes);
-            assert networkReplyNotAckedBytes < NETWORK_REPLY_MEMORY_SLOT_SIZE;
+            assert networkReplyNotAckedBytes < TRANSFER_CAPACITY;
             networkReplyNotAckedBytes += numOfBytes;
             networkReplyMemoryPosition += numOfBytes;
         }
@@ -1706,7 +1665,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         public void releaseHard()
         {
-            memoryManager.release(networkReplyMemoryAddress, NETWORK_REPLY_MEMORY_SLOT_SIZE);
+            memoryManager.release(memoryAddress, TRANSFER_CAPACITY);
         }
     }
 }
