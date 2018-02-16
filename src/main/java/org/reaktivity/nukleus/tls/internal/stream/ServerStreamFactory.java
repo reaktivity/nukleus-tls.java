@@ -1629,8 +1629,8 @@ public final class ServerStreamFactory implements StreamFactory
             directBufferRW.wrap(resolvedAddress + wIndex, writeInLength);
             directBufferRW.putBytes(0, src, srcIndex, writeInLength);
 
-            final long regionAddress = memoryAddress + writeIndex;
-//            System.out.println("Sending: " + regionAddress + ", length: " + writeInLength + ", writeIndex: " + wIndex);
+            final long regionAddress = memoryAddress + wIndex;
+            System.out.println("Sending: " + regionAddress + ", length: " + writeInLength + ", writeIndex: " + wIndex);
             regionBuilders.item(rb -> rb.address(regionAddress).length(writeInLength).streamId(networkReplyId));
             wIndex += writeInLength;
             writeIndex += writeInLength;
@@ -1696,7 +1696,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final long length = region.length();
                 final long regionAddress = memoryManager.resolve(region.address());
-//                System.out.println("Acking: " + regionAddress + ", length: " + length);
+                System.out.println("Acking: " + regionAddress + ", length: " + length);
                 directBufferRW.wrap(regionAddress + length, TAG_SIZE_PER_CHUNK);
                 ackIndex += length + TAG_SIZE_PER_CHUNK;
 
