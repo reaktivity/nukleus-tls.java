@@ -15,10 +15,13 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
+import java.util.function.Function;
+import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 
 import javax.net.ssl.SSLContext;
 
+import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.reaktivity.nukleus.buffer.MemoryManager;
@@ -27,6 +30,8 @@ import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactory.ServerHandshake;
+import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
+import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
 
 public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 {
@@ -34,11 +39,26 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private final SSLContext context;
     private final Long2ObjectHashMap<ServerHandshake> correlations;
 
+    private final UnrouteFW unrouteRO = new UnrouteFW();
+
+    private final Long2ObjectHashMap<LongSupplier> framesWrittenByteRouteId;
+    private final Long2ObjectHashMap<LongSupplier> framesReadByteRouteId;
+    private final Long2ObjectHashMap<LongConsumer> bytesWrittenByteRouteId;
+    private final Long2ObjectHashMap<LongConsumer> bytesReadByteRouteId;
+
     private RouteManager router;
     private MutableDirectBuffer writeBuffer;
     private LongSupplier supplyStreamId;
     private LongSupplier supplyCorrelationId;
     private MemoryManager memoryManager;
+
+    private Function<String, LongSupplier> supplyCounter;
+
+    private Function<RouteFW, LongSupplier> supplyWriteFrameCounter;
+    private Function<RouteFW, LongSupplier> supplyReadFrameCounter;
+    private Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator;
+    private Function<RouteFW, LongConsumer> supplyReadBytesAccumulator;
+    private Function<String, LongConsumer> supplyAccumulator;
 
     public ServerStreamFactoryBuilder(
         TlsConfiguration config,
@@ -47,6 +67,11 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         this.config = config;
         this.context = context;
         this.correlations = new Long2ObjectHashMap<>();
+
+        this.framesWrittenByteRouteId = new Long2ObjectHashMap<>();
+        this.framesReadByteRouteId = new Long2ObjectHashMap<>();
+        this.bytesWrittenByteRouteId = new Long2ObjectHashMap<>();
+        this.bytesReadByteRouteId = new Long2ObjectHashMap<>();
     }
 
     @Override
@@ -89,8 +114,79 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
+    public StreamFactoryBuilder setCounterSupplier(
+        Function<String, LongSupplier> supplyCounter)
+    {
+        this.supplyCounter = supplyCounter;
+        return this;
+    }
+
+    @Override
+    public StreamFactoryBuilder setAccumulatorSupplier(
+            Function<String, LongConsumer> supplyAccumulator)
+    {
+        this.supplyAccumulator = supplyAccumulator;
+        return this;
+    }
+
+    public boolean handleRoute(int msgTypeId, DirectBuffer buffer, int index, int length)
+    {
+        switch(msgTypeId)
+        {
+            case UnrouteFW.TYPE_ID:
+            {
+                final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
+                final long routeId = unroute.correlationId();
+                bytesWrittenByteRouteId.remove(routeId);
+                bytesReadByteRouteId.remove(routeId);
+                framesWrittenByteRouteId.remove(routeId);
+                framesReadByteRouteId.remove(routeId);
+            }
+            break;
+        }
+        return true;
+    }
+
+    @Override
     public StreamFactory build()
     {
+
+        if (supplyWriteFrameCounter == null)
+        {
+            this.supplyWriteFrameCounter = r ->
+            {
+                final long routeId = r.correlationId();
+                return framesWrittenByteRouteId.computeIfAbsent(
+                        routeId,
+                        t -> supplyCounter.apply(String.format("%d.frames.written", t)));
+            };
+            this.supplyReadFrameCounter = r ->
+            {
+                final long routeId = r.correlationId();
+                return framesReadByteRouteId.computeIfAbsent(
+                        routeId,
+                        t -> supplyCounter.apply(String.format("%d.frames.read", t)));
+            };
+        }
+
+        if (supplyWriteBytesAccumulator == null)
+        {
+            this.supplyWriteBytesAccumulator = r ->
+            {
+                final long routeId = r.correlationId();
+                return bytesWrittenByteRouteId.computeIfAbsent(
+                        routeId,
+                        t -> supplyAccumulator.apply(String.format("%d.bytes.written", t)));
+            };
+            this.supplyReadBytesAccumulator = r ->
+            {
+                final long routeId = r.correlationId();
+                return bytesReadByteRouteId.computeIfAbsent(
+                        routeId,
+                        t -> supplyAccumulator.apply(String.format("%d.bytes.read", t)));
+            };
+        }
+
         return new ServerStreamFactory(
             config,
             context,
@@ -99,6 +195,11 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             memoryManager,
             supplyStreamId,
             supplyCorrelationId,
-            correlations);
+            correlations,
+            supplyReadFrameCounter,
+            supplyReadBytesAccumulator,
+            supplyWriteFrameCounter,
+            supplyWriteBytesAccumulator);
     }
+
 }

@@ -24,6 +24,8 @@ import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 
 import javax.net.ssl.SNIHostName;
@@ -91,6 +93,11 @@ public final class ClientStreamFactory implements StreamFactory
     private final ByteBuffer outNetByteBuffer;
     private final DirectBuffer outNetBuffer;
 
+    private final Function<RouteFW, LongSupplier> supplyWriteFrameCounter;
+    private final Function<RouteFW, LongSupplier> supplyReadFrameCounter;
+    private final Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator;
+    private final Function<RouteFW, LongConsumer> supplyReadBytesAccumulator;
+
     public ClientStreamFactory(
         TlsConfiguration config,
         SSLContext context,
@@ -99,7 +106,11 @@ public final class ClientStreamFactory implements StreamFactory
         MemoryManager memoryManager,
         LongSupplier supplyStreamId,
         LongSupplier supplyCorrelationId,
-        Long2ObjectHashMap<ClientHandshake> correlations)
+        Long2ObjectHashMap<ClientHandshake> correlations,
+        Function<RouteFW, LongSupplier> supplyReadFrameCounter,
+        Function<RouteFW, LongConsumer> supplyReadBytesAccumulator,
+        Function<RouteFW, LongSupplier> supplyWriteFrameCounter,
+        Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator)
     {
         this.context = requireNonNull(context);
         this.router = requireNonNull(router);
@@ -113,6 +124,11 @@ public final class ClientStreamFactory implements StreamFactory
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outNetByteBuffer = allocateDirect(Math.min(writeBuffer.capacity(), MAXIMUM_PAYLOAD_LENGTH));
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
+
+        this.supplyWriteFrameCounter = supplyWriteFrameCounter;
+        this.supplyReadFrameCounter = supplyReadFrameCounter;
+        this.supplyWriteBytesAccumulator = supplyWriteBytesAccumulator;
+        this.supplyReadBytesAccumulator = supplyReadBytesAccumulator;
     }
 
     @Override
@@ -206,8 +222,25 @@ public final class ClientStreamFactory implements StreamFactory
 
             final long applicationId = begin.streamId();
 
-            newStream = new ClientAcceptStream(tlsHostname, tlsApplicationProtocol, defaultRoute, applicationThrottle,
-                    applicationId, authorization, networkName, networkRef)::handleStream;
+            final LongSupplier writeFrameCounter = supplyWriteFrameCounter.apply(route);
+            final LongSupplier readFrameCounter = supplyReadFrameCounter.apply(route);
+            final LongConsumer writeBytesAccumulator = supplyWriteBytesAccumulator.apply(route);
+            final LongConsumer readBytesAccumulator = supplyReadBytesAccumulator.apply(route);
+
+            newStream = new ClientAcceptStream(
+                tlsHostname,
+                tlsApplicationProtocol,
+                defaultRoute,
+                applicationThrottle,
+                applicationId,
+                authorization,
+                networkName,
+                networkRef,
+                writeFrameCounter,
+                readFrameCounter,
+                writeBytesAccumulator,
+                readBytesAccumulator
+                )::handleStream;
         }
 
         return newStream;
@@ -249,6 +282,11 @@ public final class ClientStreamFactory implements StreamFactory
         private final MessageConsumer networkTarget;
         private final long networkRef;
 
+        private final LongSupplier writeFrameCounter;
+        private final LongSupplier readFrameCounter;
+        private final LongConsumer writeBytesAccumulator;
+        private final LongConsumer readBytesAccumulator;
+
         private SSLEngine tlsEngine;
         private MessageConsumer streamState;
 
@@ -262,7 +300,11 @@ public final class ClientStreamFactory implements StreamFactory
             long applicationId,
             long authorization,
             String networkName,
-            long networkRef)
+            long networkRef,
+            LongSupplier writeFrameCounter,
+            LongSupplier readFrameCounter,
+            LongConsumer writeBytesAccumulator,
+            LongConsumer readBytesAccumulator)
         {
             this.tlsHostname = tlsHostname;
             this.tlsApplicationProtocol = tlsApplicationProtocol;
@@ -273,6 +315,10 @@ public final class ClientStreamFactory implements StreamFactory
             this.networkName = networkName;
             this.networkTarget = router.supplyTarget(networkName);
             this.networkRef = networkRef;
+            this.writeFrameCounter = writeFrameCounter;
+            this.readFrameCounter = readFrameCounter;
+            this.writeBytesAccumulator = writeBytesAccumulator;
+            this.readBytesAccumulator = readBytesAccumulator;
             this.streamState = this::beforeBegin;
         }
 
@@ -372,6 +418,10 @@ public final class ClientStreamFactory implements StreamFactory
                     applicationThrottle,
                     applicationId,
                     this::handleNetworkReplyDone);
+//                    writeFrameCounter,
+//                    readFrameCounter,
+//                    writeBytesAccumulator,
+//                    readBytesAccumulator);
 
                 doBegin(networkTarget, newNetworkId, authorization, networkRef, newCorrelationId);
                 router.setThrottle(networkName, newNetworkId, newHandshake::handleThrottle);
@@ -554,6 +604,10 @@ public final class ClientStreamFactory implements StreamFactory
             this.applicationThrottle = applicationThrottle;
             this.applicationId = applicationId;
             this.networkReplyDoneHandler = networkReplyDoneHandler;
+//            this.writeFrameCounter = writeFrameCounter;
+//            this.readFrameCounter = readFrameCounter;
+//            this.writeBytesAccumulator = writeBytesAccumulator;
+//            this.readBytesAccumulator = readBytesAccumulator;
         }
 
         @Override
@@ -768,6 +822,11 @@ public final class ClientStreamFactory implements StreamFactory
         private String applicationProtocol;
         private boolean defaultRoute;
 
+        private LongSupplier writeFrameCounter;
+        private LongSupplier readFrameCounter;
+        private LongConsumer writeBytesAccumulator;
+        private LongConsumer readBytesAccumulator;
+
         private ClientConnectReplyStream(
             MessageConsumer networkReplyThrottle,
             long networkReplyId,
@@ -849,6 +908,10 @@ public final class ClientStreamFactory implements StreamFactory
                 this.doBeginApplicationReply = handshake::doBeginApplicationReply;
                 this.streamState = handshake::afterBegin;
                 this.networkReplyDoneHandler = handshake.networkReplyDoneHandler;
+//                this.writeFrameCounter = handshake.writeFrameCounter;
+//                this.readFrameCounter = handshake.readFrameCounter;
+//                this.writeBytesAccumulator = handshake.writeBytesAccumulator;
+//                this.readBytesAccumulator = handshake.readBytesAccumulator;
 
 //                doWindow(networkReplyThrottle, networkReplyId, networkReplyBudget, networkReplyPadding);
 
@@ -1105,6 +1168,8 @@ public final class ClientStreamFactory implements StreamFactory
         long networkId,
         long authorization,
         Runnable networkReplyDoneHandler)
+//        LongSupplier writeFrameCounter,
+//        LongConsumer writeBytesAccumulator)
     {
         if (bytesProduced > 0)
         {
@@ -1224,7 +1289,9 @@ public final class ClientStreamFactory implements StreamFactory
         MessageConsumer networkTarget,
         long networkId,
         long authorization,
-        Runnable networkReplyDoneHandler) throws SSLException
+        Runnable networkReplyDoneHandler,
+        LongSupplier writeFrameCounter,
+        LongConsumer writeBytesAccumulator) throws SSLException
     {
         tlsEngine.closeOutbound();
         outNetByteBuffer.rewind();
@@ -1232,4 +1299,5 @@ public final class ClientStreamFactory implements StreamFactory
         flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId, authorization,
                 networkReplyDoneHandler);
     }
+
 }

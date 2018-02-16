@@ -37,6 +37,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 
 import javax.net.ssl.ExtendedSSLSession;
@@ -124,6 +126,11 @@ public final class ServerStreamFactory implements StreamFactory
     private final ByteBuffer outNetByteBuffer;
     private final ByteBuffer inNetByteBuffer;
 
+    private final Function<RouteFW, LongSupplier> supplyWriteFrameCounter;
+    private final Function<RouteFW, LongSupplier> supplyReadFrameCounter;
+    private final Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator;
+    private final Function<RouteFW, LongConsumer> supplyReadBytesAccumulator;
+
     public ServerStreamFactory(
         TlsConfiguration config,
         SSLContext context,
@@ -132,7 +139,11 @@ public final class ServerStreamFactory implements StreamFactory
         MemoryManager memoryManager,
         LongSupplier supplyStreamId,
         LongSupplier supplyCorrelationId,
-        Long2ObjectHashMap<ServerHandshake> correlations)
+        Long2ObjectHashMap<ServerHandshake> correlations,
+        Function<RouteFW, LongSupplier> supplyReadFrameCounter,
+        Function<RouteFW, LongConsumer> supplyReadBytesAccumulator,
+        Function<RouteFW, LongSupplier> supplyWriteFrameCounter,
+        Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator)
     {
         this.context = requireNonNull(context);
         this.router = requireNonNull(router);
@@ -153,6 +164,11 @@ public final class ServerStreamFactory implements StreamFactory
         this.outAppByteBuffer = allocateDirect(transferCapacity);
         this.outNetByteBuffer = allocateDirect(transferCapacity);
         this.inNetByteBuffer = allocateDirect(transferCapacity);
+
+        this.supplyWriteFrameCounter = supplyWriteFrameCounter;
+        this.supplyReadFrameCounter = supplyReadFrameCounter;
+        this.supplyWriteBytesAccumulator = supplyWriteBytesAccumulator;
+        this.supplyReadBytesAccumulator = supplyReadBytesAccumulator;
     }
 
     @Override
@@ -207,7 +223,22 @@ public final class ServerStreamFactory implements StreamFactory
             tlsEngine.setUseClientMode(false);
 //            tlsEngine.setNeedClientAuth(true);
 
-            newStream = new ServerAcceptStream(tlsEngine, networkThrottle, networkId, authorization, networkRef)::handleStream;
+            final LongSupplier writeFrameCounter = supplyWriteFrameCounter.apply(route);
+            final LongSupplier readFrameCounter = supplyReadFrameCounter.apply(route);
+            final LongConsumer writeBytesAccumulator = supplyWriteBytesAccumulator.apply(route);
+            final LongConsumer readBytesAccumulator = supplyReadBytesAccumulator.apply(route);
+
+            newStream = new ServerAcceptStream(
+                tlsEngine,
+                networkThrottle,
+                networkId,
+                authorization,
+                networkRef,
+                writeFrameCounter,
+                readFrameCounter,
+                writeBytesAccumulator,
+                readBytesAccumulator
+                )::handleStream;
         }
 
         return newStream;
@@ -239,6 +270,11 @@ public final class ServerStreamFactory implements StreamFactory
         private final long networkId;
         private final long networkRef;
 
+        private final LongSupplier writeFrameCounter;
+        private final LongSupplier readFrameCounter;
+        private final LongConsumer writeBytesAccumulator;
+        private final LongConsumer readBytesAccumulator;
+
         private String networkReplyName;
 
         private MessageConsumer applicationTarget;
@@ -269,13 +305,21 @@ public final class ServerStreamFactory implements StreamFactory
             MessageConsumer networkThrottle,
             long networkId,
             long authorization,
-            long networkRef)
+            long networkRef,
+            LongSupplier writeFrameCounter,
+            LongSupplier readFrameCounter,
+            LongConsumer writeBytesAccumulator,
+            LongConsumer readBytesAccumulator)
         {
             this.tlsEngine = tlsEngine;
             this.networkThrottle = networkThrottle;
             this.networkId = networkId;
             this.authorization = authorization;
             this.networkRef = networkRef;
+            this.writeFrameCounter = writeFrameCounter;
+            this.readFrameCounter = readFrameCounter;
+            this.writeBytesAccumulator = writeBytesAccumulator;
+            this.readBytesAccumulator = readBytesAccumulator;
             this.streamState = this::beforeBegin;
         }
 
@@ -329,7 +373,11 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkReply = router.supplyTarget(networkReplyName);
                     this.networkReplyId = supplyStreamId.getAsLong();
 
-                    this.networkReplyMemoryManager = new NetworkReplyMemoryManager(transferCapacity, networkReplyId);
+                    this.networkReplyMemoryManager = new NetworkReplyMemoryManager(
+                        transferCapacity,
+                        networkReplyId,
+                        writeFrameCounter,
+                        writeBytesAccumulator);
 
                     final ServerHandshake newHandshake = new ServerHandshake(
                             tlsEngine,
@@ -345,7 +393,9 @@ public final class ServerStreamFactory implements StreamFactory
                             this.networkPendingRegionLengths,
                             this::consumedRegions,
                             networkReplyMemoryManager,
-                            this::setOnNetworkClosingHandshakeHandler);
+                            this::setOnNetworkClosingHandshakeHandler,
+                            this.readFrameCounter,
+                            this.readBytesAccumulator);
 
                     doBegin(networkReply, networkReplyId, 0L, 0L, networkCorrelationId);
                     router.setThrottle(networkReplyName, networkReplyId, newHandshake::handleThrottle);
@@ -439,7 +489,14 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleTransfer(
             TransferFW transfer)
         {
-            transfer.regions().forEach(
+            final ListFW<RegionFW> regions = transfer.regions();
+            regions.forEach(r -> readBytesAccumulator.accept(r.length()));
+            if (!regions.isEmpty())
+            {
+                readFrameCounter.getAsLong();
+            }
+
+            regions.forEach(
             r ->
             {
                 networkPendingRegionAddresses.add(r.address());
@@ -899,6 +956,8 @@ public final class ServerStreamFactory implements StreamFactory
         private final Consumer<Runnable> networkReplyDoneHandlerConsumer;
         private final Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
         private NetworkReplyMemoryManager networkReplyMemoryManager;
+        private final LongSupplier readFrameCounter;
+        private final LongConsumer readBytesAccumulator;
 
         private final LongArrayList networkPendingRegions;
         private final IntArrayList networkPendingLengths;
@@ -921,7 +980,9 @@ public final class ServerStreamFactory implements StreamFactory
             IntArrayList networkPendingLengths,
             AckedRegionBuilder ackRegionBuilder,
             NetworkReplyMemoryManager networkReplyMemoryManager,
-            Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler)
+            Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler,
+            LongSupplier readFrameCounter,
+            LongConsumer readBytesAccumulator)
         {
             this.tlsEngine = tlsEngine;
             this.statusHandler = statusHandler;
@@ -941,6 +1002,8 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkPendingLengths = networkPendingLengths;
             this.ackRegionBuilder = ackRegionBuilder;
             this.setOnNetworkClosingHandshakeHandler = setOnNetworkClosingHandshakeHandler;
+            this.readFrameCounter = readFrameCounter;
+            this.readBytesAccumulator = readBytesAccumulator;
         }
 
         private void onFinished()
@@ -969,6 +1032,13 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleTransfer(
             TransferFW transfer)
         {
+            final ListFW<RegionFW> regions = transfer.regions();
+            regions.forEach(r -> readBytesAccumulator.accept(r.length()));
+            if (!regions.isEmpty())
+            {
+                readFrameCounter.getAsLong();
+            }
+
             transfer.regions().forEach(
             r ->
             {
@@ -1049,7 +1119,7 @@ public final class ServerStreamFactory implements StreamFactory
                 int totalBytesConsumed = inNetBuffer.position();
                 doAck(networkThrottle, networkId, EMPTY, ackRegionBuilder.ackRegions(totalBytesConsumed));
             }
-            catch (Exception e)
+            catch (SSLException | UnsupportedOperationException ex)
             {
                 // TODO no testing
                 doAck(networkThrottle, networkId, RST);
@@ -1564,6 +1634,8 @@ public final class ServerStreamFactory implements StreamFactory
         private static final int TAG_SIZE_PER_CHUNK = 1;
         private static final int TAG_SIZE_PER_WRITE = TAG_SIZE_PER_CHUNK * 2; // at most generates 2 regions
 
+        private final LongSupplier writeFramesAccumulator;
+        private final LongConsumer writeBytesAccumulator;
         private final long networkReplyId;
         private final int transferCapacity;
         private final long memoryAddress;
@@ -1573,9 +1645,12 @@ public final class ServerStreamFactory implements StreamFactory
         private long writeIndex;
         private long ackIndex;
 
+
         NetworkReplyMemoryManager(
             int transferCapacity,
-            long networkReplyId)
+            long networkReplyId,
+            LongSupplier writeFramesAccumulator,
+            LongConsumer writeBytesAccumulator)
         {
             this.transferCapacity = transferCapacity;
             this.memoryAddress = memoryManager.acquire(transferCapacity);
@@ -1589,6 +1664,9 @@ public final class ServerStreamFactory implements StreamFactory
             this.ackIndex = 0;
 
             this.indexMask = transferCapacity - 1;
+
+            this.writeBytesAccumulator = writeBytesAccumulator;
+            this.writeFramesAccumulator = writeFramesAccumulator;
         }
 
         // Returns the payload size you can accept
@@ -1608,6 +1686,8 @@ public final class ServerStreamFactory implements StreamFactory
             ListFW<RegionFW> consumedRegions,
             ListFW.Builder<RegionFW.Builder, RegionFW> regionBuilders)
         {
+            writeFramesAccumulator.getAsLong();
+            writeBytesAccumulator.accept(length);
             final int sizeOfRegions = consumedRegions.isEmpty() ? TAG_SIZE_PER_CHUNK : consumedRegions.sizeof();
             int wIndex = (int) (indexMask & writeIndex);
             final int rIndex = (int) (indexMask & ackIndex);
