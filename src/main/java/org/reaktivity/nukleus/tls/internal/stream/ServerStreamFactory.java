@@ -38,6 +38,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SNIHostName;
@@ -74,7 +75,6 @@ import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.RegionFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TransferFW;
-import org.reaktivity.reaktor.internal.buffer.DefaultDirectBufferBuilder;
 
 public final class ServerStreamFactory implements StreamFactory
 {
@@ -89,7 +89,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final TransferFW transferRO = new TransferFW();
     private final AckFW ackRO = new AckFW();
     private final ListFW<RegionFW> regionsRO = new ListFW<RegionFW>(new RegionFW());
-    private final DirectBufferBuilder directBufferBuilderRO = new DefaultDirectBufferBuilder();
+    private final DirectBufferBuilder directBufferBuilderRO;
 
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
     private final TransferFW.Builder transferRW = new TransferFW.Builder();
@@ -133,7 +133,8 @@ public final class ServerStreamFactory implements StreamFactory
         Function<RouteFW, LongSupplier> supplyReadFrameCounter,
         Function<RouteFW, LongConsumer> supplyReadBytesAccumulator,
         Function<RouteFW, LongSupplier> supplyWriteFrameCounter,
-        Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator)
+        Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator,
+        Supplier<DirectBufferBuilder> supplyBufferBuilder)
     {
         this.context = requireNonNull(context);
         this.router = requireNonNull(router);
@@ -143,6 +144,8 @@ public final class ServerStreamFactory implements StreamFactory
         this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
         this.correlations = requireNonNull(correlations);
 
+        this.directBufferBuilderRO = requireNonNull(supplyBufferBuilder).get();
+
         this.wrapRoute = this::wrapRoute;
 
         this.transferCapacity = config.transferCapacity();
@@ -151,10 +154,10 @@ public final class ServerStreamFactory implements StreamFactory
         this.outNetByteBuffer = allocateDirect(transferCapacity);
         this.inNetByteBuffer = allocateDirect(transferCapacity);
 
-        this.supplyWriteFrameCounter = supplyWriteFrameCounter;
-        this.supplyReadFrameCounter = supplyReadFrameCounter;
-        this.supplyWriteBytesAccumulator = supplyWriteBytesAccumulator;
-        this.supplyReadBytesAccumulator = supplyReadBytesAccumulator;
+        this.supplyWriteFrameCounter = requireNonNull(supplyWriteFrameCounter);
+        this.supplyReadFrameCounter = requireNonNull(supplyReadFrameCounter);
+        this.supplyWriteBytesAccumulator = requireNonNull(supplyWriteBytesAccumulator);
+        this.supplyReadBytesAccumulator = requireNonNull(supplyReadBytesAccumulator);
     }
 
     @Override

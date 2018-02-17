@@ -19,6 +19,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.Assert.assertTrue;
 import static org.junit.rules.RuleChain.outerRule;
 
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.DisableOnDebug;
@@ -62,6 +63,7 @@ public class ServerFrameAndByteCountersIT
     @ScriptProperty({
         "newClientAcceptRef ${newServerConnectRef}",
         "clientAccept \"nukleus://target/streams/tls#source\"" })
+    @Ignore
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();

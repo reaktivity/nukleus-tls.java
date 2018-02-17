@@ -18,12 +18,14 @@ package org.reaktivity.nukleus.tls.internal.stream;
 import java.util.function.Function;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import javax.net.ssl.SSLContext;
 
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
+import org.reaktivity.nukleus.buffer.DirectBufferBuilder;
 import org.reaktivity.nukleus.buffer.MemoryManager;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
@@ -59,6 +61,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator;
     private Function<RouteFW, LongConsumer> supplyReadBytesAccumulator;
     private Function<String, LongConsumer> supplyAccumulator;
+    private Supplier<DirectBufferBuilder> supplyBufferBuilder;
 
     public ServerStreamFactoryBuilder(
         TlsConfiguration config,
@@ -148,6 +151,14 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
+    public StreamFactoryBuilder setDirectBufferBuilderFactory(
+        Supplier<DirectBufferBuilder> supplyDirectBufferBuilder)
+    {
+        this.supplyBufferBuilder = supplyDirectBufferBuilder;
+        return this;
+    }
+
+    @Override
     public StreamFactory build()
     {
 
@@ -199,7 +210,8 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             supplyReadFrameCounter,
             supplyReadBytesAccumulator,
             supplyWriteFrameCounter,
-            supplyWriteBytesAccumulator);
+            supplyWriteBytesAccumulator,
+            supplyBufferBuilder);
     }
 
 }
