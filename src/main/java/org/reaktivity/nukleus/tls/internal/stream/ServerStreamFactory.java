@@ -22,7 +22,13 @@ import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_WRAP;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING;
 import static javax.net.ssl.SSLEngineResult.Status.BUFFER_UNDERFLOW;
 import static org.agrona.LangUtil.rethrowUnchecked;
-import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
+import static org.reaktivity.nukleus.tls.internal.FrameFlags.EMPTY;
+import static org.reaktivity.nukleus.tls.internal.FrameFlags.FIN;
+import static org.reaktivity.nukleus.tls.internal.FrameFlags.RST;
+import static org.reaktivity.nukleus.tls.internal.FrameFlags.isEmpty;
+import static org.reaktivity.nukleus.tls.internal.FrameFlags.isFin;
+import static org.reaktivity.nukleus.tls.internal.FrameFlags.isReset;
+import static org.reaktivity.nukleus.tls.internal.stream.EncryptMemoryManager.EMPTY_REGION;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -30,10 +36,9 @@ import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.IntConsumer;
-import java.util.function.IntSupplier;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SNIHostName;
@@ -46,73 +51,70 @@ import javax.net.ssl.SSLException;
 
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
+import org.agrona.collections.IntArrayList;
 import org.agrona.collections.Long2ObjectHashMap;
+import org.agrona.collections.LongArrayList;
 import org.agrona.concurrent.UnsafeBuffer;
-import org.reaktivity.nukleus.buffer.BufferPool;
+import org.reaktivity.nukleus.buffer.DirectBufferBuilder;
+import org.reaktivity.nukleus.buffer.MemoryManager;
 import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessageFunction;
 import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
+import org.reaktivity.nukleus.tls.internal.FrameFlags;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
+import org.reaktivity.nukleus.tls.internal.stream.util.AckedRegionBuilder;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
-import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
+import org.reaktivity.nukleus.tls.internal.types.ListFW;
+import org.reaktivity.nukleus.tls.internal.types.ListFW.Builder;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
-import org.reaktivity.nukleus.tls.internal.types.stream.AbortFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.AckFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
-import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
-import org.reaktivity.nukleus.tls.internal.types.stream.EndFW;
-import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.RegionFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
-import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.TransferFW;
 
 public final class ServerStreamFactory implements StreamFactory
 {
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
-    private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
-    private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
-    private static final Runnable NOP = () -> {};
+    private static final Runnable RUNNABLE_NOP = () -> {};
+    private static final Consumer<SSLEngineResult> HANDSHAKE_NOOP = (r) -> {};
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
 
     private final BeginFW beginRO = new BeginFW();
-    private final DataFW dataRO = new DataFW();
-    private final EndFW endRO = new EndFW();
-    private final AbortFW abortRO = new AbortFW();
+    private final TransferFW transferRO = new TransferFW();
+    private final AckFW ackRO = new AckFW();
+    private final ListFW<RegionFW> regionsRO = new ListFW<RegionFW>(new RegionFW());
+    private final DirectBufferBuilder directBufferBuilderRO;
 
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
-    private final DataFW.Builder dataRW = new DataFW.Builder();
-    private final EndFW.Builder endRW = new EndFW.Builder();
-    private final AbortFW.Builder abortRW = new AbortFW.Builder();
+    private final TransferFW.Builder transferRW = new TransferFW.Builder();
+    private final AckFW.Builder ackRW = new AckFW.Builder();
 
-    private final WindowFW windowRO = new WindowFW();
-    private final ResetFW resetRO = new ResetFW();
+    private final DirectBuffer view = new UnsafeBuffer(new byte[0]);
+    private final MutableDirectBuffer directBufferRW = new UnsafeBuffer(new byte[0]);
 
     private final TlsBeginExFW.Builder tlsBeginExRW = new TlsBeginExFW.Builder();
-
-    private final OctetsFW outNetOctetsRO = new OctetsFW();
-    private final OctetsFW outAppOctetsRO = new OctetsFW();
-
-    private final WindowFW.Builder windowRW = new WindowFW.Builder();
-    private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
     private final SSLContext context;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
-    private final BufferPool networkPool;
-    private final BufferPool applicationPool;
     private final LongSupplier supplyStreamId;
     private final LongSupplier supplyCorrelationId;
-    private final int handshakeBudget;
+    private final MemoryManager memoryManager;
 
     private final Long2ObjectHashMap<ServerHandshake> correlations;
     private final MessageFunction<RouteFW> wrapRoute;
     private final ByteBuffer inAppByteBuffer;
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
-    private final DirectBuffer outNetBuffer;
+    private final ByteBuffer inNetByteBuffer;
+
+    private final int transferCapacity;
 
     private final Function<RouteFW, LongSupplier> supplyWriteFrameCounter;
     private final Function<RouteFW, LongSupplier> supplyReadFrameCounter;
@@ -124,35 +126,38 @@ public final class ServerStreamFactory implements StreamFactory
         SSLContext context,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
-        BufferPool bufferPool,
+        MemoryManager memoryManager,
         LongSupplier supplyStreamId,
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ServerHandshake> correlations,
         Function<RouteFW, LongSupplier> supplyReadFrameCounter,
         Function<RouteFW, LongConsumer> supplyReadBytesAccumulator,
         Function<RouteFW, LongSupplier> supplyWriteFrameCounter,
-        Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator)
+        Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator,
+        Supplier<DirectBufferBuilder> supplyBufferBuilder)
     {
         this.context = requireNonNull(context);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
-        this.networkPool = requireNonNull(bufferPool);
-        this.applicationPool = requireNonNull(bufferPool).duplicate();
+        this.memoryManager = requireNonNull(memoryManager);
         this.supplyStreamId = requireNonNull(supplyStreamId);
         this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
         this.correlations = requireNonNull(correlations);
-        this.handshakeBudget = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
+
+        this.directBufferBuilderRO = requireNonNull(supplyBufferBuilder).get();
 
         this.wrapRoute = this::wrapRoute;
-        this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
-        this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
-        this.outNetByteBuffer = allocateDirect(Math.min(writeBuffer.capacity(), MAXIMUM_PAYLOAD_LENGTH));
-        this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
 
-        this.supplyWriteFrameCounter = supplyWriteFrameCounter;
-        this.supplyReadFrameCounter = supplyReadFrameCounter;
-        this.supplyWriteBytesAccumulator = supplyWriteBytesAccumulator;
-        this.supplyReadBytesAccumulator = supplyReadBytesAccumulator;
+        this.transferCapacity = config.transferCapacity();
+        this.inAppByteBuffer = allocateDirect(transferCapacity);
+        this.outAppByteBuffer = allocateDirect(transferCapacity);
+        this.outNetByteBuffer = allocateDirect(transferCapacity);
+        this.inNetByteBuffer = allocateDirect(transferCapacity);
+
+        this.supplyWriteFrameCounter = requireNonNull(supplyWriteFrameCounter);
+        this.supplyReadFrameCounter = requireNonNull(supplyReadFrameCounter);
+        this.supplyWriteBytesAccumulator = requireNonNull(supplyWriteBytesAccumulator);
+        this.supplyReadBytesAccumulator = requireNonNull(supplyReadBytesAccumulator);
     }
 
     @Override
@@ -260,11 +265,6 @@ public final class ServerStreamFactory implements StreamFactory
         private final LongConsumer readBytesAccumulator;
 
         private String networkReplyName;
-        private MessageConsumer networkReply;
-        private long networkReplyId;
-
-        private int networkSlot = NO_SLOT;
-        private int networkSlotOffset;
 
         private MessageConsumer applicationTarget;
         private long applicationId;
@@ -273,26 +273,21 @@ public final class ServerStreamFactory implements StreamFactory
         private MessageConsumer streamState;
         private ServerHandshake handshake;
 
-        private int networkBudget;
-        private int networkPadding;
-
-        private int applicationSlot = NO_SLOT;
-        private int applicationSlotOffset;
-
-        private int applicationBudget;
-        private int applicationPadding;
         private long applicationCorrelationId;
 
         private long networkCorrelationId;
 
-        private Runnable networkReplyDoneHandler = NOP;
+        private Runnable networkReplyDoneHandler = RUNNABLE_NOP;
+        private Consumer<SSLEngineResult> closingHandshakeHandler = HANDSHAKE_NOOP;
 
-        @Override
-        public String toString()
-        {
-            return String.format("%s [networkBudget=%d networkPadding=%d]",
-                                 getClass().getSimpleName(), networkBudget, networkPadding);
-        }
+        private final LongArrayList networkPendingRegionAddresses = new LongArrayList(2, -2);
+        private final IntArrayList networkPendingRegionLengths = new IntArrayList(2, -2);
+
+        private EncryptMemoryManager networkReplyMemoryManager;
+
+        private MessageConsumer networkReply;
+        private long networkReplyId;
+
 
         private ServerAcceptStream(
             SSLEngine tlsEngine,
@@ -339,53 +334,81 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doReset(networkThrottle, networkId);
+                doAck(networkThrottle, networkId, RST);
             }
         }
 
         private void handleBegin(
             BeginFW begin)
         {
-            try
+            final int flags = begin.flags();
+            if (isEmpty(flags))
             {
-                final String networkReplyName = begin.source().asString();
-                this.networkCorrelationId = begin.correlationId();
+                try
+                {
+                    final String networkReplyName = begin.source().asString();
+                    this.networkCorrelationId = begin.correlationId();
 
-                final MessageConsumer networkReply = router.supplyTarget(networkReplyName);
-                final long newNetworkReplyId = supplyStreamId.getAsLong();
+                    this.networkReply = router.supplyTarget(networkReplyName);
+                    this.networkReplyId = supplyStreamId.getAsLong();
 
-                final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkThrottle, networkId,
-                        networkReplyName, networkReply, newNetworkReplyId,
-                        this::handleStatus,
-                        this::handleNetworkReplyDone, this::setNetworkReplyDoneHandler,
-                        this::getNetworkBudget, this::getNetworkPadding,
-                        this::setNetworkBudget,
+                    this.networkReplyMemoryManager = new EncryptMemoryManager(
+                        memoryManager,
+                        directBufferBuilderRO,
+                        directBufferRW,
+                        regionsRO,
+                        transferCapacity,
+                        networkReplyId,
                         writeFrameCounter,
-                        readFrameCounter,
-                        writeBytesAccumulator,
-                        readBytesAccumulator);
+                        writeBytesAccumulator);
 
-                networkBudget += handshakeBudget;
-                doWindow(networkThrottle, networkId, networkBudget, networkPadding);
+                    final ServerHandshake newHandshake = new ServerHandshake(
+                            tlsEngine,
+                            networkThrottle,
+                            networkId,
+                            networkReplyName,
+                            networkReply,
+                            networkReplyId,
+                            this::handleStatus,
+                            this::handleNetworkReplyDone,
+                            this::setNetworkReplyDoneHandler, // needed to remove correlation, but could simplify (maybe?)
+                                                              // just have the accept stream handle the reset (pass reset handler)
+                                                              // and remove correlation if there
+                            this.networkPendingRegionAddresses,
+                            this.networkPendingRegionLengths,
+                            this::consumedRegions,
+                            networkReplyMemoryManager,
+                            this::setOnNetworkClosingHandshakeHandler,
+                            this.readFrameCounter,
+                            this.readBytesAccumulator);
 
-                doBegin(networkReply, newNetworkReplyId, 0L, 0L, networkCorrelationId);
-                router.setThrottle(networkReplyName, newNetworkReplyId, newHandshake::handleThrottle);
+                    doBegin(networkReply, networkReplyId, 0L, 0L, networkCorrelationId);
+                    router.setThrottle(networkReplyName, networkReplyId, newHandshake::handleThrottle);
 
-                this.streamState = newHandshake::afterBegin;
-                this.networkReplyName = networkReplyName;
-                this.networkReply = networkReply;
-                this.networkReplyId = newNetworkReplyId;
-                this.handshake = newHandshake;
+                    this.streamState = newHandshake::afterBegin;
+                    this.networkReplyName = networkReplyName;
+                    this.handshake = newHandshake;
 
-                tlsEngine.setHandshakeApplicationProtocolSelector(this::selectApplicationProtocol);
+                    tlsEngine.setHandshakeApplicationProtocolSelector(this::selectApplicationProtocol);
 
-                tlsEngine.beginHandshake();
+                    tlsEngine.beginHandshake();
+                }
+                catch (SSLException ex)
+                {
+                    // TODO testing
+                    doTransfer(applicationTarget, applicationId, authorization, RST);
+                }
             }
-            catch (SSLException ex)
+            else
             {
-                doReset(networkThrottle, networkId);
-                doAbort(networkReply, networkReplyId, 0L);
+                doAck(networkThrottle, networkId, flags);
             }
+        }
+
+        public void setOnNetworkClosingHandshakeHandler(
+            Consumer<SSLEngineResult> closingHandshakeHandler)
+        {
+            this.closingHandshakeHandler = closingHandshakeHandler;
         }
 
         private String selectApplicationProtocol(
@@ -439,183 +462,193 @@ public final class ServerStreamFactory implements StreamFactory
         {
             switch (msgTypeId)
             {
-            case DataFW.TYPE_ID:
-                final DataFW data = dataRO.wrap(buffer, index, index + length);
-                handleData(data);
-                break;
-            case EndFW.TYPE_ID:
-                final EndFW end = endRO.wrap(buffer, index, index + length);
-                handleEnd(end);
-                break;
-            case AbortFW.TYPE_ID:
-                final AbortFW abort = abortRO.wrap(buffer, index, index + length);
-                handleAbort(abort);
+            case TransferFW.TYPE_ID:
+                final TransferFW transfer = transferRO.wrap(buffer, index, index + length);
+                handleTransfer(transfer);
                 break;
             default:
-                doReset(networkThrottle, networkId);
-                break;
+                doAck(networkThrottle, networkId, RST);
             }
         }
 
-        private void handleData(
-            DataFW data)
+        private void handleTransfer(
+            TransferFW transfer)
         {
-            final int dataLength = data.length();
-
-            readFrameCounter.getAsLong();
-            readBytesAccumulator.accept(dataLength);
-
-            networkBudget -= dataLength + data.padding();
-
-            if (networkSlot == NO_SLOT)
+            final ListFW<RegionFW> regions = transfer.regions();
+            regions.forEach(r -> readBytesAccumulator.accept(r.length()));
+            if (!regions.isEmpty())
             {
-                networkSlot = networkPool.acquire(networkId);
+                readFrameCounter.getAsLong();
             }
 
-            try
-            {
-                if (networkSlot == NO_SLOT || networkBudget < 0)
-                {
-                    doCloseInbound(tlsEngine);
-                    doReset(networkThrottle, networkId);
-                    doAbort(applicationTarget, applicationId, authorization);
-                    networkSlotOffset = 0;
-                }
-                else
-                {
-                    final OctetsFW payload = data.payload();
-                    final int payloadSize = payload.sizeof();
+            regions.forEach(this::addRegionToPending);
 
-                    final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkSlot);
-                    inNetBuffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
-                    networkSlotOffset += payloadSize;
+            processNetwork();
 
-                    unwrapNetworkBufferData();
-                }
-            }
-            catch (SSLException ex)
+            final int flags = transfer.flags();
+            if (isReset(flags))
             {
-                doReset(networkThrottle, networkId);
-                doAbort(applicationTarget, applicationId, authorization);
-                networkSlotOffset = 0;
+                handleNetworkReset();
             }
-            finally
+            else if(isFin(flags))
             {
-                if (networkSlotOffset == 0 & networkSlot != NO_SLOT)
-                {
-                    networkPool.release(networkSlot);
-                    networkSlot = NO_SLOT;
-                }
+                handleNetworkFin();
             }
         }
 
-        private void unwrapNetworkBufferData() throws SSLException
+        private void addRegionToPending(RegionFW region)
         {
-            assert (networkSlotOffset != 0);
+            networkPendingRegionAddresses.add(region.address());
+            networkPendingRegionLengths.add(region.length());
+        }
 
-            if (applicationSlot == NO_SLOT)
+        private void processNetwork()
+        {
+            if (networkPendingRegionAddresses.isEmpty())
             {
-                applicationSlot = applicationPool.acquire(applicationId);
+                return;
             }
+
+            inNetByteBuffer.clear();
+            outAppByteBuffer.clear();
+
+            final ByteBuffer inNetBuffer = stageInNetBuffer(
+                this.networkPendingRegionAddresses,
+                this.networkPendingRegionLengths);
 
             try
             {
-                if (applicationSlot == NO_SLOT)
+                if (tlsEngine.isOutboundDone())
                 {
-                    doCloseInbound(tlsEngine);
-                    doReset(networkThrottle, networkId);
-                    doAbort(applicationTarget, applicationId, authorization);
-                    networkSlotOffset = 0;
+                    this.closingHandshakeHandler = r -> {};
                 }
-                else
-                {
-                    final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkSlot);
-                    final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkSlot);
-                    final int inNetByteBufferPosition = inNetByteBuffer.position();
-                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset);
 
-                    loop:
-                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+                int bytesConsumerIter = 0;
+                loop:
+                while (inNetBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+                {
+                    SSLEngineResult result = tlsEngine.unwrap(inNetBuffer, outAppByteBuffer);
+
+                    int bytesProduced = result.bytesProduced();
+                    switch (result.getStatus())
                     {
-                        final ByteBuffer outAppByteBuffer = applicationPool.byteBuffer(applicationSlot);
-                        outAppByteBuffer.position(outAppByteBuffer.position() + applicationSlotOffset);
-
-                        SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-
-                        switch (result.getStatus())
-                        {
-                        case BUFFER_OVERFLOW:
-                        case BUFFER_UNDERFLOW:
-                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
-                            final int totalBytesRemaining = inNetByteBuffer.remaining();
-                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
-                            networkSlotOffset = totalBytesRemaining;
-                            if (networkSlotOffset == networkPool.slotCapacity() &&
-                                    result.getStatus() == BUFFER_UNDERFLOW)
-                            {
-                                networkSlotOffset = 0;
-                                doReset(networkThrottle, networkId);
-                                doAbort(applicationTarget, applicationId, authorization);
-                                doCloseInbound(tlsEngine);
-                            }
-                            else
-                            {
-                                final int networkCredit =
-                                        Math.max(networkPool.slotCapacity() - networkSlotOffset - networkBudget, 0);
-
-                                if (networkCredit > 0)
-                                {
-                                    networkBudget += networkCredit;
-                                    doWindow(networkThrottle, networkId, networkCredit, networkPadding);
-                                }
-                            }
-                            break loop;
-                        default:
-                            networkSlotOffset = 0;
-                            applicationSlotOffset += result.bytesProduced();
-                            handleStatus(result.getHandshakeStatus(), r -> {});
-                            break;
-                        }
+                    case BUFFER_OVERFLOW:
+                    case BUFFER_UNDERFLOW:
+                         break loop;
+                    default:
+                        handleStatus(result.getHandshakeStatus(), closingHandshakeHandler);
+                        break;
                     }
 
-                    handleFlushAppData();
+                    int totalBytesConsumed = inNetBuffer.position();
+                    final int flags = tlsEngine.isInboundDone()? FIN : EMPTY;
+                    if (bytesProduced == 0 && totalBytesConsumed > 0)
+                    {
+                        assert tlsEngine.isInboundDone();
+                        doAck(networkThrottle, networkId, EMPTY, rb ->
+                        {
+                            while (this.networkPendingRegionAddresses.size() > 0)
+                            {
+                                rb.item(r -> r.address(networkPendingRegionAddresses.remove(0))
+                                              .length(networkPendingRegionLengths.remove(0))
+                                              .streamId(networkId));
+                            }
+                        });
+                        doTransfer(applicationTarget, applicationId, authorization, FIN);
+                    }
+                    else if (bytesProduced > 0)
+                    {
+                        handleFlushAppData(bytesProduced, totalBytesConsumed - bytesConsumerIter, flags);
+                    }
+                    bytesConsumerIter = totalBytesConsumed;
                 }
             }
             catch (SSLException ex)
             {
-                networkSlotOffset = 0;
-                applicationSlotOffset = 0;
-                throw ex;
-            }
-            finally
-            {
-                if (applicationSlotOffset == 0 && applicationSlot != NO_SLOT)
-                {
-                    applicationPool.release(applicationSlot);
-                    applicationSlot = NO_SLOT;
-                }
+                doAck(networkThrottle, networkId, RST);
+                doTransfer(applicationTarget, applicationId, authorization, RST);
             }
         }
 
-        private void handleEnd(
-            EndFW end)
+        private Consumer<Builder<RegionFW.Builder, RegionFW>> consumedRegions(
+            int totalBytesConsumed)
+        {
+            return b ->
+            {
+                int toAck = totalBytesConsumed;
+                while (toAck > 0)
+                {
+                    int nextLength = networkPendingRegionLengths.get(0);
+                    if (nextLength > toAck)
+                    {
+                        nextLength -= toAck;
+                        networkPendingRegionLengths.set(0, nextLength);
+                        final long addressBeforeAck = networkPendingRegionAddresses.get(0);
+                        final int acked = toAck;
+                        networkPendingRegionAddresses.set(0, addressBeforeAck + acked);
+                        b.item(r -> r.address(addressBeforeAck)
+                                     .length(acked)
+                                     .streamId(networkId));
+                    }
+                    else
+                    {
+                        b.item(r -> r.address(networkPendingRegionAddresses.remove(0))
+                                     .length(networkPendingRegionLengths.remove(0))
+                                     .streamId(networkId));
+                    }
+                    toAck -= nextLength;
+                }
+            };
+        }
+
+        private void doApplicationClosingHandshake(SSLEngineResult r)
+        {
+            final int bytesProduced = r.bytesProduced();
+            if (bytesProduced > 0)
+            {
+                outNetByteBuffer.flip();
+
+                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
+                if (maxPayloadSize < bytesProduced)
+                {
+                    throw new IllegalArgumentException("transfer capacity exceeded");
+                    // TODO: reset stream instead
+                }
+                doTransfer(
+                        networkReply,
+                        networkReplyId,
+                        0L, // TODO proper authorization
+                        EMPTY,
+                        rb -> this.networkReplyMemoryManager.packRegions(
+                                outNetByteBuffer,
+                                0,
+                                bytesProduced,
+                                EMPTY_REGION,
+                                rb));
+            }
+        };
+
+        private void handleNetworkFin()
         {
             if (!tlsEngine.isInboundDone())
             {
                 try
                 {
                     doCloseInbound(tlsEngine);
-                    doEnd(applicationTarget, applicationId, authorization);
+                    doTransfer(applicationTarget, applicationId, authorization, FrameFlags.FIN);
                 }
                 catch (SSLException ex)
                 {
-                    doAbort(applicationTarget, applicationId, authorization);
+                    doTransfer(applicationTarget, applicationId, authorization, RST);
                 }
+            }
+            else
+            {
+                doAck(networkThrottle, networkId, FIN);
             }
         }
 
-        private void handleAbort(
-            AbortFW abort)
+        private void handleNetworkReset()
         {
             try
             {
@@ -627,7 +660,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             finally
             {
-                doAbort(applicationTarget, applicationId, authorization);
+                doTransfer(applicationTarget, applicationId, authorization, RST);
             }
         }
 
@@ -673,6 +706,7 @@ public final class ServerStreamFactory implements StreamFactory
                 case FINISHED:
                     handleFinished();
                     status = tlsEngine.getHandshakeStatus();
+                    this.setOnNetworkClosingHandshakeHandler(this::doApplicationClosingHandshake);
                     break;
                 default:
                     break loop;
@@ -732,12 +766,6 @@ public final class ServerStreamFactory implements StreamFactory
 
                 handshake.onFinished();
 
-                if (handshake.networkSlotOffset != 0)
-                {
-                    this.networkSlot = handshake.networkSlot;
-                    this.networkSlotOffset = handshake.networkSlotOffset;
-                }
-
                 this.applicationTarget = applicationTarget;
                 this.applicationId = newApplicationId;
                 this.applicationCorrelationId = newCorrelationId;
@@ -747,45 +775,82 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doReset(networkThrottle, networkId);
-                doAbort(networkReply, networkReplyId, 0L);
+                doTransfer(networkReply, networkReplyId, authorization, RST);
+                doAck(networkThrottle, networkId, RST);
             }
         }
 
-        private void handleFlushAppData()
+        // writes to right and ack back remaining
+        private void handleFlushAppData(
+            int bytesProduced,
+            int bytesConsumed,
+            int flags)
         {
-            if (applicationSlotOffset > 0)
+            if (bytesConsumed - bytesProduced > 0)
             {
-                final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationSlot);
-
-                final int applicationWindow = Math.min(
-                        applicationBudget - applicationPadding, MAXIMUM_PAYLOAD_LENGTH);
-
-                final int applicationBytesConsumed = Math.min(applicationSlotOffset, applicationWindow);
-
-                if (applicationBytesConsumed > 0)
-                {
-                    final OctetsFW outAppOctets = outAppOctetsRO.wrap(outAppBuffer, 0, applicationBytesConsumed);
-
-                    doData(applicationTarget, applicationId, applicationPadding, authorization, outAppOctets);
-
-                    applicationBudget -= applicationBytesConsumed + applicationPadding;
-
-                    applicationSlotOffset -= applicationBytesConsumed;
-
-                }
-
-                if (applicationSlotOffset != 0)
-                {
-                    alignSlotBuffer(outAppBuffer, applicationBytesConsumed, applicationSlotOffset);
-                }
-
+                doAck(
+                    networkThrottle,
+                    networkId,
+                    EMPTY,
+                    rb ->
+                    {
+                        int bytesToAck = bytesConsumed - bytesProduced;
+                        while(bytesToAck > 0)
+                        {
+                            int availableLength = networkPendingRegionLengths.get(0);
+                            final boolean ackWholeRegion = bytesToAck > availableLength;
+                            final long uAddress = ackWholeRegion ? networkPendingRegionAddresses.remove(0):
+                                                                   networkPendingRegionAddresses.get(0);
+                            if (ackWholeRegion)
+                            {
+                                networkPendingRegionLengths.remove(0);
+                            }
+                            else
+                            {
+                                networkPendingRegionLengths.set(0, availableLength - bytesToAck);
+                                networkPendingRegionAddresses.set(0, uAddress + bytesToAck);
+                                availableLength = bytesToAck;
+                            }
+                            final int lengthAcked = availableLength;
+                            rb.item(r -> r.address(uAddress).length(lengthAcked).streamId(networkId));
+                            bytesToAck -= lengthAcked;
+                        }
+                    }
+                );
             }
 
-            if (applicationSlotOffset == 0 && tlsEngine.isInboundDone())
-            {
-                doEnd(applicationTarget, applicationId, authorization);
-            }
+            doTransfer(
+                applicationTarget,
+                applicationId,
+                0L,
+                flags,
+                rb ->
+                {
+                    int bytesToWrite = bytesProduced;
+                    while (bytesToWrite > 0)
+                    {
+                        int availableLength = networkPendingRegionLengths.get(0);
+                        final boolean useWholeRegion = availableLength <= bytesToWrite;
+                        final Long uAddress = useWholeRegion ? networkPendingRegionAddresses.remove(0):
+                                                               networkPendingRegionAddresses.get(0);
+                        if (useWholeRegion)
+                        {
+                            networkPendingRegionLengths.remove(0);
+                        }
+                        else
+                        {
+                            networkPendingRegionLengths.set(0, availableLength - bytesToWrite);
+                            availableLength = bytesToWrite;
+                        }
+                        directBufferRW.wrap(
+                            memoryManager.resolve(uAddress),
+                            availableLength);
+                        directBufferRW.putBytes(0, outAppByteBuffer, bytesProduced - bytesToWrite, availableLength);
+                        final int lengthWritten = availableLength;
+                        rb.item(r -> r.address(uAddress).length(lengthWritten).streamId(networkId));
+                        bytesToWrite -= lengthWritten;
+                    }
+                });
         }
 
         private void handleThrottle(
@@ -796,102 +861,51 @@ public final class ServerStreamFactory implements StreamFactory
         {
             switch (msgTypeId)
             {
-            case WindowFW.TYPE_ID:
-                final WindowFW window = windowRO.wrap(buffer, index, index + length);
-                handleWindow(window);
-                break;
-            case ResetFW.TYPE_ID:
-                final ResetFW reset = resetRO.wrap(buffer, index, index + length);
-                handleReset(reset);
-                break;
-            default:
-                // ignore
-                break;
-            }
-        }
-
-        private void handleWindow(
-            WindowFW window)
-        {
-            applicationBudget += window.credit();
-            applicationPadding = networkPadding = window.padding();
-
-            if (applicationSlotOffset != 0)
-            {
-                try
-                {
-                    handleFlushAppData();
-                }
-                finally
-                {
-                    if (applicationSlotOffset == 0)
+                case AckFW.TYPE_ID:
+                    final AckFW ack = ackRO.wrap(buffer, index, index + length);
+                    final ListFW<RegionFW> regions = ack.regions();
+                    final int flags = ack.flags();
+                    if (isReset(flags))
                     {
-                        applicationPool.release(applicationSlot);
-                        applicationSlot = NO_SLOT;
+                        try
+                        {
+                            doCloseInbound(tlsEngine);
+                        }
+                        catch (SSLException ex)
+                        {
+                            // NOOP
+                        }
+                        doAck(networkThrottle, networkId, RST);
                     }
-                }
-            }
-
-            if (networkSlotOffset != 0)
-            {
-                try
-                {
-                    unwrapNetworkBufferData();
-                }
-                catch (SSLException ex)
-                {
-                    doReset(networkThrottle, networkId);
-                    doAbort(applicationTarget, applicationId, authorization);
-                }
-                finally
-                {
-                    if (networkSlotOffset == 0)
+                    else if (!regions.isEmpty() || isFin(flags))
                     {
-                        networkPool.release(networkSlot);
-                        networkSlot = NO_SLOT;
+                        doAck(
+                            networkThrottle,
+                            networkId,
+                            flags,
+                            rsb -> regions.forEach(r -> rsb.item(rb -> rb.address(r.address())
+                                                                         .length(r.length())
+                                                                         .streamId(r.streamId()))));
                     }
-                }
+                    break;
+                default:
+                    // ignore
+                    break;
             }
-
-            final int networkCredit = applicationBudget - networkBudget - networkSlotOffset;
-
-            if (networkCredit > 0)
-            {
-                networkBudget += networkCredit;
-                doWindow(networkThrottle, networkId, networkCredit, networkPadding);
-            }
-        }
-
-        private void handleReset(
-            ResetFW reset)
-        {
-            try
-            {
-                doCloseInbound(tlsEngine);
-            }
-            catch (SSLException ex)
-            {
-                // Ignore and clean up
-            }
-            finally
-            {
-                doReset(networkThrottle, networkId);
-            }
-        }
-
-        private void handleNetworkDone()
-        {
-            doAbort(applicationTarget, applicationId, authorization);
         }
 
         private void handleNetworkReplyDone()
         {
             correlations.remove(applicationCorrelationId);
 
+            networkReplyMemoryManager.release();
+
             if (networkReplyDoneHandler != null)
             {
                 networkReplyDoneHandler.run();
             }
+
+            doTransfer(applicationTarget, applicationId, authorization, RST);
         }
 
         private void setNetworkReplyDoneHandler(
@@ -900,25 +914,6 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkReplyDoneHandler = networkReplyDoneHandler;
         }
 
-        private int getNetworkBudget()
-        {
-            return networkBudget;
-        }
-
-        private int getNetworkPadding()
-        {
-            return networkPadding;
-        }
-
-        private void setNetworkBudget(int networkBudget)
-        {
-            this.networkBudget = networkBudget;
-        }
-
-        private void setNetworkPadding(int networkPadding)
-        {
-            this.networkPadding = networkPadding;
-        }
     }
 
     public final class ServerHandshake
@@ -933,23 +928,17 @@ public final class ServerStreamFactory implements StreamFactory
         private final long networkReplyId;
         private final Runnable networkReplyDoneHandler;
         private final Consumer<Runnable> networkReplyDoneHandlerConsumer;
-
-        private final LongSupplier writeFrameCounter;
+        private final Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
+        private EncryptMemoryManager networkReplyMemoryManager;
         private final LongSupplier readFrameCounter;
-        private final LongConsumer writeBytesAccumulator;
         private final LongConsumer readBytesAccumulator;
 
-        private int networkSlot = NO_SLOT;
-        private int networkSlotOffset;
+        private final LongArrayList networkPendingRegionAddresses;
+        private final IntArrayList networkPendingRegionLengths;
 
-        private int networkReplyBudget;
-        private int networkReplyPadding;
+        private final AckedRegionBuilder ackRegionBuilder;
 
-        private IntSupplier networkBudgetSupplier;
-        private IntSupplier networkPaddingSupplier;
-        private IntConsumer networkBudgetConsumer;
-
-        private Consumer<ResetFW> resetHandler;
+        private Consumer<AckFW> resetHandler;
 
         private ServerHandshake(
             SSLEngine tlsEngine,
@@ -961,12 +950,12 @@ public final class ServerStreamFactory implements StreamFactory
             BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler,
             Runnable networkReplyDoneHandler,
             Consumer<Runnable> networkReplyDoneHandlerConsumer,
-            IntSupplier networkBudgetSupplier,
-            IntSupplier networkPaddingSupplier,
-            IntConsumer networkBudgetConsumer,
-            LongSupplier writeFrameCounter,
+            LongArrayList networkPendingRegionAddresses,
+            IntArrayList networkPendingRegionLengths,
+            AckedRegionBuilder ackRegionBuilder,
+            EncryptMemoryManager networkReplyMemoryManager,
+            Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler,
             LongSupplier readFrameCounter,
-            LongConsumer writeBytesAccumulator,
             LongConsumer readBytesAccumulator)
         {
             this.tlsEngine = tlsEngine;
@@ -980,12 +969,14 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkReply = networkReply;
             this.networkReplyId = networkReplyId;
             this.networkReplyDoneHandlerConsumer = networkReplyDoneHandlerConsumer;
-            this.networkBudgetSupplier = networkBudgetSupplier;
-            this.networkPaddingSupplier = networkPaddingSupplier;
-            this.networkBudgetConsumer = networkBudgetConsumer;
-            this.writeFrameCounter = writeFrameCounter;
+
+            this.networkReplyMemoryManager = networkReplyMemoryManager;
+
+            this.networkPendingRegionAddresses = networkPendingRegionAddresses;
+            this.networkPendingRegionLengths = networkPendingRegionLengths;
+            this.ackRegionBuilder = ackRegionBuilder;
+            this.setOnNetworkClosingHandshakeHandler = setOnNetworkClosingHandshakeHandler;
             this.readFrameCounter = readFrameCounter;
-            this.writeBytesAccumulator = writeBytesAccumulator;
             this.readBytesAccumulator = readBytesAccumulator;
         }
 
@@ -1002,158 +993,135 @@ public final class ServerStreamFactory implements StreamFactory
         {
             switch (msgTypeId)
             {
-            case DataFW.TYPE_ID:
-                final DataFW data = dataRO.wrap(buffer, index, index + length);
-                handleData(data);
-                break;
-            case EndFW.TYPE_ID:
-                final EndFW end = endRO.wrap(buffer, index, index + length);
-                handleEnd(end);
-                break;
-            case AbortFW.TYPE_ID:
-                final AbortFW abort = abortRO.wrap(buffer, index, index + length);
-                handleAbort(abort);
+            case TransferFW.TYPE_ID:
+                final TransferFW transfer = transferRO.wrap(buffer, index, index + length);
+                handleTransfer(transfer);
                 break;
             default:
-                doReset(networkThrottle, networkId);
+                doAck(networkThrottle, networkId, RST);
                 break;
             }
         }
 
-        private void handleData(
-            DataFW data)
+        private void handleTransfer(
+            TransferFW transfer)
         {
-            readFrameCounter.getAsLong();
-            readBytesAccumulator.accept(data.length());
-
-            networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt()
-                    - data.length() - data.padding());
-
-            if (networkSlot == NO_SLOT)
+            final ListFW<RegionFW> regions = transfer.regions();
+            regions.forEach(r -> readBytesAccumulator.accept(r.length()));
+            if (!regions.isEmpty())
             {
-                networkSlot = networkPool.acquire(networkId);
+                readFrameCounter.getAsLong();
             }
 
-            try
+            transfer.regions().forEach(
+            r ->
             {
-                if (networkSlot == NO_SLOT || networkBudgetSupplier.getAsInt() < 0)
+                int numStored = networkPendingRegionAddresses.size();
+                if (numStored > 0)
                 {
-                    doCloseOutbound(tlsEngine, networkReply, networkReplyId, networkReplyPadding,
-                            data.authorization(), NOP, writeFrameCounter, writeBytesAccumulator);
-                    doReset(networkThrottle, networkId);
-                    doAbort(networkReply, networkReplyId, 0L);
+                    int lastIndex = numStored - 1;
+                    long lastAddress = networkPendingRegionAddresses.get(lastIndex);
+                    int lastLength = networkPendingRegionLengths.get(lastIndex);
+                    if (lastAddress + lastLength == r.address())
+                    {
+                        networkPendingRegionLengths.set(lastIndex, lastLength + r.length());
+                    }
+                    else
+                    {
+                        networkPendingRegionAddresses.add(r.address());
+                        networkPendingRegionLengths.add(r.length());
+                    }
                 }
                 else
                 {
-                    final OctetsFW payload = data.payload();
-                    final int payloadSize = payload.sizeof();
+                    networkPendingRegionAddresses.add(r.address());
+                    networkPendingRegionLengths.add(r.length());
+                }
+            });
+            processNetwork();
 
-                    final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkSlot);
-                    inNetBuffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
-                    final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkSlot);
-                    final int inNetByteBufferPosition = inNetByteBuffer.position();
-                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset + payloadSize);
+            int flags = transfer.flags();
+            if (isReset(flags))
+            {
+                tlsEngine.closeOutbound();
+            }
+            else if(isFin(flags))
+            {
+                doTransfer(networkReply, networkReplyId, transfer.authorization(), RST);
+                doAck(networkThrottle, networkId, FIN);
+            }
+        }
 
-                    loop:
-                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+        private void processNetwork()
+        {
+            if (networkPendingRegionAddresses.isEmpty())
+            {
+                return;
+            }
+
+            inNetByteBuffer.clear();
+            outNetByteBuffer.clear();
+
+            final ByteBuffer inNetBuffer = stageInNetBuffer(
+                this.networkPendingRegionAddresses,
+                this.networkPendingRegionLengths);
+
+            try
+            {
+                loop:
+                while (inNetBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+                {
+                    outNetByteBuffer.rewind();
+                    HandshakeStatus handshakeStatus = NOT_HANDSHAKING;
+                    SSLEngineResult.Status status = BUFFER_UNDERFLOW;
+                    if (tlsEngine.getHandshakeStatus() != NOT_HANDSHAKING && tlsEngine.getHandshakeStatus() != FINISHED)
                     {
-                        outAppByteBuffer.rewind();
-                        HandshakeStatus handshakeStatus = NOT_HANDSHAKING;
-                        SSLEngineResult.Status status = BUFFER_UNDERFLOW;
-                        if (tlsEngine.getHandshakeStatus() != NOT_HANDSHAKING && tlsEngine.getHandshakeStatus() != FINISHED)
-                        {
-                            SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-                            status = result.getStatus();
-                            handshakeStatus = result.getHandshakeStatus();
-                        }
-
-                        if (outAppByteBuffer.position() != 0)
-                        {
-                            doReset(networkThrottle, networkId);
-                            doAbort(networkReply, networkReplyId, 0L);
-                            break loop;
-                        }
-
-                        switch (status)
-                        {
-                        case BUFFER_UNDERFLOW:
-                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
-                            final int totalBytesRemaining = inNetByteBuffer.remaining();
-                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
-                            networkSlotOffset = totalBytesRemaining;
-                            break loop;
-                        default:
-                            networkSlotOffset = inNetByteBuffer.remaining();
-                            statusHandler.accept(handshakeStatus, this::updateNetworkReplyWindow);
-                            break;
-                        }
+                        SSLEngineResult result = tlsEngine.unwrap(inNetBuffer, outNetByteBuffer);
+                        status = result.getStatus();
+                        handshakeStatus = result.getHandshakeStatus();
                     }
 
-                    networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt() + data.length());
-
-                    doWindow(networkThrottle, networkId, data.length(), networkPaddingSupplier.getAsInt());
+                    switch (status)
+                    {
+                        case BUFFER_UNDERFLOW:
+                            break loop;
+                        default:
+                            statusHandler.accept(handshakeStatus, this::flushNetworkHandshake);
+                            break;
+                    }
                 }
+                int totalBytesConsumed = inNetBuffer.position();
+                doAck(networkThrottle, networkId, EMPTY, ackRegionBuilder.ackRegions(totalBytesConsumed));
             }
             catch (SSLException | UnsupportedOperationException ex)
             {
-                networkSlotOffset = 0;
-                doReset(networkThrottle, networkId);
-                doAbort(networkReply, networkReplyId, 0L);
-            }
-            finally
-            {
-                if (networkSlotOffset == 0 && networkSlot != NO_SLOT)
-                {
-                    networkPool.release(networkSlot);
-                    networkSlot = NO_SLOT;
-                }
+                // TODO no testing
+                doAck(networkThrottle, networkId, RST);
+                doTransfer(networkReply, networkReplyId, 0L, RST);
             }
         }
 
-        private void handleEnd(
-            EndFW end)
-        {
-            try
-            {
-                doCloseOutbound(
-                    tlsEngine,
-                    networkReply,
-                    networkReplyId,
-                    networkReplyPadding,
-                    end.authorization(),
-                    NOP,
-                    writeFrameCounter,
-                    writeBytesAccumulator);
-            }
-            catch (SSLException ex)
-            {
-                doAbort(networkReply, networkReplyId, 0L);
-            }
-        }
-
-        private void handleAbort(
-            AbortFW abort)
-        {
-            tlsEngine.closeOutbound();
-        }
-
-        private void updateNetworkReplyWindow(
+        private void flushNetworkHandshake(
             SSLEngineResult result)
         {
             final int bytesProduced = result.bytesProduced();
             if (bytesProduced != 0)
             {
-                flushNetwork(
-                    tlsEngine,
-                    result.bytesProduced(),
+                outNetByteBuffer.flip();
+
+                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
+                if (maxPayloadSize < bytesProduced)
+                {
+                    throw new IllegalArgumentException("transfer capacity exceeded");
+                    // TODO: reset stream instead
+                }
+
+                doTransfer(
                     networkReply,
                     networkReplyId,
-                    0,
                     0L,
-                    networkReplyDoneHandler,
-                    writeFrameCounter,
-                    writeBytesAccumulator);
-                networkReplyBudget -= bytesProduced + networkReplyPadding;
+                    EMPTY,
+                    rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
             }
         }
 
@@ -1161,22 +1129,12 @@ public final class ServerStreamFactory implements StreamFactory
             MessageConsumer newNetworkThrottle)
         {
             router.setThrottle(networkReplyName, networkReplyId, newNetworkThrottle);
-
-
-            //doWindow(newNetworkThrottle, networkReplyId, outNetworkWindowBudget, outNetworkWindowPadding);
         }
 
         private void setNetworkReplyDoneHandler(
             Runnable networkReplyDoneHandler)
         {
             networkReplyDoneHandlerConsumer.accept(networkReplyDoneHandler);
-        }
-
-        @Override
-        public String toString()
-        {
-            return String.format("%s [networkReplyBudget=%d networkReplyPadding=%d]", getClass().getSimpleName(),
-                    networkReplyBudget, networkReplyPadding);
         }
 
         private void handleThrottle(
@@ -1187,31 +1145,23 @@ public final class ServerStreamFactory implements StreamFactory
         {
             switch (msgTypeId)
             {
-            case WindowFW.TYPE_ID:
-                final WindowFW window = windowRO.wrap(buffer, index, index + length);
-                handleWindow(window);
-                break;
-            case ResetFW.TYPE_ID:
-                final ResetFW reset = resetRO.wrap(buffer, index, index + length);
-                resetHandler.accept(reset);
-                break;
-            default:
-                // ignore
-                break;
+                case AckFW.TYPE_ID:
+                    final AckFW ack = ackRO.wrap(buffer, index, index + length);
+                    networkReplyMemoryManager.buildAckedRegions(null, ack.regions());
+                    if (isReset(ack.flags()))
+                    {
+                        resetHandler.accept(ack);
+                    }
+                    break;
+                default:
+                    // ignore
+                    break;
             }
         }
 
-        private void handleWindow(
-            WindowFW window)
-        {
-            networkReplyBudget += window.credit();
-            networkReplyPadding = window.padding();
-
-            statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkReplyWindow);
-        }
 
         private void handleReset(
-            ResetFW reset)
+            AckFW reset)
         {
             try
             {
@@ -1228,21 +1178,16 @@ public final class ServerStreamFactory implements StreamFactory
         }
 
         private void handleResetAfterHandshake(
-            ResetFW reset)
+            AckFW reset)
         {
             networkReplyDoneHandler.run();
         }
+
     }
 
     private final class ServerConnectReplyStream
     {
         private final long applicationReplyId;
-
-        private int applicationReplyBudget;
-        private int applicationReplyPadding;
-
-        private int networkReplyBudget;
-        private int networkReplyPadding;
 
         private MessageConsumer applicationReplyThrottle;
 
@@ -1251,19 +1196,9 @@ public final class ServerStreamFactory implements StreamFactory
 
         private MessageConsumer streamState;
         private SSLEngine tlsEngine;
-        private BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler;
 
-        private LongSupplier writeFrameCounter;
-        private LongSupplier readFrameCounter;
-        private LongConsumer writeBytesAccumulator;
-        private LongConsumer readBytesAccumulator;
-
-        @Override
-        public String toString()
-        {
-            return String.format("%s [applicationBudget=%d applicationPadding=%d]",
-                                 getClass().getSimpleName(), applicationReplyBudget, applicationReplyPadding);
-        }
+        private EncryptMemoryManager networkReplyMemoryManager;
+        private Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
 
         private ServerConnectReplyStream(
             MessageConsumer applicationReplyThrottle,
@@ -1296,7 +1231,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doReset(applicationReplyThrottle, applicationReplyId);
+                doAck(applicationReplyThrottle, applicationReplyId, RST);
             }
         }
 
@@ -1308,21 +1243,13 @@ public final class ServerStreamFactory implements StreamFactory
         {
             switch (msgTypeId)
             {
-            case DataFW.TYPE_ID:
-                final DataFW data = dataRO.wrap(buffer, index, index + length);
-                handleData(data);
-                break;
-            case EndFW.TYPE_ID:
-                final EndFW end = endRO.wrap(buffer, index, index + length);
-                handleEnd(end);
-                break;
-            case AbortFW.TYPE_ID:
-                final AbortFW abort = abortRO.wrap(buffer, index, index + length);
-                handleAbort(abort);
-                break;
-            default:
-                doReset(applicationReplyThrottle, applicationReplyId);
-                break;
+                case TransferFW.TYPE_ID:
+                    final TransferFW transfer = transferRO.wrap(buffer, index, index + length);
+                    handleTransfer(transfer);
+                    break;
+                default:
+                    doAck(applicationReplyThrottle, applicationReplyId, RST);
+                    break;
             }
         }
 
@@ -1339,105 +1266,142 @@ public final class ServerStreamFactory implements StreamFactory
                 this.tlsEngine = handshake.tlsEngine;
                 this.networkReply = handshake.networkReply;
                 this.networkReplyId = handshake.networkReplyId;
-                this.statusHandler = handshake.statusHandler;
+                this.setOnNetworkClosingHandshakeHandler = handshake.setOnNetworkClosingHandshakeHandler;
 
-                this.writeFrameCounter = handshake.writeFrameCounter;
-                this.readFrameCounter = handshake.readFrameCounter;
-                this.writeBytesAccumulator = handshake.writeBytesAccumulator;
-                this.readBytesAccumulator = handshake.readBytesAccumulator;
-
-                this.networkReplyBudget = handshake.networkReplyBudget;
-                this.networkReplyPadding = handshake.networkReplyPadding;
-                this.applicationReplyPadding = networkReplyPadding + MAXIMUM_HEADER_SIZE;
+                this.networkReplyMemoryManager = handshake.networkReplyMemoryManager;
+                doAck(applicationReplyThrottle, applicationReplyId, 0);
                 handshake.setNetworkThrottle(this::handleThrottle);
-                sendApplicationReplyWindow();
                 handshake.setNetworkReplyDoneHandler(this::handleNetworkReplyDone);
             }
             else
             {
-                doReset(applicationReplyThrottle, applicationReplyId);
+                doAck(applicationReplyThrottle, applicationReplyId, RST);
             }
         }
 
-        private void handleData(
-            DataFW data)
+        private void handleTransfer(
+            TransferFW transfer)
         {
-            applicationReplyBudget -= data.length() + data.padding();
+            final ListFW<RegionFW> regions = transfer.regions();
+            final long authorization = transfer.authorization();
+
+            if (!regions.isEmpty()) // TODO combine with flags frome down below?
+            {
+                processApplication(regions, authorization, EMPTY);
+            }
+
+            final int flags = transfer.flags();
+            if (isFin(flags))
+            {
+                handleEnd(transfer);
+            }
+            if (isReset(flags))
+            {
+                handleAbort();
+            }
+        }
+
+        private void processApplication(
+            final ListFW<RegionFW> regions,
+            final long authorization,
+            final int flags)
+        {
+            // stage into buffer
+            inAppByteBuffer.clear();
+
+            regions.forEach(ServerStreamFactory.this::stageRegionsToInAppByteBuffer);
+            inAppByteBuffer.flip();
 
             try
             {
-                if (applicationReplyBudget < 0)
+                while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                 {
-                    doReset(applicationReplyThrottle, applicationReplyId);
-                    doCloseOutbound(tlsEngine, networkReply, networkReplyId, networkReplyPadding,
-                            data.authorization(), this::handleNetworkReplyDone,
-                            writeFrameCounter, writeBytesAccumulator);
-                }
-                else
-                {
-                    final OctetsFW payload = data.payload();
+                    outNetByteBuffer.clear();
+                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(regions);
+                    //    outNetByteBuffer.limit(maxPayloadSize);  TODO, need to check for buffer OVERFLOW,
+                    // instead we are checking bytesProduced < maxPayload Size (if we do TODO need bookkeeping)
 
-                    // Note: inAppBuffer is emptied by SslEngine.wrap(...)
-                    //       so should be able to eliminate copy (stateless)
-                    inAppByteBuffer.clear();
-                    payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
-                    inAppByteBuffer.flip();
+                    SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
+                    final int bytesProduced = result.bytesProduced();
 
-                    while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
+                    if (maxPayloadSize < bytesProduced)
                     {
-                        outNetByteBuffer.rewind();
-                        SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                        if (result.bytesProduced() > 0)
-                        {
-                            networkReplyBudget -= result.bytesProduced() + networkReplyPadding;
-                        }
-                        flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId, networkReplyPadding,
-                                data.authorization(), this::handleNetworkReplyDone, writeFrameCounter, writeBytesAccumulator);
+                        throw new IllegalArgumentException("transfer capacity exceeded");
+                        // TODO: reset stream instead
+                    }
+                    outNetByteBuffer.flip();
 
-                        statusHandler.accept(result.getHandshakeStatus(), this::updateNetworkWindow);
+                    if (inAppByteBuffer.hasRemaining())
+                    {
+                        doTransfer(
+                            networkReply,
+                            networkReplyId,
+                            authorization,
+                            EMPTY,
+                            rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
+                    }
+                    else
+                    {
+                        doTransfer(
+                            networkReply,
+                            networkReplyId,
+                            authorization,
+                            EMPTY,
+                            rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, regions, rb));
                     }
                 }
             }
             catch (SSLException ex)
             {
-                doReset(applicationReplyThrottle, applicationReplyId);
-                doAbort(networkReply, networkReplyId, 0L);
+                // TODO testing
+                doTransfer(networkReply, networkReplyId, authorization, RST);
             }
         }
 
-        private void handleEnd(
-            EndFW end)
+        private void handleEnd(TransferFW transfer)
         {
-            applicationReplyThrottle = null;
+            if(!tlsEngine.isOutboundDone())
+            {
+                try
+                {
+                    tlsEngine.closeOutbound();
+                    inAppByteBuffer.clear();
+                    outNetByteBuffer.clear();
+                    SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
+                    outNetByteBuffer.flip();
+                    final int bytesProduced = result.bytesProduced();
 
-            try
-            {
-                doCloseOutbound(tlsEngine, networkReply, networkReplyId, networkReplyPadding,
-                        end.authorization(), this::handleNetworkReplyDone,
-                        writeFrameCounter, writeBytesAccumulator);
+                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
+                    if (maxPayloadSize < bytesProduced)
+                    {
+                        throw new IllegalArgumentException("transfer capacity exceeded");
+                    }
+
+                    doTransfer(
+                        networkReply,
+                        networkReplyId,
+                        0L,
+                        FIN,
+                        rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
+                }
+                catch (SSLException ex)
+                {
+                    // END is from application reply, so no need to clean that stream
+                    doTransfer(networkReply, networkReplyId, transfer.authorization(), FIN);
+                }
             }
-            catch (SSLException ex)
-            {
-                // END is from application reply, so no need to clean that stream
-                doAbort(networkReply, networkReplyId, 0L);
-            }
+            doTransfer(networkReply, networkReplyId, transfer.authorization(), FIN);
         }
 
-        private void handleAbort(
-            AbortFW abort)
+        private void handleAbort()
         {
             tlsEngine.closeOutbound();
 
-            // ABORT is from application reply, so no need to clean that stream
-            doAbort(networkReply, networkReplyId, 0L);
+            setOnNetworkClosingHandshakeHandler.accept(HANDSHAKE_NOOP);
+//            // ABORT is from application reply, so no need to clean that stream
+            doTransfer(networkReply, networkReplyId, 0L, RST);
         }
 
-        private void updateNetworkWindow(
-            SSLEngineResult result)
-        {
-            // TODO network-network protocol interaction (renegotiate key)
-            //applicationWindowBudgetAdjustment += result.bytesProduced() - result.bytesConsumed();
-        }
 
         private void handleThrottle(
             int msgTypeId,
@@ -1447,13 +1411,25 @@ public final class ServerStreamFactory implements StreamFactory
         {
             switch (msgTypeId)
             {
-            case WindowFW.TYPE_ID:
-                final WindowFW window = windowRO.wrap(buffer, index, index + length);
-                handleWindow(window);
-                break;
-            case ResetFW.TYPE_ID:
-                final ResetFW reset = resetRO.wrap(buffer, index, index + length);
-                handleReset(reset);
+            case AckFW.TYPE_ID:
+                final AckFW ack = ackRO.wrap(buffer, index, index + length);
+                if (!ack.regions().isEmpty())
+                {
+                    doAck(
+                        applicationReplyThrottle,
+                        applicationReplyId,
+                        EMPTY,
+                        b -> networkReplyMemoryManager.buildAckedRegions(b, ack.regions())); // TODO, possibility of empty ack
+                }
+                if (isReset(ack.flags()))
+                {
+                    handleReset();
+                }
+                if (isFin(ack.flags()))
+                {
+                    networkReplyMemoryManager.release();
+                    doAck(applicationReplyThrottle, applicationReplyId, FIN);
+                }
                 break;
             default:
                 // ignore
@@ -1461,81 +1437,24 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
-        private void sendApplicationReplyWindow()
-        {
-            int applicationReplyCredit = networkReplyBudget - applicationReplyBudget;
-            if (applicationReplyCredit > 0)
-            {
-                applicationReplyBudget += applicationReplyCredit;
-                doWindow(applicationReplyThrottle, applicationReplyId, applicationReplyCredit,
-                        applicationReplyPadding);
-            }
-        }
-
-        private void handleWindow(
-            final WindowFW window)
-        {
-            networkReplyBudget += window.credit();
-            networkReplyPadding = window.padding();
-            applicationReplyPadding = networkReplyPadding + MAXIMUM_HEADER_SIZE;
-            sendApplicationReplyWindow();
-        }
-
-        private void handleReset(
-            ResetFW reset)
+        private void handleReset()
         {
             tlsEngine.closeOutbound();
-
+            setOnNetworkClosingHandshakeHandler.accept(HANDSHAKE_NOOP);
             // RESET is from network reply, so no need to clean that stream
             handleNetworkReplyDone();
+
         }
 
         private void handleNetworkReplyDone()
         {
             if (applicationReplyThrottle != null)
             {
-                doReset(applicationReplyThrottle, applicationReplyId);
+                doAck(applicationReplyThrottle, applicationReplyId, RST);
             }
+            networkReplyMemoryManager.release();
         }
 
-    }
-
-    private void flushNetwork(
-        SSLEngine tlsEngine,
-        int bytesProduced,
-        MessageConsumer networkReply,
-        long networkReplyId,
-        int padding,
-        long authorization,
-        Runnable networkReplyDoneHandler,
-        LongSupplier writeFrameCounter,
-        LongConsumer writeBytesAccumulator)
-    {
-        if (bytesProduced > 0)
-        {
-            writeFrameCounter.getAsLong();
-            writeBytesAccumulator.accept(bytesProduced);
-            final OctetsFW outNetOctets = outNetOctetsRO.wrap(outNetBuffer, 0, bytesProduced);
-            doData(networkReply, networkReplyId, padding, authorization, outNetOctets);
-        }
-
-        if (tlsEngine.isOutboundDone())
-        {
-            doEnd(networkReply, networkReplyId, authorization);
-            networkReplyDoneHandler.run();      // sends RESET to application reply stream (if not received END)
-        }
-    }
-
-    private void alignSlotBuffer(
-        final MutableDirectBuffer slotBuffer,
-        final int bytesConsumed,
-        final int bytesRemaining)
-    {
-        if (bytesConsumed > 0)
-        {
-            writeBuffer.putBytes(0, slotBuffer, bytesConsumed, bytesRemaining);
-            slotBuffer.putBytes(0, writeBuffer, 0, bytesRemaining);
-        }
     }
 
     private void doTlsBegin(
@@ -1589,76 +1508,63 @@ public final class ServerStreamFactory implements StreamFactory
         target.accept(begin.typeId(), begin.buffer(), begin.offset(), begin.sizeof());
     }
 
-    private void doData(
+    private void doTransfer(
         final MessageConsumer target,
         final long targetId,
-        final int padding,
         final long authorization,
-        final OctetsFW payload)
+        final int flags,
+        final Consumer<Builder<RegionFW.Builder, RegionFW>> mutator)
     {
-        final DataFW data = dataRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-                .streamId(targetId)
-                .authorization(authorization)
-                .groupId(0)
-                .padding(padding)
-                .payload(p -> p.set(payload.buffer(), payload.offset(), payload.sizeof()))
-                .build();
-
-        target.accept(data.typeId(), data.buffer(), data.offset(), data.sizeof());
+        final TransferFW transfer = transferRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+            .streamId(targetId)
+            .authorization(authorization)
+            .flags(flags)
+            .regions(mutator)
+            .build();
+        target.accept(transfer.typeId(), transfer.buffer(), transfer.offset(), transfer.sizeof());
     }
 
-    private void doEnd(
+    private void doTransfer(
         final MessageConsumer target,
         final long targetId,
-        final long authorization)
+        final long authorization,
+        final int flags)
     {
-        final EndFW end = endRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-                .streamId(targetId)
-                .authorization(authorization)
-                .build();
-
-        target.accept(end.typeId(), end.buffer(), end.offset(), end.sizeof());
+        final TransferFW transfer = transferRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+            .streamId(targetId)
+            .authorization(authorization)
+            .flags(flags)
+            .build();
+        target.accept(transfer.typeId(), transfer.buffer(), transfer.offset(), transfer.sizeof());
     }
 
-    private void doAbort(
-        final MessageConsumer target,
-        final long targetId,
-        final long authorization)
-    {
-        final AbortFW abort = abortRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-                .streamId(targetId)
-                .authorization(authorization)
-                .build();
 
-        target.accept(abort.typeId(), abort.buffer(), abort.offset(), abort.sizeof());
+    private void doAck(
+            final MessageConsumer throttle,
+            final long throttleId,
+            final int flags,
+            Consumer<Builder<RegionFW.Builder, RegionFW>> mutator)
+    {
+        final AckFW ack = ackRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+                               .streamId(throttleId)
+                               .flags(flags)
+                               .regions(mutator)
+                               .build();
+        throttle.accept(ack.typeId(), ack.buffer(), ack.offset(), ack.sizeof());
     }
 
-    private void doWindow(
+    private void doAck(
         final MessageConsumer throttle,
         final long throttleId,
-        final int credit,
-        final int padding)
+        final int flags)
     {
-        final WindowFW window = windowRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+        final AckFW ack = ackRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(throttleId)
-                .credit(credit)
-                .padding(padding)
-                .groupId(0)
+                .flags(flags)
                 .build();
-
-        throttle.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
+        throttle.accept(ack.typeId(), ack.buffer(), ack.offset(), ack.sizeof());
     }
 
-    private void doReset(
-        final MessageConsumer throttle,
-        final long throttleId)
-    {
-        final ResetFW reset = resetRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-               .streamId(throttleId)
-               .build();
-
-        throttle.accept(reset.typeId(), reset.buffer(), reset.offset(), reset.sizeof());
-    }
 
     private void doCloseInbound(
         final SSLEngine tlsEngine) throws SSLException
@@ -1666,21 +1572,31 @@ public final class ServerStreamFactory implements StreamFactory
         tlsEngine.closeInbound();
     }
 
-    private void doCloseOutbound(
-        SSLEngine tlsEngine,
-        MessageConsumer networkReply,
-        long networkReplyId,
-        int padding,
-        long authorization,
-        Runnable networkReplyDoneHandler,
-        LongSupplier writeFrameCounter,
-        LongConsumer writeBytesAccumulator
-        ) throws SSLException
+    private ByteBuffer stageInNetBuffer(
+        LongArrayList regionAddresses,
+        IntArrayList regionLengths)
     {
-        tlsEngine.closeOutbound();
-        outNetByteBuffer.rewind();
-        SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-        flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkReplyId, padding,
-                authorization, networkReplyDoneHandler, writeFrameCounter, writeBytesAccumulator);
+        // TODO better loop
+        for (int i = 0; i < regionAddresses.size(); i++)
+        {
+            int position = inNetByteBuffer.position();
+            long addr = regionAddresses.get(i);
+            int length = regionLengths.get(i);
+            view.wrap(memoryManager.resolve(addr), length);
+            view.getBytes(0, inNetByteBuffer, position, length);
+            inNetByteBuffer.position(position + length);
+        }
+        inNetByteBuffer.flip();
+        return inNetByteBuffer;
+    }
+
+    private void stageRegionsToInAppByteBuffer(RegionFW region)
+    {
+        final long rAddress = memoryManager.resolve(region.address());
+        final int length = region.length();
+        view.wrap(rAddress, length);
+        final int appByteBufferIndex = inAppByteBuffer.position();
+        view.getBytes(0, inAppByteBuffer, appByteBufferIndex, length);
+        inAppByteBuffer.position(appByteBufferIndex + length);
     }
 }

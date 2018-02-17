@@ -322,7 +322,7 @@ public class ServerIT
     @Specification({
             "${route}/server/controller",
             "${client}/client.sent.read.abort.before.correlated/client",
-            "${server}/client.sent.read.abort.before.correlated/server"})
+            "${server}/client.sent.write.abort.before.correlated/server"})
     @ScriptProperty({
             "newClientAcceptRef ${newServerConnectRef}",
             "clientAccept \"nukleus://target/streams/tls#source\"" })
@@ -335,7 +335,7 @@ public class ServerIT
     @Specification({
         "${route}/server/controller",
         "${client}/client.sent.read.abort/client",
-        "${server}/client.sent.read.abort/server"})
+        "${server}/client.sent.write.abort.before.correlated/server"})
     @ScriptProperty({
         "newClientAcceptRef ${newServerConnectRef}",
         "clientAccept \"nukleus://target/streams/tls#source\"" })

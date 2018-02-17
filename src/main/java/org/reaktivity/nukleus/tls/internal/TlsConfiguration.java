@@ -15,15 +15,16 @@
  */
 package org.reaktivity.nukleus.tls.internal;
 
+import static java.lang.String.format;
+import static org.agrona.BitUtil.isPowerOfTwo;
+
 import org.reaktivity.nukleus.Configuration;
 
 public class TlsConfiguration extends Configuration
 {
-    public static final String HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME = "nukleus.tls.handshake.window.bytes";
+    public static final String TRANSFER_CAPACITY = "nukleus.tls.transfer.capacity";
 
-    public static final String HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME = "nukleus.tls.handshake.window.frames";
-
-    public static final int HANDSHAKE_WINDOW_BYTES_DEFAULT = 65536;
+    public static final int TRANSFER_CAPACITY_DEFAULT = 1 << 16;
 
     public TlsConfiguration(
         Configuration config)
@@ -31,9 +32,14 @@ public class TlsConfiguration extends Configuration
         super(config);
     }
 
-    public int handshakeWindowBytes()
+    public int transferCapacity()
     {
-        return getInteger(HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME, HANDSHAKE_WINDOW_BYTES_DEFAULT);
+        int transferCapacity = getInteger(TRANSFER_CAPACITY, TRANSFER_CAPACITY_DEFAULT);
+        if (!isPowerOfTwo(transferCapacity))
+        {
+            throw new IllegalArgumentException(format("%s is not a power of 2", TRANSFER_CAPACITY));
+        }
+        return transferCapacity;
     }
 
 }

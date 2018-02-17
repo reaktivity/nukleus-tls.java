@@ -16,9 +16,7 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import java.util.function.Function;
-import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
-import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -27,7 +25,8 @@ import javax.net.ssl.SSLContext;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
-import org.reaktivity.nukleus.buffer.BufferPool;
+import org.reaktivity.nukleus.buffer.DirectBufferBuilder;
+import org.reaktivity.nukleus.buffer.MemoryManager;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
@@ -53,7 +52,8 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private MutableDirectBuffer writeBuffer;
     private LongSupplier supplyStreamId;
     private LongSupplier supplyCorrelationId;
-    private Supplier<BufferPool> supplyBufferPool;
+    private MemoryManager memoryManager;
+
     private Function<String, LongSupplier> supplyCounter;
 
     private Function<RouteFW, LongSupplier> supplyWriteFrameCounter;
@@ -61,6 +61,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator;
     private Function<RouteFW, LongConsumer> supplyReadBytesAccumulator;
     private Function<String, LongConsumer> supplyAccumulator;
+    private Supplier<DirectBufferBuilder> supplyBufferBuilder;
 
     public ServerStreamFactoryBuilder(
         TlsConfiguration config,
@@ -101,18 +102,6 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public ServerStreamFactoryBuilder setGroupBudgetClaimer(LongFunction<IntUnaryOperator> groupBudgetClaimer)
-    {
-        return this;
-    }
-
-    @Override
-    public ServerStreamFactoryBuilder setGroupBudgetReleaser(LongFunction<IntUnaryOperator> groupBudgetReleaser)
-    {
-        return this;
-    }
-
-    @Override
     public ServerStreamFactoryBuilder setCorrelationIdSupplier(
         LongSupplier supplyCorrelationId)
     {
@@ -121,10 +110,9 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public StreamFactoryBuilder setBufferPoolSupplier(
-        Supplier<BufferPool> supplyBufferPool)
+    public StreamFactoryBuilder setMemoryManager(MemoryManager memoryManager)
     {
-        this.supplyBufferPool = supplyBufferPool;
+        this.memoryManager = memoryManager;
         return this;
     }
 
@@ -163,9 +151,16 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
+    public StreamFactoryBuilder setDirectBufferBuilderFactory(
+        Supplier<DirectBufferBuilder> supplyDirectBufferBuilder)
+    {
+        this.supplyBufferBuilder = supplyDirectBufferBuilder;
+        return this;
+    }
+
+    @Override
     public StreamFactory build()
     {
-        final BufferPool bufferPool = supplyBufferPool.get();
 
         if (supplyWriteFrameCounter == null)
         {
@@ -208,14 +203,15 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             context,
             router,
             writeBuffer,
-            bufferPool,
+            memoryManager,
             supplyStreamId,
             supplyCorrelationId,
             correlations,
             supplyReadFrameCounter,
             supplyReadBytesAccumulator,
             supplyWriteFrameCounter,
-            supplyWriteBytesAccumulator);
+            supplyWriteBytesAccumulator,
+            supplyBufferBuilder);
     }
 
 }
