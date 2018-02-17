@@ -347,25 +347,15 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                try
-                {
-                    doCloseInbound(tlsEngine);
-                }
-                catch (SSLException ex)
-                {
-                    // NOOP
-                }
-                finally
-                {
-                    doAck(networkThrottle, networkId, RST);
-                }
+                doAck(networkThrottle, networkId, RST);
             }
         }
 
         private void handleBegin(
             BeginFW begin)
         {
-            if (isEmpty(begin.flags()))
+            final int flags = begin.flags();
+            if (isEmpty(flags))
             {
                 try
                 {
@@ -424,7 +414,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doAck(networkThrottle, networkId, RST);
+                doAck(networkThrottle, networkId, flags);
             }
         }
 
@@ -504,12 +494,7 @@ public final class ServerStreamFactory implements StreamFactory
                 readFrameCounter.getAsLong();
             }
 
-            regions.forEach(
-            r ->
-            {
-                networkPendingRegionAddresses.add(r.address());
-                networkPendingRegionLengths.add(r.length());
-            });
+            regions.forEach(this::addRegionToPending);
 
             processNetwork();
 
@@ -522,6 +507,12 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 handleNetworkFin();
             }
+        }
+
+        private void addRegionToPending(RegionFW region)
+        {
+            networkPendingRegionAddresses.add(region.address());
+            networkPendingRegionLengths.add(region.length());
         }
 
         private void processNetwork()
@@ -609,15 +600,14 @@ public final class ServerStreamFactory implements StreamFactory
                         final int acked = toAck;
                         networkPendingRegionAddresses.set(0, addressBeforeAck + acked);
                         b.item(r -> r.address(addressBeforeAck)
-                                .length(acked)
-                                .streamId(networkId));
+                                     .length(acked)
+                                     .streamId(networkId));
                     }
                     else
                     {
-                        b.item(r ->
-                        r.address(networkPendingRegionAddresses.remove(0))
-                        .length(networkPendingRegionLengths.remove(0))
-                        .streamId(networkId));
+                        b.item(r -> r.address(networkPendingRegionAddresses.remove(0))
+                                     .length(networkPendingRegionLengths.remove(0))
+                                     .streamId(networkId));
                     }
                     toAck -= nextLength;
                 }
@@ -956,8 +946,8 @@ public final class ServerStreamFactory implements StreamFactory
         private final LongSupplier readFrameCounter;
         private final LongConsumer readBytesAccumulator;
 
-        private final LongArrayList networkPendingRegions;
-        private final IntArrayList networkPendingLengths;
+        private final LongArrayList networkPendingRegionAddresses;
+        private final IntArrayList networkPendingRegionLengths;
 
         private final AckedRegionBuilder ackRegionBuilder;
 
@@ -973,8 +963,8 @@ public final class ServerStreamFactory implements StreamFactory
             BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler,
             Runnable networkReplyDoneHandler,
             Consumer<Runnable> networkReplyDoneHandlerConsumer,
-            LongArrayList networkPendingRegions,
-            IntArrayList networkPendingLengths,
+            LongArrayList networkPendingRegionAddresses,
+            IntArrayList networkPendingRegionLengths,
             AckedRegionBuilder ackRegionBuilder,
             EncryptMemoryManager networkReplyMemoryManager,
             Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler,
@@ -995,8 +985,8 @@ public final class ServerStreamFactory implements StreamFactory
 
             this.networkReplyMemoryManager = networkReplyMemoryManager;
 
-            this.networkPendingRegions = networkPendingRegions;
-            this.networkPendingLengths = networkPendingLengths;
+            this.networkPendingRegionAddresses = networkPendingRegionAddresses;
+            this.networkPendingRegionLengths = networkPendingRegionLengths;
             this.ackRegionBuilder = ackRegionBuilder;
             this.setOnNetworkClosingHandshakeHandler = setOnNetworkClosingHandshakeHandler;
             this.readFrameCounter = readFrameCounter;
@@ -1039,26 +1029,26 @@ public final class ServerStreamFactory implements StreamFactory
             transfer.regions().forEach(
             r ->
             {
-                int numStored = networkPendingRegions.size();
+                int numStored = networkPendingRegionAddresses.size();
                 if (numStored > 0)
                 {
                     int lastIndex = numStored - 1;
-                    long lastAddress = networkPendingRegions.get(lastIndex);
-                    int lastLength = networkPendingLengths.get(lastIndex);
+                    long lastAddress = networkPendingRegionAddresses.get(lastIndex);
+                    int lastLength = networkPendingRegionLengths.get(lastIndex);
                     if (lastAddress + lastLength == r.address())
                     {
-                        networkPendingLengths.set(lastIndex, lastLength + r.length());
+                        networkPendingRegionLengths.set(lastIndex, lastLength + r.length());
                     }
                     else
                     {
-                        networkPendingRegions.add(r.address());
-                        networkPendingLengths.add(r.length());
+                        networkPendingRegionAddresses.add(r.address());
+                        networkPendingRegionLengths.add(r.length());
                     }
                 }
                 else
                 {
-                    networkPendingRegions.add(r.address());
-                    networkPendingLengths.add(r.length());
+                    networkPendingRegionAddresses.add(r.address());
+                    networkPendingRegionLengths.add(r.length());
                 }
             });
             processNetwork();
@@ -1077,7 +1067,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         private void processNetwork()
         {
-            if (networkPendingRegions.isEmpty())
+            if (networkPendingRegionAddresses.isEmpty())
             {
                 return;
             }
@@ -1086,8 +1076,8 @@ public final class ServerStreamFactory implements StreamFactory
             outNetByteBuffer.clear();
 
             final ByteBuffer inNetBuffer = stageInNetBuffer(
-                this.networkPendingRegions,
-                this.networkPendingLengths);
+                this.networkPendingRegionAddresses,
+                this.networkPendingRegionLengths);
 
             try
             {
@@ -1332,15 +1322,7 @@ public final class ServerStreamFactory implements StreamFactory
             // stage into buffer
             inAppByteBuffer.clear();
 
-            regions.forEach(r ->
-            {
-                final long rAddress = memoryManager.resolve(r.address());
-                final int length = r.length();
-                view.wrap(rAddress, length);
-                final int appByteBufferIndex = inAppByteBuffer.position();
-                view.getBytes(0, inAppByteBuffer, appByteBufferIndex, length);
-                inAppByteBuffer.position(appByteBufferIndex + length);
-            });
+            regions.forEach(ServerStreamFactory.this::stageRegionsToInAppByteBuffer);
             inAppByteBuffer.flip();
 
             try
@@ -1621,4 +1603,13 @@ public final class ServerStreamFactory implements StreamFactory
         return inNetByteBuffer;
     }
 
+    private void stageRegionsToInAppByteBuffer(RegionFW region)
+    {
+        final long rAddress = memoryManager.resolve(region.address());
+        final int length = region.length();
+        view.wrap(rAddress, length);
+        final int appByteBufferIndex = inAppByteBuffer.position();
+        view.getBytes(0, inAppByteBuffer, appByteBufferIndex, length);
+        inAppByteBuffer.position(appByteBufferIndex + length);
+    }
 }
