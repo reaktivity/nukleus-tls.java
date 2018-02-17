@@ -220,7 +220,6 @@ public class ServerIT
             "${route}/server/controller",
             "${client}/server.sent.write.close.before.correlated/client",
             "${server}/server.sent.write.close.before.correlated/server"})
-    @Ignore("behavior looks correct to me, error in k3po nukleus?")
     @ScriptProperty({
             "newClientAcceptRef ${newServerConnectRef}",
             "clientAccept \"nukleus://target/streams/tls#source\"" })

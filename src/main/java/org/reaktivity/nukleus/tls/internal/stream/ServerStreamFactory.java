@@ -394,7 +394,9 @@ public final class ServerStreamFactory implements StreamFactory
                             networkReplyId,
                             this::handleStatus,
                             this::handleNetworkReplyDone,
-                            this::setNetworkReplyDoneHandler,
+                            this::setNetworkReplyDoneHandler, // needed to remove correlation, but could simplify (maybe?)
+                                                              // just have the accept stream handle the reset (pass reset handler)
+                                                              // and remove correlation if there
                             this.networkPendingRegionAddresses,
                             this.networkPendingRegionLengths,
                             this::consumedRegions,
