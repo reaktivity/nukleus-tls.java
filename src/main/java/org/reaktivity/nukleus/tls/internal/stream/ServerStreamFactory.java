@@ -157,11 +157,6 @@ public final class ServerStreamFactory implements StreamFactory
         this.wrapRoute = this::wrapRoute;
 
         this.transferCapacity = config.transferCapacity();
-        if (!isPowerOfTwo(transferCapacity))
-        {
-            throw new IllegalArgumentException(format("%s is not a power of 2", TRANSFER_CAPACITY));
-        }
-
         this.inAppByteBuffer = allocateDirect(transferCapacity);
         this.outAppByteBuffer = allocateDirect(transferCapacity);
         this.outNetByteBuffer = allocateDirect(transferCapacity);

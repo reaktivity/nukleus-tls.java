@@ -15,6 +15,9 @@
  */
 package org.reaktivity.nukleus.tls.internal;
 
+import static java.lang.String.format;
+import static org.agrona.BitUtil.isPowerOfTwo;
+
 import org.reaktivity.nukleus.Configuration;
 
 public class TlsConfiguration extends Configuration
@@ -31,7 +34,12 @@ public class TlsConfiguration extends Configuration
 
     public int transferCapacity()
     {
-        return getInteger(TRANSFER_CAPACITY, TRANSFER_CAPACITY_DEFAULT);
+        int transferCapacity = getInteger(TRANSFER_CAPACITY, TRANSFER_CAPACITY_DEFAULT);
+        if (!isPowerOfTwo(transferCapacity))
+        {
+            throw new IllegalArgumentException(format("%s is not a power of 2", TRANSFER_CAPACITY));
+        }
+        return transferCapacity;
     }
 
 }
