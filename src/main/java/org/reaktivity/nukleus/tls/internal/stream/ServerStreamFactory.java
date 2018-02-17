@@ -15,14 +15,12 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
-import static java.lang.String.format;
 import static java.nio.ByteBuffer.allocateDirect;
 import static java.util.Objects.requireNonNull;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.FINISHED;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_WRAP;
 import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING;
 import static javax.net.ssl.SSLEngineResult.Status.BUFFER_UNDERFLOW;
-import static org.agrona.BitUtil.isPowerOfTwo;
 import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.EMPTY;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.FIN;
@@ -30,7 +28,7 @@ import static org.reaktivity.nukleus.tls.internal.FrameFlags.RST;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isEmpty;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isFin;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isReset;
-import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TRANSFER_CAPACITY;
+import static org.reaktivity.nukleus.tls.internal.stream.EncryptMemoryManager.EMPTY_REGION;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -80,18 +78,9 @@ import org.reaktivity.reaktor.internal.buffer.DefaultDirectBufferBuilder;
 
 public final class ServerStreamFactory implements StreamFactory
 {
-    private static final ListFW<RegionFW> EMPTY_REGION_RO;
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
     private static final Runnable RUNNABLE_NOP = () -> {};
     private static final Consumer<SSLEngineResult> HANDSHAKE_NOOP = (r) -> {};
-
-    static
-    {
-        ListFW.Builder<RegionFW.Builder, RegionFW> regionsRW = new Builder<RegionFW.Builder, RegionFW>(
-                new RegionFW.Builder(),
-                new RegionFW());
-        EMPTY_REGION_RO = regionsRW.wrap(new UnsafeBuffer(new byte[100]), 0, 100).build();
-    }
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -616,7 +605,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 outNetByteBuffer.flip();
 
-                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION_RO);
+                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
                 if (maxPayloadSize < bytesProduced)
                 {
                     throw new IllegalArgumentException("transfer capacity exceeded");
@@ -631,7 +620,7 @@ public final class ServerStreamFactory implements StreamFactory
                                 outNetByteBuffer,
                                 0,
                                 bytesProduced,
-                                EMPTY_REGION_RO,
+                                EMPTY_REGION,
                                 rb));
             }
         };
@@ -1117,7 +1106,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 outNetByteBuffer.flip();
 
-                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION_RO);
+                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
                 if (maxPayloadSize < bytesProduced)
                 {
                     throw new IllegalArgumentException("transfer capacity exceeded");
@@ -1129,7 +1118,7 @@ public final class ServerStreamFactory implements StreamFactory
                     networkReplyId,
                     0L,
                     EMPTY,
-                    rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION_RO, rb));
+                    rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
             }
         }
 
@@ -1346,7 +1335,7 @@ public final class ServerStreamFactory implements StreamFactory
                             networkReplyId,
                             authorization,
                             EMPTY,
-                            rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION_RO, rb));
+                            rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
                     }
                     else
                     {
@@ -1379,7 +1368,7 @@ public final class ServerStreamFactory implements StreamFactory
                     outNetByteBuffer.flip();
                     final int bytesProduced = result.bytesProduced();
 
-                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION_RO);
+                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
                     if (maxPayloadSize < bytesProduced)
                     {
                         throw new IllegalArgumentException("transfer capacity exceeded");
@@ -1390,7 +1379,7 @@ public final class ServerStreamFactory implements StreamFactory
                         networkReplyId,
                         0L,
                         FIN,
-                        rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION_RO, rb));
+                        rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
                 }
                 catch (SSLException ex)
                 {

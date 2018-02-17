@@ -22,13 +22,24 @@ import java.util.function.LongSupplier;
 
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
+import org.agrona.concurrent.UnsafeBuffer;
 import org.reaktivity.nukleus.buffer.DirectBufferBuilder;
 import org.reaktivity.nukleus.buffer.MemoryManager;
 import org.reaktivity.nukleus.tls.internal.types.ListFW;
+import org.reaktivity.nukleus.tls.internal.types.ListFW.Builder;
 import org.reaktivity.nukleus.tls.internal.types.stream.RegionFW;
 
 public class EncryptMemoryManager
 {
+    public static final ListFW<RegionFW> EMPTY_REGION;
+    static
+    {
+        ListFW.Builder<RegionFW.Builder, RegionFW> regionsRW = new Builder<RegionFW.Builder, RegionFW>(
+                new RegionFW.Builder(),
+                new RegionFW());
+        EMPTY_REGION = regionsRW.wrap(new UnsafeBuffer(new byte[100]), 0, 100).build();
+    }
+
     private static final byte EMPTY_REGION_TAG = 0x00;
     private static final byte FULL_REGION_TAG = 0x01;
     private static final byte WRAP_AROUND_REGION_TAG = 0x02;
