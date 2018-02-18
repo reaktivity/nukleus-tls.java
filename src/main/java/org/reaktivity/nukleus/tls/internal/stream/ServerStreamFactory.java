@@ -510,7 +510,6 @@ public final class ServerStreamFactory implements StreamFactory
             }
 
             inNetByteBuffer.clear();
-            outAppByteBuffer.clear();
 
             final ByteBuffer inNetBuffer = stageInNetBuffer(
                 this.networkPendingRegionAddresses,
@@ -527,6 +526,7 @@ public final class ServerStreamFactory implements StreamFactory
                 loop:
                 while (inNetBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                 {
+                    outAppByteBuffer.clear();
                     SSLEngineResult result = tlsEngine.unwrap(inNetBuffer, outAppByteBuffer);
 
                     int bytesProduced = result.bytesProduced();
@@ -831,7 +831,7 @@ public final class ServerStreamFactory implements StreamFactory
                     {
                         int availableLength = networkPendingRegionLengths.get(0);
                         final boolean useWholeRegion = availableLength <= bytesToWrite;
-                        final Long uAddress = useWholeRegion ? networkPendingRegionAddresses.remove(0):
+                        final long uAddress = useWholeRegion ? networkPendingRegionAddresses.remove(0):
                                                                networkPendingRegionAddresses.get(0);
                         if (useWholeRegion)
                         {
@@ -839,7 +839,9 @@ public final class ServerStreamFactory implements StreamFactory
                         }
                         else
                         {
-                            networkPendingRegionLengths.set(0, availableLength - bytesToWrite);
+                            final int consumed = availableLength - bytesToWrite;
+                            networkPendingRegionAddresses.set(0, uAddress + consumed);
+                            networkPendingRegionLengths.set(0, consumed);
                             availableLength = bytesToWrite;
                         }
                         directBufferRW.wrap(
@@ -1074,7 +1076,7 @@ public final class ServerStreamFactory implements StreamFactory
                 loop:
                 while (inNetBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                 {
-                    outNetByteBuffer.rewind();
+                    outNetByteBuffer.clear();
                     HandshakeStatus handshakeStatus = NOT_HANDSHAKING;
                     SSLEngineResult.Status status = BUFFER_UNDERFLOW;
                     if (tlsEngine.getHandshakeStatus() != NOT_HANDSHAKING && tlsEngine.getHandshakeStatus() != FINISHED)
