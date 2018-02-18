@@ -905,7 +905,10 @@ public final class ServerStreamFactory implements StreamFactory
                 networkReplyDoneHandler.run();
             }
 
-            doTransfer(applicationTarget, applicationId, authorization, RST);
+            if (applicationTarget != null)
+            {
+                doTransfer(applicationTarget, applicationId, authorization, RST);
+            }
         }
 
         private void setNetworkReplyDoneHandler(
