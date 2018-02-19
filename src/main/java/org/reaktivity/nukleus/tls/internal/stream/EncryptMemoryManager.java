@@ -133,33 +133,22 @@ public class EncryptMemoryManager
 
         if (length != writeInLength) // append tag and then write more
         {
-            final int metaDataSize = TAG_SIZE_PER_CHUNK;
-            directBufferRW.wrap(resolvedAddress + wIndex, metaDataSize);
+            directBufferRW.wrap(resolvedAddress + wIndex, TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, EMPTY_REGION_TAG);
-            writeIndex += metaDataSize;
+            writeIndex += TAG_SIZE_PER_CHUNK;
             packRegions(src, srcIndex + writeInLength, length - writeInLength, consumedRegions, regionBuilders);
         }
         else if (consumedRegions.isEmpty()) // append empty tag and return
         {
-            final int metaDataSize = TAG_SIZE_PER_CHUNK;
-            directBufferRW.wrap(resolvedAddress + wIndex, metaDataSize);
+            directBufferRW.wrap(resolvedAddress + wIndex, TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, EMPTY_REGION_TAG);
-            writeIndex += metaDataSize;
+            writeIndex += TAG_SIZE_PER_CHUNK;
         }
         else if(sizeOfRegions + TAG_SIZE_PER_CHUNK > transferCapacity - wIndex) // append tags on wrap and return
         {
-            final int metaDataSize = sizeOfRegions + TAG_SIZE_PER_CHUNK;
-
-            System.out.println("Adding split at " + (resolvedAddress + wIndex) + " of length " + sizeOfRegions);
-
+            System.out.println("Spliting at " + resolvedAddress + wIndex);
             directBufferRW.wrap(resolvedAddress + wIndex, TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, WRAP_AROUND_REGION_TAG);
-
-            for (int i = 0; i < consumedRegions.sizeof(); i++)
-            {
-                System.out.printf("%02x ", consumedRegions.buffer().getByte(consumedRegions.offset() + i));
-            }
-            System.out.println("");
 
             int leftOverToWrite = transferCapacity - wIndex - TAG_SIZE_PER_CHUNK;
             if (leftOverToWrite > 0)
@@ -179,16 +168,15 @@ public class EncryptMemoryManager
                     consumedRegions.offset() + leftOverToWrite,
                     rollOverToWrite);
 
-            writeIndex += metaDataSize + consumedRegions.sizeof();
+            writeIndex += TAG_SIZE_PER_CHUNK + sizeOfRegions;
         }
         else // append tags and return
         {
-            final int metaDataSize = sizeOfRegions + TAG_SIZE_PER_CHUNK;
-            directBufferRW.wrap(resolvedAddress + wIndex, metaDataSize);
+            directBufferRW.wrap(resolvedAddress + wIndex, sizeOfRegions + TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, FULL_REGION_TAG);
             directBufferRW.putBytes(TAG_SIZE_PER_CHUNK, consumedRegions.buffer(), consumedRegions.offset(), sizeOfRegions);
 
-            writeIndex += metaDataSize;
+            writeIndex += sizeOfRegions + TAG_SIZE_PER_CHUNK;
         }
     }
 
