@@ -115,47 +115,44 @@ public class EncryptMemoryManager
         writeFramesAccumulator.getAsLong();
         writeBytesAccumulator.accept(length);
         final int sizeOfRegions = consumedRegions.isEmpty() ? TAG_SIZE_PER_CHUNK : consumedRegions.sizeof();
-        int wIndex = (int) (indexMask & writeIndex);
+        int ackIndex = (int) (indexMask & writeIndex);
         final int rIndex = (int) (indexMask & ackIndex);
 
-        final int blockSizeAvailable = ((wIndex >= rIndex ? transferCapacity - wIndex: rIndex - wIndex))
+        final int blockSizeAvailable = ((ackIndex >= rIndex ? transferCapacity - ackIndex: rIndex - ackIndex))
                                        - TAG_SIZE_PER_CHUNK;
 
         final int writeInLength = Math.min(blockSizeAvailable, length);
-        directBufferRW.wrap(resolvedAddress + wIndex, writeInLength);
+        directBufferRW.wrap(resolvedAddress + ackIndex, writeInLength);
         directBufferRW.putBytes(0, src, srcIndex, writeInLength);
 
-        final long regionAddress = memoryAddress + wIndex;
+        final long regionAddress = memoryAddress + ackIndex;
         regionBuilders.item(rb -> rb.address(regionAddress).length(writeInLength).streamId(streamId));
-        wIndex += writeInLength;
+        ackIndex += writeInLength;
         writeIndex += writeInLength;
 
 
         if (length != writeInLength) // append tag and then write more
         {
-            final int metaDataSize = TAG_SIZE_PER_CHUNK;
-            directBufferRW.wrap(resolvedAddress + wIndex, metaDataSize);
+            directBufferRW.wrap(resolvedAddress + ackIndex, TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, EMPTY_REGION_TAG);
-            writeIndex += metaDataSize;
+            writeIndex += TAG_SIZE_PER_CHUNK;
             packRegions(src, srcIndex + writeInLength, length - writeInLength, consumedRegions, regionBuilders);
         }
         else if (consumedRegions.isEmpty()) // append empty tag and return
         {
-            final int metaDataSize = TAG_SIZE_PER_CHUNK;
-            directBufferRW.wrap(resolvedAddress + wIndex, metaDataSize);
+            directBufferRW.wrap(resolvedAddress + ackIndex, TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, EMPTY_REGION_TAG);
-            writeIndex += metaDataSize;
+            writeIndex += TAG_SIZE_PER_CHUNK;
         }
-        else if(sizeOfRegions + TAG_SIZE_PER_CHUNK > transferCapacity - wIndex) // append tags on wrap and return
+        else if(sizeOfRegions + TAG_SIZE_PER_CHUNK > transferCapacity - ackIndex) // append tags on wrap and return
         {
-            final int metaDataSize = sizeOfRegions + TAG_SIZE_PER_CHUNK;
-            directBufferRW.wrap(resolvedAddress + wIndex, TAG_SIZE_PER_CHUNK);
+            directBufferRW.wrap(resolvedAddress + ackIndex, TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, WRAP_AROUND_REGION_TAG);
 
-            int leftOverToWrite = transferCapacity - wIndex - TAG_SIZE_PER_CHUNK;
+            int leftOverToWrite = transferCapacity - ackIndex - TAG_SIZE_PER_CHUNK;
             if (leftOverToWrite > 0)
             {
-                directBufferRW.wrap(resolvedAddress + wIndex + TAG_SIZE_PER_CHUNK, leftOverToWrite);
+                directBufferRW.wrap(resolvedAddress + ackIndex + TAG_SIZE_PER_CHUNK, leftOverToWrite);
                 directBufferRW.putBytes(
                     0,
                     consumedRegions.buffer(),
@@ -170,16 +167,15 @@ public class EncryptMemoryManager
                     consumedRegions.offset() + leftOverToWrite,
                     rollOverToWrite);
 
-            writeIndex += metaDataSize + consumedRegions.sizeof();
+            writeIndex += TAG_SIZE_PER_CHUNK + sizeOfRegions;
         }
         else // append tags and return
         {
-            final int metaDataSize = sizeOfRegions + TAG_SIZE_PER_CHUNK;
-            directBufferRW.wrap(resolvedAddress + wIndex, metaDataSize);
+            directBufferRW.wrap(resolvedAddress + ackIndex, sizeOfRegions + TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, FULL_REGION_TAG);
             directBufferRW.putBytes(TAG_SIZE_PER_CHUNK, consumedRegions.buffer(), consumedRegions.offset(), sizeOfRegions);
 
-            writeIndex += metaDataSize;
+            writeIndex += sizeOfRegions + TAG_SIZE_PER_CHUNK;
         }
     }
 
@@ -211,10 +207,12 @@ public class EncryptMemoryManager
                 }
                 case WRAP_AROUND_REGION_TAG:
                 {
-                    final int remainingCapacity = (int) (resolvedAddress - regionAddress + transferCapacity);
-                    directBufferBuilderRO.wrap(regionAddress + length + TAG_SIZE_PER_CHUNK, remainingCapacity);
-                    directBufferBuilderRO.wrap(resolvedAddress, 1000); // TODO: remove magic value;
+                    final int remainingCapacity = transferCapacity - (int) (ackIndex & indexMask);
+
+                    directBufferBuilderRO.wrap(resolvedAddress + (ackIndex & indexMask), remainingCapacity);
+                    directBufferBuilderRO.wrap(resolvedAddress, 1000);
                     DirectBuffer directBufferRO = directBufferBuilderRO.build();
+
                     regionsRO.wrap(directBufferRO, 0, remainingCapacity + 1000)
                         .forEach(ackedRegion -> builder.item(rb -> rb.address(ackedRegion.address())
                                                                  .length(ackedRegion.length())
