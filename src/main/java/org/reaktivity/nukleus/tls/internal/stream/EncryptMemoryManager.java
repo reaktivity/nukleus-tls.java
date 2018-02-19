@@ -118,25 +118,24 @@ public class EncryptMemoryManager
         int ackIndex = (int) (indexMask & writeIndex);
         final int rIndex = (int) (indexMask & ackIndex);
 
-        final int blockSizeAvailable = ((ackIndex >= rIndex ? transferCapacity - ackIndex: rIndex - ackIndex))
-                                       - TAG_SIZE_PER_CHUNK;
+        final int lengthToWrap = ((ackIndex >= rIndex ? transferCapacity - ackIndex: rIndex - ackIndex));
 
-        final int writeInLength = Math.min(blockSizeAvailable, length);
-        directBufferRW.wrap(resolvedAddress + ackIndex, writeInLength);
-        directBufferRW.putBytes(0, src, srcIndex, writeInLength);
+        final int blocksToWrite = Math.min(lengthToWrap - TAG_SIZE_PER_CHUNK, length);
+        directBufferRW.wrap(resolvedAddress + ackIndex, blocksToWrite);
+        directBufferRW.putBytes(0, src, srcIndex, blocksToWrite);
 
         final long regionAddress = memoryAddress + ackIndex;
-        regionBuilders.item(rb -> rb.address(regionAddress).length(writeInLength).streamId(streamId));
-        ackIndex += writeInLength;
-        writeIndex += writeInLength;
+        regionBuilders.item(rb -> rb.address(regionAddress).length(blocksToWrite).streamId(streamId));
+        ackIndex += blocksToWrite;
+        writeIndex += blocksToWrite;
 
 
-        if (length != writeInLength) // append tag and then write more
+        if (length != blocksToWrite) // append tag and then write more
         {
             directBufferRW.wrap(resolvedAddress + ackIndex, TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, EMPTY_REGION_TAG);
             writeIndex += TAG_SIZE_PER_CHUNK;
-            packRegions(src, srcIndex + writeInLength, length - writeInLength, consumedRegions, regionBuilders);
+            packRegions(src, srcIndex + blocksToWrite, length - blocksToWrite, consumedRegions, regionBuilders);
         }
         else if (consumedRegions.isEmpty()) // append empty tag and return
         {
