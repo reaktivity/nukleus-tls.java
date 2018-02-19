@@ -149,8 +149,17 @@ public class EncryptMemoryManager
         else if(sizeOfRegions + TAG_SIZE_PER_CHUNK > transferCapacity - wIndex) // append tags on wrap and return
         {
             final int metaDataSize = sizeOfRegions + TAG_SIZE_PER_CHUNK;
+
+            System.out.println("Adding split at " + (resolvedAddress + wIndex) + " of length " + sizeOfRegions);
+
             directBufferRW.wrap(resolvedAddress + wIndex, TAG_SIZE_PER_CHUNK);
             directBufferRW.putByte(0, WRAP_AROUND_REGION_TAG);
+
+            for (int i = 0; i < consumedRegions.sizeof(); i++)
+            {
+                System.out.printf("%02x ", consumedRegions.buffer().getByte(consumedRegions.offset() + i));
+            }
+            System.out.println("");
 
             int leftOverToWrite = transferCapacity - wIndex - TAG_SIZE_PER_CHUNK;
             if (leftOverToWrite > 0)
@@ -211,10 +220,20 @@ public class EncryptMemoryManager
                 }
                 case WRAP_AROUND_REGION_TAG:
                 {
-                    final int remainingCapacity = (int) (resolvedAddress - regionAddress + transferCapacity);
-                    directBufferBuilderRO.wrap(regionAddress + length + TAG_SIZE_PER_CHUNK, remainingCapacity);
-                    directBufferBuilderRO.wrap(resolvedAddress, 1000); // TODO: remove magic value;
+                    final int remainingCapacity = transferCapacity - (int) (ackIndex & indexMask);
+
+                    System.out.println("remaining capacity: " + remainingCapacity);
+                    directBufferBuilderRO.wrap(resolvedAddress + (ackIndex & indexMask), remainingCapacity);
+                    directBufferBuilderRO.wrap(resolvedAddress, 1000);
                     DirectBuffer directBufferRO = directBufferBuilderRO.build();
+
+                    System.out.println("DPW ---- reading region at " + (regionAddress + length + TAG_SIZE_PER_CHUNK));
+                    for (int i = 0; i < remainingCapacity + 1000; i++)
+                    {
+                        System.out.printf("%02x ", directBufferRO.getByte(i));
+                    }
+                    System.out.println("");
+
                     regionsRO.wrap(directBufferRO, 0, remainingCapacity + 1000)
                         .forEach(ackedRegion -> builder.item(rb -> rb.address(ackedRegion.address())
                                                                  .length(ackedRegion.length())
