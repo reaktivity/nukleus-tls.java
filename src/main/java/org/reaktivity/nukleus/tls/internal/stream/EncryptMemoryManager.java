@@ -157,7 +157,7 @@ public class EncryptMemoryManager
             {
                 directBufferRW.wrap(resolvedAddress + wIndex + TAG_SIZE_PER_CHUNK, leftOverToWrite);
                 directBufferRW.putBytes(
-                    TAG_SIZE_PER_CHUNK,
+                    0,
                     consumedRegions.buffer(),
                     consumedRegions.offset(),
                     leftOverToWrite);
@@ -165,7 +165,7 @@ public class EncryptMemoryManager
             int rollOverToWrite = consumedRegions.sizeof() - leftOverToWrite;
             directBufferRW.wrap(resolvedAddress, rollOverToWrite);
             directBufferRW.putBytes(
-                    TAG_SIZE_PER_CHUNK,
+                    0,
                     consumedRegions.buffer(),
                     consumedRegions.offset() + leftOverToWrite,
                     rollOverToWrite);
@@ -213,9 +213,9 @@ public class EncryptMemoryManager
                 {
                     final int remainingCapacity = (int) (resolvedAddress - regionAddress + transferCapacity);
                     directBufferBuilderRO.wrap(regionAddress + length + TAG_SIZE_PER_CHUNK, remainingCapacity);
-                    directBufferBuilderRO.wrap(memoryAddress, 1000); // TODO: remove magic value;
+                    directBufferBuilderRO.wrap(resolvedAddress, 1000); // TODO: remove magic value;
                     DirectBuffer directBufferRO = directBufferBuilderRO.build();
-                    regionsRO.wrap(directBufferRO, 0, remainingCapacity)
+                    regionsRO.wrap(directBufferRO, 0, remainingCapacity + 1000)
                         .forEach(ackedRegion -> builder.item(rb -> rb.address(ackedRegion.address())
                                                                  .length(ackedRegion.length())
                                                                  .streamId(ackedRegion.streamId())));
