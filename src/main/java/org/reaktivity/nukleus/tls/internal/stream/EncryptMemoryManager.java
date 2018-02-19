@@ -215,7 +215,7 @@ public class EncryptMemoryManager
                     directBufferBuilderRO.wrap(regionAddress + length + TAG_SIZE_PER_CHUNK, remainingCapacity);
                     directBufferBuilderRO.wrap(resolvedAddress, 1000); // TODO: remove magic value;
                     DirectBuffer directBufferRO = directBufferBuilderRO.build();
-                    regionsRO.wrap(directBufferRO, 0, remainingCapacity)
+                    regionsRO.wrap(directBufferRO, 0, remainingCapacity + 1000)
                         .forEach(ackedRegion -> builder.item(rb -> rb.address(ackedRegion.address())
                                                                  .length(ackedRegion.length())
                                                                  .streamId(ackedRegion.streamId())));
