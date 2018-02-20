@@ -17,11 +17,13 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import java.nio.ByteBuffer;
+import java.util.function.Function;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
+import org.agrona.collections.MutableInteger;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.reaktivity.nukleus.buffer.DirectBufferBuilder;
 import org.reaktivity.nukleus.buffer.MemoryManager;
@@ -62,6 +64,12 @@ public class EncryptMemoryManager
     private long writeIndex;
     private long ackIndex;
 
+    private final int backlogCapacity = 1024; // TODO: Configuration
+    private long backlogAddress;
+    private final MutableDirectBuffer backlogRW = new UnsafeBuffer(new byte[0]);
+    private final ListFW.Builder<RegionFW.Builder, RegionFW> regionsRW =
+            new ListFW.Builder<>(new RegionFW.Builder(), new RegionFW());
+    private final DirectBuffer view = new UnsafeBuffer(new byte[0]);
 
     EncryptMemoryManager(
         MemoryManager memoryManager,
@@ -93,15 +101,76 @@ public class EncryptMemoryManager
 
         this.writeBytesAccumulator = writeBytesAccumulator;
         this.writeFramesAccumulator = writeFramesAccumulator;
+        this.backlogAddress = -1;
+        Function<Long, Integer> what = this::resolvePartialWrite;
+    }
+
+    private long paritalWriteAddress = -1;
+    private int partialWritePosition = -1;
+    private final MutableInteger sentRegions;
+    private final MutableInteger iterCount;
+
+    private int resolvePartialWrite(long addr)
+    {
+        return addr == paritalWriteAddress ? partialWritePosition : 0;
+    }
+
+    public ListFW<RegionFW> stageBacklog(
+        ListFW<RegionFW> newRegions,
+        ByteBuffer tlsInBuffer)
+    {
+        tlsInBuffer.clear();
+        if (backlogAddress != -1)
+        {
+            newRegions = appendBacklogRegions(backlogAddress, newRegions);
+        }
+        iterCount.value = 0;
+        newRegions.forEach(r -> // TODO: remove multi line lambda
+        {
+            iterCount.value++;
+            if (iterCount.value > sentRegions.value)
+            {
+                int partialWrite = resolvePartialWrite(r.address());
+                final int length = r.length() - partialWrite;
+                view.wrap(r.address() + partialWrite, length);
+                view.getBytes(0, tlsInBuffer, tlsInBuffer.position(), length);
+                tlsInBuffer.position(tlsInBuffer.position() + length);
+            }
+        });
+        tlsInBuffer.flip();
+        return newRegions;
     }
 
     // Returns the payload size you can accept
-    public int maxPayloadSize(
+    public int maxWriteCapacity(
         ListFW<RegionFW> regions)
     {
         final int metaDataReserve =  regions.sizeof() + TAG_SIZE_PER_WRITE;
         final int unAcked = (int) (writeIndex - ackIndex);
         return transferCapacity - (unAcked + metaDataReserve);
+    }
+
+    private ListFW<RegionFW> appendBacklogRegions(
+        long address,
+        ListFW<RegionFW> regions)
+    {
+        MutableDirectBuffer backlog = backlogRW;
+        backlog.wrap(memoryManager.resolve(backlogAddress), backlogCapacity);
+        regionsRW.wrap(backlog, 0, backlog.capacity());
+        regionsRO.wrap(backlog, 0, backlog.capacity())
+                 .forEach(this::appendRegion);
+        regions.forEach(this::appendRegion);
+        regions = regionsRW.build();
+
+        return regions;
+    }
+
+    private void appendRegion(
+        RegionFW region)
+    {
+        regionsRW.item(r -> r.address(region.address())
+                             .length(region.length())
+                             .streamId(region.streamId()));
     }
 
     // know we have room for meta data cause must call maxPayloadSize

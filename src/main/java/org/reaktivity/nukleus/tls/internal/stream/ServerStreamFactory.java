@@ -608,12 +608,6 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 outNetByteBuffer.flip();
 
-                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
-                if (maxPayloadSize < bytesProduced)
-                {
-                    throw new IllegalArgumentException("transfer capacity exceeded");
-                    // TODO: reset stream instead
-                }
                 doTransfer(
                         networkReply,
                         networkReplyId,
@@ -1114,13 +1108,6 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 outNetByteBuffer.flip();
 
-                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
-                if (maxPayloadSize < bytesProduced)
-                {
-                    throw new IllegalArgumentException("transfer capacity exceeded");
-                    // TODO: reset stream instead
-                }
-
                 doTransfer(
                     networkReply,
                     networkReplyId,
@@ -1307,33 +1294,26 @@ public final class ServerStreamFactory implements StreamFactory
         }
 
         private void processApplication(
-            final ListFW<RegionFW> regions,
+            ListFW<RegionFW> newRegions,
             final long authorization,
             final int flags)
         {
             // stage into buffer
             inAppByteBuffer.clear();
 
-            regions.forEach(ServerStreamFactory.this::stageRegionsToInAppByteBuffer);
-            inAppByteBuffer.flip();
-
+            final ListFW<RegionFW> regions = networkReplyMemoryManager.stageBacklog(newRegions, inAppByteBuffer);
+            final int writeCapacity = networkReplyMemoryManager.maxWriteCapacity(regions);
+            int totalBytesProduced = 0;
             try
             {
                 while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                 {
                     outNetByteBuffer.clear();
-                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(regions);
-                    //    outNetByteBuffer.limit(maxPayloadSize);  TODO, need to check for buffer OVERFLOW,
-                    // instead we are checking bytesProduced < maxPayload Size (if we do TODO need bookkeeping)
+                    outNetByteBuffer.limit(writeCapacity - totalBytesProduced);
 
                     SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
                     final int bytesProduced = result.bytesProduced();
 
-                    if (maxPayloadSize < bytesProduced)
-                    {
-                        throw new IllegalArgumentException("transfer capacity exceeded");
-                        // TODO: reset stream instead
-                    }
                     outNetByteBuffer.flip();
 
                     if (inAppByteBuffer.hasRemaining())
@@ -1354,6 +1334,7 @@ public final class ServerStreamFactory implements StreamFactory
                             EMPTY,
                             rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, regions, rb));
                     }
+                    totalBytesProduced += bytesProduced;
                 }
             }
             catch (SSLException ex)
@@ -1375,12 +1356,6 @@ public final class ServerStreamFactory implements StreamFactory
                     SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
                     outNetByteBuffer.flip();
                     final int bytesProduced = result.bytesProduced();
-
-                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
-                    if (maxPayloadSize < bytesProduced)
-                    {
-                        throw new IllegalArgumentException("transfer capacity exceeded");
-                    }
 
                     doTransfer(
                         networkReply,
@@ -1595,13 +1570,4 @@ public final class ServerStreamFactory implements StreamFactory
         return inNetByteBuffer;
     }
 
-    private void stageRegionsToInAppByteBuffer(RegionFW region)
-    {
-        final long rAddress = memoryManager.resolve(region.address());
-        final int length = region.length();
-        view.wrap(rAddress, length);
-        final int appByteBufferIndex = inAppByteBuffer.position();
-        view.getBytes(0, inAppByteBuffer, appByteBufferIndex, length);
-        inAppByteBuffer.position(appByteBufferIndex + length);
-    }
 }
