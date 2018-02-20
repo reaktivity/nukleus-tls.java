@@ -48,6 +48,7 @@ public class EncryptMemoryManager
 
     private static final int TAG_SIZE_PER_CHUNK = 1;
     private static final int TAG_SIZE_PER_WRITE = TAG_SIZE_PER_CHUNK * 2; // at most generates 2 regions
+    private static final int MAX_REGION_SIZE = 1000;
 
     private final DirectBufferBuilder directBufferBuilderRO;
     private final MemoryManager memoryManager;
@@ -275,13 +276,16 @@ public class EncryptMemoryManager
                 }
                 case WRAP_AROUND_REGION_TAG:
                 {
-                    final int remainingCapacity = transferCapacity - (int) (ackIndex & indexMask);
+                    final int remaining = MAX_REGION_SIZE;
+                    final int ackOffset = (int) (ackIndex & indexMask);
+                    final int toEndOfBuffer = Math.min(transferCapacity - ackOffset, remaining);
 
-                    directBufferBuilderRO.wrap(resolvedAddress + (ackIndex & indexMask), remainingCapacity);
-                    directBufferBuilderRO.wrap(resolvedAddress, 1000);
+                    directBufferBuilderRO.wrap(resolvedAddress + ackOffset, toEndOfBuffer);
+                    directBufferBuilderRO.wrap(resolvedAddress, remaining - toEndOfBuffer);
+
                     DirectBuffer directBufferRO = directBufferBuilderRO.build();
 
-                    regionsRO.wrap(directBufferRO, 0, remainingCapacity + 1000)
+                    regionsRO.wrap(directBufferRO, 0, MAX_REGION_SIZE)
                         .forEach(ackedRegion -> builder.item(rb -> rb.address(ackedRegion.address())
                                                                  .length(ackedRegion.length())
                                                                  .streamId(ackedRegion.streamId())));
