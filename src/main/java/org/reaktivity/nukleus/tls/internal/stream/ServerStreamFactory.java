@@ -28,7 +28,7 @@ import static org.reaktivity.nukleus.tls.internal.FrameFlags.RST;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isEmpty;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isFin;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isReset;
-import static org.reaktivity.nukleus.tls.internal.stream.EncryptMemoryManager.EMPTY_REGION;
+import static org.reaktivity.nukleus.tls.internal.stream.util.EncryptMemoryManager.EMPTY_REGION;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -65,6 +65,7 @@ import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.FrameFlags;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.stream.util.AckedRegionBuilder;
+import org.reaktivity.nukleus.tls.internal.stream.util.EncryptMemoryManager;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
 import org.reaktivity.nukleus.tls.internal.types.ListFW;
 import org.reaktivity.nukleus.tls.internal.types.ListFW.Builder;

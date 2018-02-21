@@ -14,10 +14,9 @@
  * under the License.
  */
 
-package org.reaktivity.nukleus.tls.internal.stream;
+package org.reaktivity.nukleus.tls.internal.stream.util;
 
 import java.nio.ByteBuffer;
-import java.util.function.Function;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 
@@ -51,7 +50,7 @@ public class EncryptMemoryManager
     private static final int MAX_REGION_SIZE = 1000;
 
     private final DirectBufferBuilder directBufferBuilderRO;
-    private final MemoryManager memoryManager;
+    private final MemoryManager memory;
     private final MutableDirectBuffer directBufferRW;
     private final ListFW<RegionFW> regionsRO;
     private final LongSupplier writeFramesAccumulator;
@@ -70,9 +69,12 @@ public class EncryptMemoryManager
     private final MutableDirectBuffer backlogRW = new UnsafeBuffer(new byte[0]);
     private final ListFW.Builder<RegionFW.Builder, RegionFW> regionsRW =
             new ListFW.Builder<>(new RegionFW.Builder(), new RegionFW());
-    private final DirectBuffer view = new UnsafeBuffer(new byte[0]);
 
-    EncryptMemoryManager(
+    private final DirectBuffer view = new UnsafeBuffer(new byte[0]);
+    private final MutableInteger backlogOffset;
+    private final MutableInteger iter;   // needed for lambda on ListFW
+
+    public EncryptMemoryManager(
         MemoryManager memoryManager,
         DirectBufferBuilder directBufferBuilderRO,
         MutableDirectBuffer directBufferRW,
@@ -83,7 +85,7 @@ public class EncryptMemoryManager
         LongConsumer writeBytesAccumulator)
     {
         this.directBufferBuilderRO = directBufferBuilderRO;
-        this.memoryManager = memoryManager;
+        this.memory = memoryManager;
         this.directBufferRW = directBufferRW;
         this.regionsRO = regionsRO;
 
@@ -103,76 +105,12 @@ public class EncryptMemoryManager
         this.writeBytesAccumulator = writeBytesAccumulator;
         this.writeFramesAccumulator = writeFramesAccumulator;
         this.backlogAddress = -1;
-        Function<Long, Integer> what = this::resolvePartialWrite;
+
+        this.backlogOffset = new MutableInteger();
+        this.backlogOffset.value = 0;
+        this.iter = new MutableInteger();
     }
 
-    private long paritalWriteAddress = -1;
-    private int partialWritePosition = -1;
-    private final MutableInteger sentRegions;
-    private final MutableInteger iterCount;
-
-    private int resolvePartialWrite(long addr)
-    {
-        return addr == paritalWriteAddress ? partialWritePosition : 0;
-    }
-
-    public ListFW<RegionFW> stageBacklog(
-        ListFW<RegionFW> newRegions,
-        ByteBuffer tlsInBuffer)
-    {
-        tlsInBuffer.clear();
-        if (backlogAddress != -1)
-        {
-            newRegions = appendBacklogRegions(backlogAddress, newRegions);
-        }
-        iterCount.value = 0;
-        newRegions.forEach(r -> // TODO: remove multi line lambda
-        {
-            iterCount.value++;
-            if (iterCount.value > sentRegions.value)
-            {
-                int partialWrite = resolvePartialWrite(r.address());
-                final int length = r.length() - partialWrite;
-                view.wrap(r.address() + partialWrite, length);
-                view.getBytes(0, tlsInBuffer, tlsInBuffer.position(), length);
-                tlsInBuffer.position(tlsInBuffer.position() + length);
-            }
-        });
-        tlsInBuffer.flip();
-        return newRegions;
-    }
-
-    // Returns the payload size you can accept
-    public int maxWriteCapacity(
-        ListFW<RegionFW> regions)
-    {
-        final int metaDataReserve =  regions.sizeof() + TAG_SIZE_PER_WRITE;
-        final int unAcked = (int) (writeIndex - ackIndex);
-        return transferCapacity - (unAcked + metaDataReserve);
-    }
-
-    private ListFW<RegionFW> appendBacklogRegions(
-        long address,
-        ListFW<RegionFW> regions)
-    {
-        MutableDirectBuffer backlog = backlogRW;
-        backlog.wrap(memoryManager.resolve(backlogAddress), backlogCapacity);
-        regionsRW.wrap(backlog, 0, backlog.capacity());
-        regionsRO.wrap(backlog, 0, backlog.capacity())
-                 .forEach(this::appendRegion);
-        regions.forEach(this::appendRegion);
-        regions = regionsRW.build();
-
-        return regions;
-    }
-
-    private void appendRegion(
-        RegionFW region)
-    {
-        regionsRW.item(r -> r.address(region.address())
-                             .length(region.length())
-                             .streamId(region.streamId()));
-    }
 
     // know we have room for meta data cause must call maxPayloadSize
     public void packRegions(
@@ -255,7 +193,7 @@ public class EncryptMemoryManager
         regions.forEach(region ->
         {
             final long length = region.length();
-            final long regionAddress = memoryManager.resolve(region.address());
+            final long regionAddress = memory.resolve(region.address());
             directBufferRW.wrap(regionAddress + length, TAG_SIZE_PER_CHUNK);
             ackIndex += length + TAG_SIZE_PER_CHUNK;
 
@@ -300,6 +238,116 @@ public class EncryptMemoryManager
 
     public void release()
     {
-        memoryManager.release(memoryAddress, transferCapacity);
+        memory.release(memoryAddress, transferCapacity);
     }
+
+    // Returns the max payload size tlsOutputBuffer can accept
+    public int maxWriteCapacity(
+        ListFW<RegionFW> regions)
+    {
+        final int metaDataReserve =  regions.sizeof() + TAG_SIZE_PER_WRITE;
+        final int unAcked = (int) (writeIndex - ackIndex);
+        return transferCapacity - (unAcked + metaDataReserve);
+    }
+
+    public ListFW<RegionFW> stageRegions(
+        ListFW<RegionFW> regions,
+        ByteBuffer tlsInBuffer)
+    {
+
+        regions = backlog(backlogAddress, regions);
+        tlsInBuffer.clear();
+
+        iter.value = 0;
+        regions.forEach(r -> // TODO: remove multi line lambda
+        {
+            iter.value += r.length();
+            final int length = r.length() - Math.min(backlogOffset.value - iter.value, r.length());
+            if (length > 0 && tlsInBuffer.remaining() > length)
+            {
+                final int offset =  r.length() - length;
+                view.wrap(r.address() + offset, length);
+                view.getBytes(0, tlsInBuffer, tlsInBuffer.position(), length);
+                tlsInBuffer.position(tlsInBuffer.position() + length);
+            }
+        });
+        tlsInBuffer.flip();
+        return regions;
+    }
+
+    private ListFW<RegionFW> backlog(
+            long address,
+            ListFW<RegionFW> regions)
+    {
+        if (backlogAddress != -1)
+        {
+            final MutableDirectBuffer backlog = backlogRW;
+            backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
+            regionsRW.wrap(backlog, 0, backlog.capacity());
+            regionsRO.wrap(backlog, 0, backlog.capacity())
+                     .forEach(this::appendRegion);
+            regions.forEach(this::appendRegion);
+            regions = regionsRW.build();
+        }
+        return regions;
+    }
+
+    private void setBacklog(
+        ListFW<RegionFW> regions,
+        final int bytesConsumed)
+    {
+        final int totalConsumedBytes =  backlogOffset.value + bytesConsumed;
+        iter.value = 0;
+        regions.forEach(r ->
+        {
+            if (iter.value > totalConsumedBytes)
+            {
+                // write all
+            }
+            else if(iter.value + r.length() > totalConsumedBytes)
+            {
+                backlogOffset.value = r.length() - (totalConsumedBytes - iter.value);
+            }
+            iter.value += r.length();
+        });
+
+        backlogOffset.value += bytesConsumed;
+
+        // TODO, consider break out if already saved,
+        // i.e. backlogAddress already set, but want to assert that
+
+        // TODO consider removing no longer backlogged
+        if (iter.value < backlogOffset.value)
+        {
+            final MutableDirectBuffer backlog = backlogRW;
+            backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
+            regionsRW.wrap(backlog, 0, backlog.capacity()).build();
+            backlogOffset.value = 0;
+        }
+    }
+
+    private void appendRegion(
+        RegionFW region)
+    {
+        regionsRW.item(r -> r.address(region.address())
+                             .length(region.length())
+                             .streamId(region.streamId()));
+    }
+
+    public long acquireWriteMemory(
+        long address)
+    {
+        return address == -1L ? memory.acquire(backlogCapacity) : address;
+    }
+
+    public long releaseWriteMemory(
+        long address)
+    {
+        if (address != -1L)
+        {
+            memory.release(address, backlogCapacity);
+        }
+        return -1L;
+    }
+
 }
