@@ -241,7 +241,6 @@ public class EncryptMemoryManager
         memory.release(memoryAddress, transferCapacity);
     }
 
-    // Returns the max payload size tlsOutputBuffer can accept
     public int maxWriteCapacity(
         ListFW<RegionFW> regions)
     {
@@ -254,22 +253,24 @@ public class EncryptMemoryManager
         ListFW<RegionFW> regions,
         ByteBuffer tlsInBuffer)
     {
-
         regions = backlog(backlogAddress, regions);
         tlsInBuffer.clear();
 
         iter.value = 0;
         regions.forEach(r -> // TODO: remove multi line lambda
         {
-            iter.value += r.length();
-            final int length = r.length() - Math.min(backlogOffset.value - iter.value, r.length());
-            if (length > 0 && tlsInBuffer.remaining() > length)
+            if (iter.value + r.length() > backlogOffset.value)
             {
-                final int offset =  r.length() - length;
-                view.wrap(r.address() + offset, length);
-                view.getBytes(0, tlsInBuffer, tlsInBuffer.position(), length);
-                tlsInBuffer.position(tlsInBuffer.position() + length);
+                final int position = (iter.value < backlogOffset.value) ? backlogOffset.value - iter.value : 0;
+                final int length = Math.min(tlsInBuffer.remaining(), r.length() - position);
+                if (length > 0)
+                {
+                    view.wrap(memory.resolve(r.address()) + position, length);
+                    view.getBytes(0, tlsInBuffer, tlsInBuffer.position(), length);
+                    tlsInBuffer.position(tlsInBuffer.position() + length);
+                }
             }
+            iter.value += r.length();
         });
         tlsInBuffer.flip();
         return regions;
@@ -292,37 +293,32 @@ public class EncryptMemoryManager
         return regions;
     }
 
-    private void setBacklog(
+    public void setBacklog(
         ListFW<RegionFW> regions,
         final int bytesConsumed)
     {
-        final int totalConsumedBytes =  backlogOffset.value + bytesConsumed;
+        final MutableDirectBuffer backlog = backlogRW;
+        backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
+        regionsRW.wrap(backlog, 0, backlog.capacity());
+
+        backlogOffset.value += bytesConsumed;
         iter.value = 0;
         regions.forEach(r ->
         {
-            if (iter.value > totalConsumedBytes)
+            if (iter.value + r.length() > backlogOffset.value)
             {
-                // write all
+                if (iter.value < backlogOffset.value)
+                {
+                    // first region
+                    backlogOffset.value -= iter.value;
+                }
+                regionsRW.item(rb -> rb.address(r.address()).length(r.length()).streamId(r.streamId()));
             }
-            else if(iter.value + r.length() > totalConsumedBytes)
-            {
-                backlogOffset.value = r.length() - (totalConsumedBytes - iter.value);
-            }
-            iter.value += r.length();
         });
-
-        backlogOffset.value += bytesConsumed;
-
-        // TODO, consider break out if already saved,
-        // i.e. backlogAddress already set, but want to assert that
-
-        // TODO consider removing no longer backlogged
-        if (iter.value < backlogOffset.value)
+        if (regionsRW.build().isEmpty())
         {
-            final MutableDirectBuffer backlog = backlogRW;
-            backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
-            regionsRW.wrap(backlog, 0, backlog.capacity()).build();
             backlogOffset.value = 0;
+            backlogAddress = releaseWriteMemory(backlogAddress);
         }
     }
 

@@ -1299,44 +1299,40 @@ public final class ServerStreamFactory implements StreamFactory
             final long authorization,
             final int flags)
         {
-            // stage into buffer
-            inAppByteBuffer.clear();
-
-            final ListFW<RegionFW> regions = networkReplyMemoryManager.stageBacklog(newRegions, inAppByteBuffer);
+            final ListFW<RegionFW> regions = networkReplyMemoryManager.stageRegions(newRegions, inAppByteBuffer);
             final int writeCapacity = networkReplyMemoryManager.maxWriteCapacity(regions);
             int totalBytesProduced = 0;
+            int totalBytesConsumed = 0;
             try
             {
+                outNetByteBuffer.clear();
+                loop:
                 while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                 {
-                    outNetByteBuffer.clear();
                     outNetByteBuffer.limit(writeCapacity - totalBytesProduced);
 
                     SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                    final int bytesProduced = result.bytesProduced();
 
-                    outNetByteBuffer.flip();
-
-                    if (inAppByteBuffer.hasRemaining())
+                    switch (result.getStatus())
                     {
-                        doTransfer(
-                            networkReply,
-                            networkReplyId,
-                            authorization,
-                            EMPTY,
-                            rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
+                        case BUFFER_OVERFLOW:
+                        case BUFFER_UNDERFLOW:
+                        case CLOSED:
+                            break loop;
+                        case OK:
                     }
-                    else
-                    {
-                        doTransfer(
-                            networkReply,
-                            networkReplyId,
-                            authorization,
-                            EMPTY,
-                            rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, regions, rb));
-                    }
-                    totalBytesProduced += bytesProduced;
+                    totalBytesProduced += result.bytesProduced();
+                    totalBytesConsumed += result.bytesConsumed();
                 }
+
+                final int totalBytesWritten = totalBytesProduced;
+                doTransfer(
+                    networkReply,
+                    networkReplyId,
+                    authorization,
+                    EMPTY,
+                    rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, totalBytesWritten, regions, rb));
+                networkReplyMemoryManager.setBacklog(regions, totalBytesConsumed);
             }
             catch (SSLException ex)
             {
