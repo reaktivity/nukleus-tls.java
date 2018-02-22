@@ -16,6 +16,8 @@
 
 package org.reaktivity.nukleus.tls.internal.stream.util;
 
+import static org.reaktivity.nukleus.tls.internal.FrameFlags.EMPTY;
+
 import java.nio.ByteBuffer;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
@@ -32,6 +34,7 @@ import org.reaktivity.nukleus.tls.internal.types.stream.RegionFW;
 
 public class EncryptMemoryManager
 {
+    private static final int MEM_NOT_SET = -1;
     public static final ListFW<RegionFW> EMPTY_REGION;
     static
     {
@@ -73,6 +76,7 @@ public class EncryptMemoryManager
     private final DirectBuffer view = new UnsafeBuffer(new byte[0]);
     private final MutableInteger backlogOffset;
     private final MutableInteger iter;   // needed for lambda on ListFW
+    private int queuedFlag = EMPTY;
 
     public EncryptMemoryManager(
         MemoryManager memoryManager,
@@ -92,7 +96,7 @@ public class EncryptMemoryManager
         this.transferCapacity = transferCapacity;
         this.memoryAddress = memoryManager.acquire(transferCapacity);
         this.resolvedAddress = memoryManager.resolve(memoryAddress);
-        if (this.memoryAddress == -1)
+        if (this.memoryAddress == MEM_NOT_SET)
         {
             throw new IllegalStateException("Unable to allocate memory block: " + transferCapacity);
         }
@@ -104,7 +108,7 @@ public class EncryptMemoryManager
 
         this.writeBytesAccumulator = writeBytesAccumulator;
         this.writeFramesAccumulator = writeFramesAccumulator;
-        this.backlogAddress = -1;
+        this.backlogAddress = MEM_NOT_SET;
 
         this.backlogOffset = new MutableInteger();
         this.backlogOffset.value = 0;
@@ -251,8 +255,10 @@ public class EncryptMemoryManager
 
     public ListFW<RegionFW> stageRegions(
         ListFW<RegionFW> regions,
-        ByteBuffer tlsInBuffer)
+        ByteBuffer tlsInBuffer,
+        int flags)
     {
+        this.queuedFlag |= flags;
         regions = backlog(backlogAddress, regions);
         tlsInBuffer.clear();
 
@@ -276,11 +282,16 @@ public class EncryptMemoryManager
         return regions;
     }
 
+    public boolean hasBacklog()
+    {
+        return backlogAddress != MEM_NOT_SET;
+    }
+
     private ListFW<RegionFW> backlog(
             long address,
             ListFW<RegionFW> regions)
     {
-        if (backlogAddress != -1)
+        if (backlogAddress != MEM_NOT_SET)
         {
             final MutableDirectBuffer backlog = backlogRW;
             backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
@@ -293,7 +304,7 @@ public class EncryptMemoryManager
         return regions;
     }
 
-    public void setBacklog(
+    public int setBacklog(
         ListFW<RegionFW> regions,
         final int bytesConsumed)
     {
@@ -319,6 +330,11 @@ public class EncryptMemoryManager
         {
             backlogOffset.value = 0;
             backlogAddress = releaseWriteMemory(backlogAddress);
+            return queuedFlag;
+        }
+        else
+        {
+            return EMPTY;
         }
     }
 

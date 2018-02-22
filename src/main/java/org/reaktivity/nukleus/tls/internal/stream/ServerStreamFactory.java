@@ -284,7 +284,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final LongArrayList networkPendingRegionAddresses = new LongArrayList(2, -2);
         private final IntArrayList networkPendingRegionLengths = new IntArrayList(2, -2);
 
-        private EncryptMemoryManager networkReplyMemoryManager;
+        private EncryptMemoryManager networkReplyStream;
 
         private MessageConsumer networkReply;
         private long networkReplyId;
@@ -353,7 +353,7 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkReply = router.supplyTarget(networkReplyName);
                     this.networkReplyId = supplyStreamId.getAsLong();
 
-                    this.networkReplyMemoryManager = new EncryptMemoryManager(
+                    this.networkReplyStream = new EncryptMemoryManager(
                         memoryManager,
                         directBufferBuilderRO,
                         directBufferRW,
@@ -378,7 +378,7 @@ public final class ServerStreamFactory implements StreamFactory
                             this.networkPendingRegionAddresses,
                             this.networkPendingRegionLengths,
                             this::consumedRegions,
-                            networkReplyMemoryManager,
+                            networkReplyStream,
                             this::setOnNetworkClosingHandshakeHandler,
                             this.readFrameCounter,
                             this.readBytesAccumulator);
@@ -614,7 +614,7 @@ public final class ServerStreamFactory implements StreamFactory
                         networkReplyId,
                         0L, // TODO proper authorization
                         EMPTY,
-                        rb -> this.networkReplyMemoryManager.packRegions(
+                        rb -> this.networkReplyStream.packRegions(
                                 outNetByteBuffer,
                                 0,
                                 bytesProduced,
@@ -895,7 +895,7 @@ public final class ServerStreamFactory implements StreamFactory
         {
             correlations.remove(applicationCorrelationId);
 
-            networkReplyMemoryManager.release();
+            networkReplyStream.release();
 
             if (networkReplyDoneHandler != null)
             {
@@ -929,7 +929,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final Runnable networkReplyDoneHandler;
         private final Consumer<Runnable> networkReplyDoneHandlerConsumer;
         private final Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
-        private EncryptMemoryManager networkReplyMemoryManager;
+        private EncryptMemoryManager networkReplyStream;
         private final LongSupplier readFrameCounter;
         private final LongConsumer readBytesAccumulator;
 
@@ -953,7 +953,7 @@ public final class ServerStreamFactory implements StreamFactory
             LongArrayList networkPendingRegionAddresses,
             IntArrayList networkPendingRegionLengths,
             AckedRegionBuilder ackRegionBuilder,
-            EncryptMemoryManager networkReplyMemoryManager,
+            EncryptMemoryManager networkReplyStream,
             Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler,
             LongSupplier readFrameCounter,
             LongConsumer readBytesAccumulator)
@@ -970,7 +970,7 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkReplyId = networkReplyId;
             this.networkReplyDoneHandlerConsumer = networkReplyDoneHandlerConsumer;
 
-            this.networkReplyMemoryManager = networkReplyMemoryManager;
+            this.networkReplyStream = networkReplyStream;
 
             this.networkPendingRegionAddresses = networkPendingRegionAddresses;
             this.networkPendingRegionLengths = networkPendingRegionLengths;
@@ -1114,7 +1114,7 @@ public final class ServerStreamFactory implements StreamFactory
                     networkReplyId,
                     0L,
                     EMPTY,
-                    rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
+                    rb -> networkReplyStream.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
             }
         }
 
@@ -1140,7 +1140,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 case AckFW.TYPE_ID:
                     final AckFW ack = ackRO.wrap(buffer, index, index + length);
-                    networkReplyMemoryManager.buildAckedRegions(null, ack.regions());
+                    networkReplyStream.buildAckedRegions(null, ack.regions());
                     if (isReset(ack.flags()))
                     {
                         resetHandler.accept(ack);
@@ -1190,7 +1190,7 @@ public final class ServerStreamFactory implements StreamFactory
         private MessageConsumer streamState;
         private SSLEngine tlsEngine;
 
-        private EncryptMemoryManager networkReplyMemoryManager;
+        private EncryptMemoryManager networkReplyStream;
         private Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
 
         private ServerConnectReplyStream(
@@ -1261,7 +1261,7 @@ public final class ServerStreamFactory implements StreamFactory
                 this.networkReplyId = handshake.networkReplyId;
                 this.setOnNetworkClosingHandshakeHandler = handshake.setOnNetworkClosingHandshakeHandler;
 
-                this.networkReplyMemoryManager = handshake.networkReplyMemoryManager;
+                this.networkReplyStream = handshake.networkReplyStream;
                 doAck(applicationReplyThrottle, applicationReplyId, 0);
                 handshake.setNetworkThrottle(this::handleThrottle);
                 handshake.setNetworkReplyDoneHandler(this::handleNetworkReplyDone);
@@ -1277,17 +1277,11 @@ public final class ServerStreamFactory implements StreamFactory
         {
             final ListFW<RegionFW> regions = transfer.regions();
             final long authorization = transfer.authorization();
-
-            if (!regions.isEmpty()) // TODO combine with flags frome down below?
-            {
-                processApplication(regions, authorization, EMPTY);
-            }
-
             final int flags = transfer.flags();
-            if (isFin(flags))
-            {
-                handleEnd(transfer);
-            }
+
+                // TODO decide to queue RST or NOT
+            processApplication(regions, authorization, isReset(flags) ? EMPTY : flags);
+
             if (isReset(flags))
             {
                 handleAbort();
@@ -1299,8 +1293,8 @@ public final class ServerStreamFactory implements StreamFactory
             final long authorization,
             final int flags)
         {
-            final ListFW<RegionFW> regions = networkReplyMemoryManager.stageRegions(newRegions, inAppByteBuffer);
-            final int writeCapacity = networkReplyMemoryManager.maxWriteCapacity(regions);
+            final ListFW<RegionFW> regions = networkReplyStream.stageRegions(newRegions, inAppByteBuffer, flags);
+            final int writeCapacity = networkReplyStream.maxWriteCapacity(regions);
             int totalBytesProduced = 0;
             int totalBytesConsumed = 0;
             try
@@ -1326,22 +1320,28 @@ public final class ServerStreamFactory implements StreamFactory
                 }
 
                 final int totalBytesWritten = totalBytesProduced;
-                doTransfer(
-                    networkReply,
-                    networkReplyId,
-                    authorization,
-                    EMPTY,
-                    rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, totalBytesWritten, regions, rb));
-                networkReplyMemoryManager.setBacklog(regions, totalBytesConsumed);
+                final int queuedFlag = networkReplyStream.setBacklog(regions, totalBytesConsumed);
+                if (totalBytesWritten > 0)
+                {
+                    doTransfer(
+                        networkReply,
+                        networkReplyId,
+                        authorization,
+                        queuedFlag,
+                        rb -> networkReplyStream.packRegions(outNetByteBuffer, 0, totalBytesWritten, regions, rb));
+                }
+                if (FrameFlags.isFin(queuedFlag))
+                {
+                    handleEnd(authorization);
+                }
             }
             catch (SSLException ex)
             {
-                // TODO testing
                 doTransfer(networkReply, networkReplyId, authorization, RST);
             }
         }
 
-        private void handleEnd(TransferFW transfer)
+        private void handleEnd(long authorization)
         {
             if(!tlsEngine.isOutboundDone())
             {
@@ -1359,15 +1359,15 @@ public final class ServerStreamFactory implements StreamFactory
                         networkReplyId,
                         0L,
                         FIN,
-                        rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
+                        rb -> networkReplyStream.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
                 }
                 catch (SSLException ex)
                 {
                     // END is from application reply, so no need to clean that stream
-                    doTransfer(networkReply, networkReplyId, transfer.authorization(), FIN);
+                    doTransfer(networkReply, networkReplyId, authorization, FIN);
                 }
             }
-            doTransfer(networkReply, networkReplyId, transfer.authorization(), FIN);
+            doTransfer(networkReply, networkReplyId, authorization, FIN);
         }
 
         private void handleAbort()
@@ -1396,7 +1396,11 @@ public final class ServerStreamFactory implements StreamFactory
                         applicationReplyThrottle,
                         applicationReplyId,
                         EMPTY,
-                        b -> networkReplyMemoryManager.buildAckedRegions(b, ack.regions())); // TODO, possibility of empty ack
+                        b -> networkReplyStream.buildAckedRegions(b, ack.regions())); // TODO, possibility of empty ack
+                    if (networkReplyStream.hasBacklog())
+                    {
+                        processApplication(EMPTY_REGION, 0L, EMPTY);
+                    }
                 }
                 if (isReset(ack.flags()))
                 {
@@ -1404,7 +1408,7 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 if (isFin(ack.flags()))
                 {
-                    networkReplyMemoryManager.release();
+                    networkReplyStream.release();
                     doAck(applicationReplyThrottle, applicationReplyId, FIN);
                 }
                 break;
@@ -1429,7 +1433,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 doAck(applicationReplyThrottle, applicationReplyId, RST);
             }
-            networkReplyMemoryManager.release();
+            networkReplyStream.release();
         }
 
     }
