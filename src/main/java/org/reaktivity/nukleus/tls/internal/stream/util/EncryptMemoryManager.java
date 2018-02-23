@@ -327,11 +327,11 @@ public class EncryptMemoryManager
                     // first region
                     backlogOffset.value -= iter.value;
                 }
-                if (backlogAddress != MEM_NOT_SET)
+                if (backlogAddress == MEM_NOT_SET)
                 {
                     final MutableDirectBuffer backlog = backlogRW;
                     backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
-                    acquireWriteMemory(backlogAddress);
+                    backlogAddress = acquireWriteMemory(backlogAddress);
                     backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
                     regionsRW.wrap(backlog, 0, backlog.capacity());
                 }
