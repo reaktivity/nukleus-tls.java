@@ -28,7 +28,7 @@ import static org.reaktivity.nukleus.tls.internal.FrameFlags.RST;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isEmpty;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isFin;
 import static org.reaktivity.nukleus.tls.internal.FrameFlags.isReset;
-import static org.reaktivity.nukleus.tls.internal.stream.EncryptMemoryManager.EMPTY_REGION;
+import static org.reaktivity.nukleus.tls.internal.stream.util.EncryptMemoryManager.EMPTY_REGION;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -65,6 +65,7 @@ import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.FrameFlags;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.stream.util.AckedRegionBuilder;
+import org.reaktivity.nukleus.tls.internal.stream.util.EncryptMemoryManager;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
 import org.reaktivity.nukleus.tls.internal.types.ListFW;
 import org.reaktivity.nukleus.tls.internal.types.ListFW.Builder;
@@ -283,7 +284,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final LongArrayList networkPendingRegionAddresses = new LongArrayList(2, -2);
         private final IntArrayList networkPendingRegionLengths = new IntArrayList(2, -2);
 
-        private EncryptMemoryManager networkReplyMemoryManager;
+        private EncryptMemoryManager networkReplyStream;
 
         private MessageConsumer networkReply;
         private long networkReplyId;
@@ -352,7 +353,7 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkReply = router.supplyTarget(networkReplyName);
                     this.networkReplyId = supplyStreamId.getAsLong();
 
-                    this.networkReplyMemoryManager = new EncryptMemoryManager(
+                    this.networkReplyStream = new EncryptMemoryManager(
                         memoryManager,
                         directBufferBuilderRO,
                         directBufferRW,
@@ -377,7 +378,7 @@ public final class ServerStreamFactory implements StreamFactory
                             this.networkPendingRegionAddresses,
                             this.networkPendingRegionLengths,
                             this::consumedRegions,
-                            networkReplyMemoryManager,
+                            networkReplyStream,
                             this::setOnNetworkClosingHandshakeHandler,
                             this.readFrameCounter,
                             this.readBytesAccumulator);
@@ -608,18 +609,12 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 outNetByteBuffer.flip();
 
-                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
-                if (maxPayloadSize < bytesProduced)
-                {
-                    throw new IllegalArgumentException("transfer capacity exceeded");
-                    // TODO: reset stream instead
-                }
                 doTransfer(
                         networkReply,
                         networkReplyId,
                         0L, // TODO proper authorization
                         EMPTY,
-                        rb -> this.networkReplyMemoryManager.packRegions(
+                        rb -> this.networkReplyStream.packRegions(
                                 outNetByteBuffer,
                                 0,
                                 bytesProduced,
@@ -900,7 +895,7 @@ public final class ServerStreamFactory implements StreamFactory
         {
             correlations.remove(applicationCorrelationId);
 
-            networkReplyMemoryManager.release();
+            networkReplyStream.release();
 
             if (networkReplyDoneHandler != null)
             {
@@ -934,7 +929,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final Runnable networkReplyDoneHandler;
         private final Consumer<Runnable> networkReplyDoneHandlerConsumer;
         private final Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
-        private EncryptMemoryManager networkReplyMemoryManager;
+        private EncryptMemoryManager networkReplyStream;
         private final LongSupplier readFrameCounter;
         private final LongConsumer readBytesAccumulator;
 
@@ -958,7 +953,7 @@ public final class ServerStreamFactory implements StreamFactory
             LongArrayList networkPendingRegionAddresses,
             IntArrayList networkPendingRegionLengths,
             AckedRegionBuilder ackRegionBuilder,
-            EncryptMemoryManager networkReplyMemoryManager,
+            EncryptMemoryManager networkReplyStream,
             Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler,
             LongSupplier readFrameCounter,
             LongConsumer readBytesAccumulator)
@@ -975,7 +970,7 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkReplyId = networkReplyId;
             this.networkReplyDoneHandlerConsumer = networkReplyDoneHandlerConsumer;
 
-            this.networkReplyMemoryManager = networkReplyMemoryManager;
+            this.networkReplyStream = networkReplyStream;
 
             this.networkPendingRegionAddresses = networkPendingRegionAddresses;
             this.networkPendingRegionLengths = networkPendingRegionLengths;
@@ -1114,19 +1109,12 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 outNetByteBuffer.flip();
 
-                final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
-                if (maxPayloadSize < bytesProduced)
-                {
-                    throw new IllegalArgumentException("transfer capacity exceeded");
-                    // TODO: reset stream instead
-                }
-
                 doTransfer(
                     networkReply,
                     networkReplyId,
                     0L,
                     EMPTY,
-                    rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
+                    rb -> networkReplyStream.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
             }
         }
 
@@ -1152,7 +1140,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 case AckFW.TYPE_ID:
                     final AckFW ack = ackRO.wrap(buffer, index, index + length);
-                    networkReplyMemoryManager.buildAckedRegions(null, ack.regions());
+                    networkReplyStream.buildAckedRegions(null, ack.regions());
                     if (isReset(ack.flags()))
                     {
                         resetHandler.accept(ack);
@@ -1202,7 +1190,7 @@ public final class ServerStreamFactory implements StreamFactory
         private MessageConsumer streamState;
         private SSLEngine tlsEngine;
 
-        private EncryptMemoryManager networkReplyMemoryManager;
+        private EncryptMemoryManager networkReplyStream;
         private Consumer<Consumer<SSLEngineResult>> setOnNetworkClosingHandshakeHandler;
 
         private ServerConnectReplyStream(
@@ -1273,7 +1261,7 @@ public final class ServerStreamFactory implements StreamFactory
                 this.networkReplyId = handshake.networkReplyId;
                 this.setOnNetworkClosingHandshakeHandler = handshake.setOnNetworkClosingHandshakeHandler;
 
-                this.networkReplyMemoryManager = handshake.networkReplyMemoryManager;
+                this.networkReplyStream = handshake.networkReplyStream;
                 doAck(applicationReplyThrottle, applicationReplyId, 0);
                 handshake.setNetworkThrottle(this::handleThrottle);
                 handshake.setNetworkReplyDoneHandler(this::handleNetworkReplyDone);
@@ -1289,17 +1277,11 @@ public final class ServerStreamFactory implements StreamFactory
         {
             final ListFW<RegionFW> regions = transfer.regions();
             final long authorization = transfer.authorization();
-
-            if (!regions.isEmpty()) // TODO combine with flags frome down below?
-            {
-                processApplication(regions, authorization, EMPTY);
-            }
-
             final int flags = transfer.flags();
-            if (isFin(flags))
-            {
-                handleEnd(transfer);
-            }
+
+                // TODO decide to queue RST or NOT
+            processApplication(regions, authorization, isReset(flags) ? EMPTY : flags);
+
             if (isReset(flags))
             {
                 handleAbort();
@@ -1307,63 +1289,59 @@ public final class ServerStreamFactory implements StreamFactory
         }
 
         private void processApplication(
-            final ListFW<RegionFW> regions,
+            ListFW<RegionFW> newRegions,
             final long authorization,
             final int flags)
         {
-            // stage into buffer
-            inAppByteBuffer.clear();
-
-            regions.forEach(ServerStreamFactory.this::stageRegionsToInAppByteBuffer);
-            inAppByteBuffer.flip();
-
+            final ListFW<RegionFW> regions = networkReplyStream.stageRegions(newRegions, inAppByteBuffer, flags);
+            final int writeCapacity = networkReplyStream.maxWriteCapacity(regions);
+            int totalBytesProduced = 0;
+            int totalBytesConsumed = 0;
             try
             {
+                outNetByteBuffer.clear();
+                loop:
                 while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                 {
-                    outNetByteBuffer.clear();
-                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(regions);
-                    //    outNetByteBuffer.limit(maxPayloadSize);  TODO, need to check for buffer OVERFLOW,
-                    // instead we are checking bytesProduced < maxPayload Size (if we do TODO need bookkeeping)
+                    outNetByteBuffer.limit(writeCapacity - totalBytesProduced);
 
                     SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                    final int bytesProduced = result.bytesProduced();
 
-                    if (maxPayloadSize < bytesProduced)
+                    switch (result.getStatus())
                     {
-                        throw new IllegalArgumentException("transfer capacity exceeded");
-                        // TODO: reset stream instead
+                        case BUFFER_OVERFLOW:
+                        case BUFFER_UNDERFLOW:
+                        case CLOSED:
+                            break loop;
+                        case OK:
                     }
-                    outNetByteBuffer.flip();
+                    totalBytesProduced += result.bytesProduced();
+                    totalBytesConsumed += result.bytesConsumed();
+                }
 
-                    if (inAppByteBuffer.hasRemaining())
-                    {
-                        doTransfer(
-                            networkReply,
-                            networkReplyId,
-                            authorization,
-                            EMPTY,
-                            rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
-                    }
-                    else
-                    {
-                        doTransfer(
-                            networkReply,
-                            networkReplyId,
-                            authorization,
-                            EMPTY,
-                            rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, regions, rb));
-                    }
+                final int totalBytesWritten = totalBytesProduced;
+                final int queuedFlag = networkReplyStream.setBacklog(regions, totalBytesConsumed);
+                if (totalBytesWritten > 0)
+                {
+                    doTransfer(
+                        networkReply,
+                        networkReplyId,
+                        authorization,
+                        queuedFlag,
+                        rb -> networkReplyStream.packRegions(outNetByteBuffer, 0, totalBytesWritten, regions, rb));
+                }
+                if (FrameFlags.isFin(queuedFlag))
+                {
+                    handleEnd(authorization);
                 }
             }
             catch (SSLException ex)
             {
-                // TODO testing
                 doTransfer(networkReply, networkReplyId, authorization, RST);
             }
         }
 
-        private void handleEnd(TransferFW transfer)
+        private void handleEnd(long authorization)
         {
             if(!tlsEngine.isOutboundDone())
             {
@@ -1376,26 +1354,20 @@ public final class ServerStreamFactory implements StreamFactory
                     outNetByteBuffer.flip();
                     final int bytesProduced = result.bytesProduced();
 
-                    final int maxPayloadSize = networkReplyMemoryManager.maxPayloadSize(EMPTY_REGION);
-                    if (maxPayloadSize < bytesProduced)
-                    {
-                        throw new IllegalArgumentException("transfer capacity exceeded");
-                    }
-
                     doTransfer(
                         networkReply,
                         networkReplyId,
                         0L,
                         FIN,
-                        rb -> networkReplyMemoryManager.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
+                        rb -> networkReplyStream.packRegions(outNetByteBuffer, 0, bytesProduced, EMPTY_REGION, rb));
                 }
                 catch (SSLException ex)
                 {
                     // END is from application reply, so no need to clean that stream
-                    doTransfer(networkReply, networkReplyId, transfer.authorization(), FIN);
+                    doTransfer(networkReply, networkReplyId, authorization, FIN);
                 }
             }
-            doTransfer(networkReply, networkReplyId, transfer.authorization(), FIN);
+            doTransfer(networkReply, networkReplyId, authorization, FIN);
         }
 
         private void handleAbort()
@@ -1424,7 +1396,11 @@ public final class ServerStreamFactory implements StreamFactory
                         applicationReplyThrottle,
                         applicationReplyId,
                         EMPTY,
-                        b -> networkReplyMemoryManager.buildAckedRegions(b, ack.regions())); // TODO, possibility of empty ack
+                        b -> networkReplyStream.buildAckedRegions(b, ack.regions())); // TODO, possibility of empty ack
+                    if (networkReplyStream.hasBacklog())
+                    {
+                        processApplication(EMPTY_REGION, 0L, EMPTY);
+                    }
                 }
                 if (isReset(ack.flags()))
                 {
@@ -1432,7 +1408,7 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 if (isFin(ack.flags()))
                 {
-                    networkReplyMemoryManager.release();
+                    networkReplyStream.release();
                     doAck(applicationReplyThrottle, applicationReplyId, FIN);
                 }
                 break;
@@ -1457,7 +1433,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 doAck(applicationReplyThrottle, applicationReplyId, RST);
             }
-            networkReplyMemoryManager.release();
+            networkReplyStream.release();
         }
 
     }
@@ -1595,13 +1571,4 @@ public final class ServerStreamFactory implements StreamFactory
         return inNetByteBuffer;
     }
 
-    private void stageRegionsToInAppByteBuffer(RegionFW region)
-    {
-        final long rAddress = memoryManager.resolve(region.address());
-        final int length = region.length();
-        view.wrap(rAddress, length);
-        final int appByteBufferIndex = inAppByteBuffer.position();
-        view.getBytes(0, inAppByteBuffer, appByteBufferIndex, length);
-        inAppByteBuffer.position(appByteBufferIndex + length);
-    }
 }
