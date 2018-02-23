@@ -561,7 +561,7 @@ public final class ServerStreamFactory implements StreamFactory
                     {
                         handleFlushAppData(bytesProduced, totalBytesConsumed - bytesConsumerIter, flags);
                     }
-                    bytesConsumerIter = totalBytesConsumed;
+                    bytesConsumerIter += totalBytesConsumed;
                 }
             }
             catch (SSLException ex)
@@ -834,9 +834,9 @@ public final class ServerStreamFactory implements StreamFactory
                         }
                         else
                         {
-                            final int consumed = availableLength - bytesToWrite;
-                            networkPendingRegionAddresses.set(0, uAddress + consumed);
-                            networkPendingRegionLengths.set(0, consumed);
+                            final int remaining = availableLength - bytesToWrite;
+                            networkPendingRegionAddresses.set(0, uAddress + bytesToWrite);
+                            networkPendingRegionLengths.set(0, remaining);
                             availableLength = bytesToWrite;
                         }
                         directBufferRW.wrap(
