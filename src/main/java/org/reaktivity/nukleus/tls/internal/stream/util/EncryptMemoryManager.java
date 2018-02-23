@@ -337,17 +337,17 @@ public class EncryptMemoryManager
                 }
                 regionsRW.item(rb -> rb.address(r.address()).length(r.length()).streamId(r.streamId()));
             }
+            iter.value += r.length();
         });
         if (backlogAddress != MEM_NOT_SET && regionsRW.build().isEmpty())
         {
-            backlogOffset.value = 0;
             backlogAddress = releaseWriteMemory(backlogAddress);
-            return queuedFlag;
         }
-        else
+        if (backlogAddress == MEM_NOT_SET)
         {
-            return queuedFlag;
+            backlogOffset.value = 0;
         }
+        return queuedFlag;
     }
 
     private void appendRegion(
