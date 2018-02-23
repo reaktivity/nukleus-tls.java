@@ -308,9 +308,13 @@ public class EncryptMemoryManager
         ListFW<RegionFW> regions,
         final int bytesConsumed)
     {
-        final MutableDirectBuffer backlog = backlogRW;
-        backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
-        regionsRW.wrap(backlog, 0, backlog.capacity());
+        if (backlogAddress != MEM_NOT_SET)
+        {
+            final MutableDirectBuffer backlog = backlogRW;
+            backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
+            regions = regionsRO.wrap(backlog, 0, backlogCapacity);
+            regionsRW.wrap(backlog, 0, backlog.capacity());
+        }
 
         backlogOffset.value += bytesConsumed;
         iter.value = 0;
@@ -323,10 +327,18 @@ public class EncryptMemoryManager
                     // first region
                     backlogOffset.value -= iter.value;
                 }
+                if (backlogAddress != MEM_NOT_SET)
+                {
+                    final MutableDirectBuffer backlog = backlogRW;
+                    backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
+                    acquireWriteMemory(backlogAddress);
+                    backlog.wrap(memory.resolve(backlogAddress), backlogCapacity);
+                    regionsRW.wrap(backlog, 0, backlog.capacity());
+                }
                 regionsRW.item(rb -> rb.address(r.address()).length(r.length()).streamId(r.streamId()));
             }
         });
-        if (regionsRW.build().isEmpty())
+        if (backlogAddress != MEM_NOT_SET && regionsRW.build().isEmpty())
         {
             backlogOffset.value = 0;
             backlogAddress = releaseWriteMemory(backlogAddress);
@@ -334,7 +346,7 @@ public class EncryptMemoryManager
         }
         else
         {
-            return EMPTY;
+            return queuedFlag;
         }
     }
 
