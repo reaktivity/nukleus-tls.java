@@ -728,8 +728,8 @@ public final class ServerStreamFactory implements StreamFactory
 
                 final long newApplicationId = supplyStreamId.getAsLong();
 
-                doTlsBegin(applicationTarget, newApplicationId, authorization, applicationRef, newCorrelationId,
-                    tlsHostname, tlsApplicationProtocol);
+                doTlsBegin(applicationTarget, newApplicationId, networkTraceId, authorization, applicationRef,
+                        newCorrelationId, tlsHostname, tlsApplicationProtocol);
                 router.setThrottle(applicationName, newApplicationId, this::handleThrottle);
 
                 handshake.onFinished();
@@ -1552,6 +1552,7 @@ public final class ServerStreamFactory implements StreamFactory
     private void doTlsBegin(
         MessageConsumer connect,
         long connectId,
+        long traceId,
         long authorization,
         long connectRef,
         long correlationId,
@@ -1560,6 +1561,7 @@ public final class ServerStreamFactory implements StreamFactory
     {
         final BeginFW begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                                      .streamId(connectId)
+                                     .trace(traceId)
                                      .authorization(authorization)
                                      .source("tls")
                                      .sourceRef(connectRef)

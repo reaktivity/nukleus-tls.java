@@ -440,7 +440,7 @@ public final class ClientStreamFactory implements StreamFactory
 
                 correlations.put(newCorrelationId, newHandshake);
 
-                doBegin(networkTarget, newNetworkId, authorization, networkRef, newCorrelationId);
+                doBegin(networkTarget, newNetworkId, begin.trace(), authorization, networkRef, newCorrelationId);
                 router.setThrottle(networkName, newNetworkId, newHandshake::handleThrottle);
 
                 this.tlsEngine = tlsEngine;
@@ -1570,12 +1570,14 @@ public final class ClientStreamFactory implements StreamFactory
     private void doBegin(
         final MessageConsumer target,
         final long targetId,
+        final long traceId,
         final long authorization,
         final long targetRef,
         final long correlationId)
     {
         final BeginFW begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
+                .trace(traceId)
                 .authorization(authorization)
                 .source("tls")
                 .sourceRef(targetRef)
