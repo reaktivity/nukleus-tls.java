@@ -312,6 +312,8 @@ public final class ClientStreamFactory implements StreamFactory
         private int networkBudget;
         private int networkPadding;
 
+        private long applicationTraceId;
+
         private ClientAcceptStream(
             String tlsHostname,
             String tlsApplicationProtocol,
@@ -438,7 +440,7 @@ public final class ClientStreamFactory implements StreamFactory
 
                 correlations.put(newCorrelationId, newHandshake);
 
-                doBegin(networkTarget, newNetworkId, authorization, networkRef, newCorrelationId);
+                doBegin(networkTarget, newNetworkId, begin.trace(), authorization, networkRef, newCorrelationId);
                 router.setThrottle(networkName, newNetworkId, newHandshake::handleThrottle);
 
                 this.tlsEngine = tlsEngine;
@@ -457,6 +459,7 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
+            applicationTraceId = data.trace();
             applicationBudget -= data.length() + data.padding();
 
             try
@@ -464,7 +467,7 @@ public final class ClientStreamFactory implements StreamFactory
                 if (applicationBudget < 0)
                 {
                     doReset(applicationThrottle, applicationId);
-                    doCloseOutbound(tlsEngine, networkTarget, networkId, networkPadding,
+                    doCloseOutbound(tlsEngine, networkTarget, networkId, applicationTraceId, networkPadding,
                             authorization, this::handleNetworkReplyDone,
                             writeFrameCounter, writeBytesAccumulator);
                 }
@@ -487,8 +490,8 @@ public final class ClientStreamFactory implements StreamFactory
                             networkBudget -= result.bytesProduced() + networkPadding;
                         }
 
-                        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId, networkPadding,
-                                authorization, this::handleNetworkReplyDone,
+                        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId, applicationTraceId,
+                                networkPadding, authorization, this::handleNetworkReplyDone,
                                 writeFrameCounter, writeBytesAccumulator);
                     }
                 }
@@ -507,7 +510,7 @@ public final class ClientStreamFactory implements StreamFactory
 
             try
             {
-                doCloseOutbound(tlsEngine, networkTarget, networkId, networkPadding,
+                doCloseOutbound(tlsEngine, networkTarget, networkId, end.trace(), networkPadding,
                         authorization, this::handleNetworkReplyDone,
                         writeFrameCounter, writeBytesAccumulator);
             }
@@ -521,7 +524,7 @@ public final class ClientStreamFactory implements StreamFactory
             AbortFW abort)
         {
             tlsEngine.closeOutbound();
-            doAbort(networkTarget, networkId, authorization);
+            doAbort(networkTarget, networkId, abort.trace(), authorization);
         }
 
         private void handleThrottle(
@@ -546,14 +549,14 @@ public final class ClientStreamFactory implements StreamFactory
             }
         }
 
-        private void sendApplicationWindow()
+        private void sendApplicationWindow(long traceId)
         {
             final int applicationCredit = networkBudget - applicationBudget;
 
             if (applicationCredit > 0)
             {
                 applicationBudget += applicationCredit;
-                doWindow(applicationThrottle, applicationId, applicationCredit, applicationPadding);
+                doWindow(applicationThrottle, applicationId, traceId, applicationCredit, applicationPadding);
             }
         }
 
@@ -563,13 +566,13 @@ public final class ClientStreamFactory implements StreamFactory
             networkBudget += window.credit();
             networkPadding = window.padding();
             applicationPadding = networkPadding + MAXIMUM_HEADER_SIZE;
-            sendApplicationWindow();
+            sendApplicationWindow(window.trace());
         }
 
         private void handleReset(
             ResetFW reset)
         {
-            doReset(applicationThrottle, applicationId);
+            doReset(applicationThrottle, applicationId, reset.trace());
             tlsEngine.closeOutbound();
         }
 
@@ -639,11 +642,12 @@ public final class ClientStreamFactory implements StreamFactory
         IntSupplier networkPaddingSupplier;
         IntConsumer networkBudgetConsumer;
         IntConsumer networkPaddingConsumer;
-        Runnable sendApplicationWindow;
+        LongConsumer sendApplicationWindow;
         LongSupplier writeFrameCounter;
         LongSupplier readFrameCounter;
         LongConsumer writeBytesAccumulator;
         LongConsumer readBytesAccumulator;
+        long networkReplyTraceId;
 
         private ClientHandshake(
             SSLEngine tlsEngine,
@@ -663,7 +667,7 @@ public final class ClientStreamFactory implements StreamFactory
             IntSupplier networkPaddingSupplier,
             IntConsumer networkBudgetConsumer,
             IntConsumer networkPaddingConsumer,
-            Runnable sendApplicationWindow,
+            LongConsumer sendApplicationWindow,
             LongSupplier writeFrameCounter,
             LongSupplier readFrameCounter,
             LongConsumer writeBytesAccumulator,
@@ -742,7 +746,7 @@ public final class ClientStreamFactory implements StreamFactory
 
             router.setThrottle(networkName, networkId, networkThrottle);
 
-            sendApplicationWindow.run();
+            sendApplicationWindow.accept(0);
 
             return applicationReply;
         }
@@ -792,7 +796,7 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 if (correlations.remove(networkCorrelationId) == null)
                 {
-                    doReset(applicationThrottle, applicationId);
+                    doReset(applicationThrottle, applicationId, reset.trace());
                 }
                 tlsEngine.closeInbound();
             }
@@ -832,6 +836,7 @@ public final class ClientStreamFactory implements StreamFactory
             DataFW data)
         {
             int dataLength = data.length();
+            networkReplyTraceId = data.trace();
 
             readFrameCounter.getAsLong();
             readBytesAccumulator.accept(dataLength);
@@ -849,7 +854,7 @@ public final class ClientStreamFactory implements StreamFactory
                 if (networkReplySlot == NO_SLOT || networkReplyBudgetSupplier.getAsInt() < 0)
                 {
                     doReset(networkReplyThrottle, networkReplyId);
-                    doCloseOutbound(tlsEngine, networkTarget, networkId, networkPaddingSupplier.getAsInt(),
+                    doCloseOutbound(tlsEngine, networkTarget, networkId, networkReplyTraceId, networkPaddingSupplier.getAsInt(),
                             networkAuthorization, networkReplyDoneHandler,
                             writeFrameCounter, writeBytesAccumulator);
                 }
@@ -919,7 +924,7 @@ public final class ClientStreamFactory implements StreamFactory
         {
             try
             {
-                doCloseOutbound(tlsEngine, networkTarget, networkId, networkPaddingSupplier.getAsInt(),
+                doCloseOutbound(tlsEngine, networkTarget, networkId, end.trace(), networkPaddingSupplier.getAsInt(),
                         networkAuthorization, networkReplyDoneHandler,
                         writeFrameCounter, writeBytesAccumulator);
             }
@@ -938,7 +943,7 @@ public final class ClientStreamFactory implements StreamFactory
         {
             correlations.remove(networkCorrelationId);
             tlsEngine.closeOutbound();
-            doAbort(networkTarget, networkId, networkAuthorization);
+            doAbort(networkTarget, networkId, abort.trace(), networkAuthorization);
         }
 
         private void updateNetworkWindow(
@@ -991,6 +996,8 @@ public final class ClientStreamFactory implements StreamFactory
         private LongSupplier readFrameCounter;
         private LongConsumer writeBytesAccumulator;
         private LongConsumer readBytesAccumulator;
+
+        private long networkReplyTraceId;
 
         private ClientConnectReplyStream(
             MessageConsumer networkReplyThrottle,
@@ -1113,6 +1120,7 @@ public final class ClientStreamFactory implements StreamFactory
             DataFW data)
         {
             final int dataLength = data.length();
+            networkReplyTraceId = data.trace();
 
             readFrameCounter.getAsLong();
             readBytesAccumulator.accept(dataLength);
@@ -1257,7 +1265,7 @@ public final class ClientStreamFactory implements StreamFactory
                 try
                 {
                     tlsEngine.closeInbound();
-                    doEnd(applicationReply, applicationReplyId, applicationReplyAuthorization);
+                    doEnd(applicationReply, applicationReplyId, end.trace(), applicationReplyAuthorization);
                 }
                 catch (SSLException ex)
                 {
@@ -1279,7 +1287,7 @@ public final class ClientStreamFactory implements StreamFactory
             }
             finally
             {
-                doAbort(applicationReply, applicationReplyId, applicationReplyAuthorization);
+                doAbort(applicationReply, applicationReplyId, abort.trace(), applicationReplyAuthorization);
             }
         }
 
@@ -1313,6 +1321,7 @@ public final class ClientStreamFactory implements StreamFactory
                             result.bytesProduced(),
                             networkTarget,
                             networkId,
+                            networkReplyTraceId,
                             networkPaddingSupplier.getAsInt(),
                             networkAuthorization,
                             networkReplyDoneHandler,
@@ -1376,7 +1385,7 @@ public final class ClientStreamFactory implements StreamFactory
                 {
                     final OctetsFW outAppOctets = outAppOctetsRO.wrap(outAppBuffer, 0, applicationBytesConsumed);
 
-                    doData(applicationReply, applicationReplyId, applicationReplyPadding,
+                    doData(applicationReply, applicationReplyId, networkReplyTraceId, applicationReplyPadding,
                             applicationReplyAuthorization, outAppOctets);
 
                     applicationReplyBudget -= applicationBytesConsumed + applicationReplyPadding;
@@ -1393,7 +1402,7 @@ public final class ClientStreamFactory implements StreamFactory
 
             if (applicationReplySlotOffset == 0 && tlsEngine.isInboundDone())
             {
-                doEnd(applicationReply, applicationReplyId, applicationReplyAuthorization);
+                doEnd(applicationReply, applicationReplyId, networkReplyTraceId, applicationReplyAuthorization);
                 if (networkReplyBudget == -1)
                 {
                     doReset(networkReplyThrottle, networkReplyId);
@@ -1466,7 +1475,7 @@ public final class ClientStreamFactory implements StreamFactory
             if (networkCredit > 0)
             {
                 networkReplyBudget += networkCredit;
-                doWindow(networkReplyThrottle, networkReplyId, networkCredit, networkReplyPadding);
+                doWindow(networkReplyThrottle, networkReplyId, window.trace(), networkCredit, networkReplyPadding);
             }
         }
 
@@ -1483,7 +1492,7 @@ public final class ClientStreamFactory implements StreamFactory
             }
             finally
             {
-                doReset(networkReplyThrottle, networkReplyId);
+                doReset(networkReplyThrottle, networkReplyId, reset.trace());
             }
         }
     }
@@ -1493,6 +1502,7 @@ public final class ClientStreamFactory implements StreamFactory
         int bytesProduced,
         MessageConsumer networkTarget,
         long networkId,
+        long traceId,
         int padding,
         long authorization,
         Runnable networkReplyDoneHandler,
@@ -1502,7 +1512,7 @@ public final class ClientStreamFactory implements StreamFactory
         if (bytesProduced > 0)
         {
             final OctetsFW outNetOctets = outNetOctetsRO.wrap(outNetBuffer, 0, bytesProduced);
-            doData(networkTarget, networkId, padding, authorization, outNetOctets);
+            doData(networkTarget, networkId, traceId, padding, authorization, outNetOctets);
             writeFrameCounter.getAsLong();
             writeBytesAccumulator.accept(bytesProduced);
         }
@@ -1560,12 +1570,14 @@ public final class ClientStreamFactory implements StreamFactory
     private void doBegin(
         final MessageConsumer target,
         final long targetId,
+        final long traceId,
         final long authorization,
         final long targetRef,
         final long correlationId)
     {
         final BeginFW begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
+                .trace(traceId)
                 .authorization(authorization)
                 .source("tls")
                 .sourceRef(targetRef)
@@ -1578,12 +1590,14 @@ public final class ClientStreamFactory implements StreamFactory
     private void doData(
         final MessageConsumer target,
         final long targetId,
+        final long traceId,
         final int padding,
         final long authorization,
         final OctetsFW payload)
     {
         final DataFW data = dataRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
+                .trace(traceId)
                 .authorization(authorization)
                 .groupId(0)
                 .padding(padding)
@@ -1596,14 +1610,39 @@ public final class ClientStreamFactory implements StreamFactory
     private void doEnd(
         final MessageConsumer target,
         final long targetId,
+        final long traceId,
         final long authorization)
     {
         final EndFW end = endRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-                .streamId(targetId)
-                .authorization(authorization)
-                .build();
+                               .streamId(targetId)
+                               .trace(traceId)
+                               .authorization(authorization)
+                               .build();
 
         target.accept(end.typeId(), end.buffer(), end.offset(), end.sizeof());
+    }
+
+    private void doEnd(
+        final MessageConsumer target,
+        final long targetId,
+        final long authorization)
+    {
+        doEnd(target, targetId, 0, authorization);
+    }
+
+    private void doAbort(
+        final MessageConsumer target,
+        final long targetId,
+        final long traceId,
+        final long authorization)
+    {
+        final AbortFW abort = abortRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+                                     .streamId(targetId)
+                                     .trace(traceId)
+                                     .authorization(authorization)
+                                     .build();
+
+        target.accept(abort.typeId(), abort.buffer(), abort.offset(), abort.sizeof());
     }
 
     private void doAbort(
@@ -1611,17 +1650,13 @@ public final class ClientStreamFactory implements StreamFactory
         final long targetId,
         final long authorization)
     {
-        final AbortFW abort = abortRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-                .streamId(targetId)
-                .authorization(authorization)
-                .build();
-
-        target.accept(abort.typeId(), abort.buffer(), abort.offset(), abort.sizeof());
+        doAbort(target, targetId, 0, authorization);
     }
 
     private void doWindow(
         final MessageConsumer throttle,
         final long throttleId,
+        final long traceId,
         final int credit,
         final int padding)
     {
@@ -1635,21 +1670,40 @@ public final class ClientStreamFactory implements StreamFactory
         throttle.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
     }
 
+    private void doWindow(
+        final MessageConsumer throttle,
+        final long throttleId,
+        final int credit,
+        final int padding)
+    {
+        doWindow(throttle, throttleId, 0, credit, padding);
+    }
+
+    private void doReset(
+        final MessageConsumer throttle,
+        final long throttleId,
+        final long traceId)
+    {
+        final ResetFW reset = resetRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+               .streamId(throttleId)
+               .trace(traceId)
+               .build();
+
+        throttle.accept(reset.typeId(), reset.buffer(), reset.offset(), reset.sizeof());
+    }
+
     private void doReset(
         final MessageConsumer throttle,
         final long throttleId)
     {
-        final ResetFW reset = resetRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-               .streamId(throttleId)
-               .build();
-
-        throttle.accept(reset.typeId(), reset.buffer(), reset.offset(), reset.sizeof());
+        doReset(throttle, throttleId, 0);
     }
 
     private void doCloseOutbound(
         SSLEngine tlsEngine,
         MessageConsumer networkTarget,
         long networkId,
+        long traceId,
         int networkPadding,
         long authorization,
         Runnable networkReplyDoneHandler,
@@ -1663,7 +1717,7 @@ public final class ClientStreamFactory implements StreamFactory
         {
             // networkWindowBudget -= result.bytesProduced() + networkWindowPadding;
         }
-        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId, networkPadding, authorization,
+        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkId, traceId, networkPadding, authorization,
                 networkReplyDoneHandler, writeFrameCounter, writeBytesAccumulator);
     }
 
