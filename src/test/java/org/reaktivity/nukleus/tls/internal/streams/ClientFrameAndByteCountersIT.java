@@ -27,7 +27,6 @@ import org.junit.rules.Timeout;
 import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
-import org.reaktivity.nukleus.tls.internal.TlsController;
 import org.reaktivity.nukleus.tls.internal.test.TlsCountersRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
 
@@ -42,7 +41,7 @@ public class ClientFrameAndByteCountersIT
 
     private final ReaktorRule reaktor = new ReaktorRule()
             .directory("target/nukleus-itests")
-            .controller(TlsController.class::isAssignableFrom)
+            .controller("tls"::equals)
             .commandBufferCapacity(1024)
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(1024)

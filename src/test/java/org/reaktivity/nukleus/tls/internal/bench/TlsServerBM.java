@@ -79,7 +79,7 @@ public class TlsServerBM
         reaktor = Reaktor.builder()
                 .config(configuration)
                 .nukleus("tls"::equals)
-                .controller(TlsController.class::isAssignableFrom)
+                .controller("tls"::equals)
                 .errorHandler(ex -> ex.printStackTrace(System.err))
                 .build();
 
