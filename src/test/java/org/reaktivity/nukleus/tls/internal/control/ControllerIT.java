@@ -43,7 +43,7 @@ public class ControllerIT
         .commandBufferCapacity(1024)
         .responseBufferCapacity(1024)
         .counterValuesBufferCapacity(1024)
-        .controller(TlsController.class::equals);
+        .controller("tls"::equals);
 
     @Rule
     public final TestRule chain = outerRule(k3po).around(timeout).around(reaktor);
