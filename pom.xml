@@ -57,7 +57,7 @@
     <nukleus.version>0.20</nukleus.version>
 
     <nukleus.tls.spec.version>0.20</nukleus.tls.spec.version>
-    <reaktor.version>0.45</reaktor.version>
+    <reaktor.version>0.46</reaktor.version>
   </properties>
 
   <dependencies>
