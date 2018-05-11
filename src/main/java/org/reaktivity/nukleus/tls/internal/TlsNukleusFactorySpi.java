@@ -64,7 +64,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
     {
         final TlsConfiguration tlsConfig = new TlsConfiguration(config);
         final Path directory = config.directory();
-        final SSLContext context = initContext(directory);
+        final SSLContext context = initContext(directory, tlsConfig);
 
         final ServerStreamFactoryBuilder serverStreamFactoryBuilder =
             new ServerStreamFactoryBuilder(
@@ -84,7 +84,8 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
     }
 
     private SSLContext initContext(
-        Path directory)
+        Path directory,
+        TlsConfiguration tlsConfig)
     {
         SSLContext context = null;
 
@@ -99,7 +100,8 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
             {
                 KeyStore keyStore = KeyStore.getInstance("JKS");
                 keyStore.load(new FileInputStream(keyStoreFile), keyStorePassword.toCharArray());
-                KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance("SunX509");
+                KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(
+                        tlsConfig.keyManagerFactoryAlgorithm());
                 keyManagerFactory.init(keyStore, keyStorePassword.toCharArray());
                 keyManagers = keyManagerFactory.getKeyManagers();
             }
@@ -114,7 +116,8 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
                 KeyStore trustStore = KeyStore.getInstance("JKS");
                 trustStore.load(new FileInputStream(trustStoreFile), trustStorePassword.toCharArray());
                 // TODO: TLS Alert Record, code 112 / scope trustStore to match routes?
-                TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance("SunX509");
+                TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
+                        TrustManagerFactory.getDefaultAlgorithm());
                 trustManagerFactory.init(trustStore);
                 trustManagers = trustManagerFactory.getTrustManagers();
             }
