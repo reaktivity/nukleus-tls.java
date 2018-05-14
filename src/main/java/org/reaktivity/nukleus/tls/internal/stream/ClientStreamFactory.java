@@ -1263,13 +1263,17 @@ public final class ClientStreamFactory implements StreamFactory
                 try
                 {
                     tlsEngine.closeInbound();
+                    doEnd(applicationReply, applicationReplyId, end.trace(), applicationReplyAuthorization);
                 }
                 catch (SSLException ex)
                 {
-                    // ignore and clean up
+                    doAbort(applicationReply, applicationReplyId, applicationReplyAuthorization);
                 }
             }
-            doEnd(applicationReply, applicationReplyId, end.trace(), applicationReplyAuthorization);
+            else
+            {
+                doEnd(applicationReply, applicationReplyId, end.trace(), applicationReplyAuthorization);
+            }
         }
 
         private void handleAbort(
