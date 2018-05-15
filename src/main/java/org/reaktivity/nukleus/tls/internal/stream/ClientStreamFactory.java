@@ -1271,6 +1271,10 @@ public final class ClientStreamFactory implements StreamFactory
                     doAbort(applicationReply, applicationReplyId, applicationReplyAuthorization);
                 }
             }
+            else
+            {
+                doEnd(applicationReply, applicationReplyId, end.trace(), applicationReplyAuthorization);
+            }
         }
 
         private void handleAbort(
