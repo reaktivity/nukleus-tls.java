@@ -62,6 +62,19 @@ public class ClientIT
         k3po.finish();
     }
 
+//    @Test
+//    @Specification({
+//            "${route}/client/controller",
+//            "${client}/connection.established.with.extension.data/client",
+//            "${server}/connection.established.with.extension.data/server" })
+//    @ScriptProperty({
+//            "newServerAcceptRef ${newClientConnectRef}",
+//            "serverAccept \"nukleus://target/streams/tls#source\"" })
+//    public void shouldEstablishConnectionWithExtensionData() throws Exception
+//    {
+//        k3po.finish();
+//    }
+
     @Test
     @Specification({
             "${route}/client.alpn/controller",
