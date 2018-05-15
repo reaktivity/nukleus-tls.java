@@ -22,8 +22,11 @@ public class TlsConfiguration extends Configuration
     public static final String HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME = "nukleus.tls.handshake.window.bytes";
 
     public static final String HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME = "nukleus.tls.handshake.window.frames";
+    public static final String KEY_MANAGER_ALGORITHM = "nukleus.tls.key.manager.algorithm";
 
     public static final int HANDSHAKE_WINDOW_BYTES_DEFAULT = 65536;
+    // PKIX has support for choosing server certificate using SNI in a keystore with multiple keys
+    public static final String KEY_MANAGER_ALGORITHM_DEFAULT = "PKIX";
 
     public TlsConfiguration(
         Configuration config)
@@ -34,6 +37,11 @@ public class TlsConfiguration extends Configuration
     public int handshakeWindowBytes()
     {
         return getInteger(HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME, HANDSHAKE_WINDOW_BYTES_DEFAULT);
+    }
+
+    String keyManagerAlgorithm()
+    {
+        return getProperty(KEY_MANAGER_ALGORITHM, KEY_MANAGER_ALGORITHM_DEFAULT);
     }
 
 }
