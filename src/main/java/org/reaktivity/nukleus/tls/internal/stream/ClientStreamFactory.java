@@ -68,6 +68,7 @@ public final class ClientStreamFactory implements StreamFactory
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
     private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
+    private static final DirectBuffer NO_EXTENSION = new UnsafeBuffer(new byte[] {(byte)0xff, (byte)0xff});
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -181,8 +182,12 @@ public final class ClientStreamFactory implements StreamFactory
         final long applicationRef = begin.sourceRef();
         final String applicationName = begin.source().asString();
         final long authorization = begin.authorization();
-        final OctetsFW extension = begin.extension();
-        final TlsBeginExFW tlsBeginEx = extension.get(tlsBeginExRO::wrap);
+        // Ignoring extension data until there is a way to find a specific extension in the whole
+        // extension data
+        // final OctetsFW extension = begin.extension();
+        // final TlsBeginExFW tlsBeginEx = extension.extension.get(tlsBeginExRO::wrap);
+        final TlsBeginExFW tlsBeginEx = tlsBeginExRO.wrap(NO_EXTENSION, 0, NO_EXTENSION.capacity());
+
         final boolean defaultRoute;
 
         final MessagePredicate defaultRouteFilter = (t, b, o, l) ->
