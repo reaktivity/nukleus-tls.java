@@ -794,10 +794,8 @@ public final class ClientStreamFactory implements StreamFactory
         {
             try
             {
-                if (correlations.remove(networkCorrelationId) == null)
-                {
-                    doReset(applicationThrottle, applicationId, reset.trace());
-                }
+                correlations.remove(networkCorrelationId);
+                doReset(applicationThrottle, applicationId, reset.trace());
                 tlsEngine.closeInbound();
             }
             catch (SSLException ex)
@@ -1271,6 +1269,10 @@ public final class ClientStreamFactory implements StreamFactory
                 {
                     doAbort(applicationReply, applicationReplyId, applicationReplyAuthorization);
                 }
+            }
+            else
+            {
+                doEnd(applicationReply, applicationReplyId, end.trace(), applicationReplyAuthorization);
             }
         }
 
