@@ -101,7 +101,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
                 KeyStore keyStore = KeyStore.getInstance("JKS");
                 keyStore.load(new FileInputStream(keyStoreFile), keyStorePassword.toCharArray());
                 KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(
-                        tlsConfig.keyManagerFactoryAlgorithm());
+                        tlsConfig.keyManagerAlgorithm());
                 keyManagerFactory.init(keyStore, keyStorePassword.toCharArray());
                 keyManagers = keyManagerFactory.getKeyManagers();
             }
