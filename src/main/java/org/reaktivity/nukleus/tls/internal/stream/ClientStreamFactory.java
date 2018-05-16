@@ -68,6 +68,7 @@ public final class ClientStreamFactory implements StreamFactory
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
     private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
+    private static final DirectBuffer NO_EXTENSION = new UnsafeBuffer(new byte[] {(byte)0xff, (byte)0xff});
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -181,8 +182,9 @@ public final class ClientStreamFactory implements StreamFactory
         final long applicationRef = begin.sourceRef();
         final String applicationName = begin.source().asString();
         final long authorization = begin.authorization();
-        final OctetsFW extension = begin.extension();
-        final TlsBeginExFW tlsBeginEx = extension.get(tlsBeginExRO::wrap);
+        // Ignoring extension data, see reaktivity/nukleus-tls.java#47
+        final TlsBeginExFW tlsBeginEx = tlsBeginExRO.wrap(NO_EXTENSION, 0, NO_EXTENSION.capacity());
+
         final boolean defaultRoute;
 
         final MessagePredicate defaultRouteFilter = (t, b, o, l) ->
@@ -440,7 +442,8 @@ public final class ClientStreamFactory implements StreamFactory
 
                 correlations.put(newCorrelationId, newHandshake);
 
-                doBegin(networkTarget, newNetworkId, begin.trace(), authorization, networkRef, newCorrelationId);
+                doBegin(networkTarget, newNetworkId, begin.trace(), authorization, networkRef, newCorrelationId,
+                        begin.extension());
                 router.setThrottle(networkName, newNetworkId, newHandshake::handleThrottle);
 
                 this.tlsEngine = tlsEngine;
@@ -1575,7 +1578,8 @@ public final class ClientStreamFactory implements StreamFactory
         final long traceId,
         final long authorization,
         final long targetRef,
-        final long correlationId)
+        final long correlationId,
+        final OctetsFW extension)
     {
         final BeginFW begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .streamId(targetId)
@@ -1584,6 +1588,7 @@ public final class ClientStreamFactory implements StreamFactory
                 .source("tls")
                 .sourceRef(targetRef)
                 .correlationId(correlationId)
+                .extension(extension)
                 .build();
 
         target.accept(begin.typeId(), begin.buffer(), begin.offset(), begin.sizeof());
