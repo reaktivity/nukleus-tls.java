@@ -15,6 +15,13 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.nio.file.Path;
+import java.security.KeyStore;
+import java.security.SecureRandom;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
@@ -22,9 +29,14 @@ import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
 
 import org.agrona.DirectBuffer;
+import org.agrona.LangUtil;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.reaktivity.nukleus.buffer.BufferPool;
@@ -32,17 +44,23 @@ import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
+import org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi;
 import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactory.ServerHandshake;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
+import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
+
+import static java.lang.System.getProperty;
 
 public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final SSLContext context;
+    private final Map<String, SSLContext> context;
     private final Long2ObjectHashMap<ServerHandshake> correlations;
 
     private final UnrouteFW unrouteRO = new UnrouteFW();
+    private final RouteFW routeRO = new RouteFW();
+    private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
 
     private final Long2ObjectHashMap<LongSupplier> framesWrittenByteRouteId;
     private final Long2ObjectHashMap<LongSupplier> framesReadByteRouteId;
@@ -63,11 +81,10 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private Function<String, LongConsumer> supplyAccumulator;
 
     public ServerStreamFactoryBuilder(
-        TlsConfiguration config,
-        SSLContext context)
+        TlsConfiguration config)
     {
         this.config = config;
-        this.context = context;
+        this.context = new HashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
 
         this.framesWrittenByteRouteId = new Long2ObjectHashMap<>();
@@ -148,6 +165,13 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     {
         switch(msgTypeId)
         {
+            case RouteFW.TYPE_ID:
+                final RouteFW route = routeRO.wrap(buffer, index, index + length);
+                final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+                final String store = routeEx.store().asString();
+                context.computeIfAbsent(store, (x) -> TlsNukleusFactorySpi.initContext(config.config.directory(), config, store));
+                break;
+
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);

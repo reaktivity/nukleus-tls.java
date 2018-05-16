@@ -68,8 +68,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
 
         final ServerStreamFactoryBuilder serverStreamFactoryBuilder =
             new ServerStreamFactoryBuilder(
-                tlsConfig,
-                context);
+                tlsConfig);
 
         final ClientStreamFactoryBuilder clientStreamFactoryBuilder =
             new ClientStreamFactoryBuilder(
@@ -83,9 +82,10 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
                       .build();
     }
 
-    private SSLContext initContext(
+    public static SSLContext initContext(
         Path directory,
-        TlsConfiguration tlsConfig)
+        TlsConfiguration tlsConfig,
+        String store)
     {
         SSLContext context = null;
 

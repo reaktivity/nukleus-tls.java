@@ -28,10 +28,13 @@ public class TlsConfiguration extends Configuration
     // PKIX has support for choosing server certificate using SNI in a keystore with multiple keys
     public static final String KEY_MANAGER_ALGORITHM_DEFAULT = "PKIX";
 
+    public final Configuration config;
+
     public TlsConfiguration(
         Configuration config)
     {
         super(config);
+        this.config = config;
     }
 
     public int handshakeWindowBytes()

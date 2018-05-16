@@ -26,6 +26,7 @@ import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -98,7 +99,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
-    private final SSLContext context;
+    private final Map<String, SSLContext> context;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
@@ -121,7 +122,7 @@ public final class ServerStreamFactory implements StreamFactory
 
     public ServerStreamFactory(
         TlsConfiguration config,
-        SSLContext context,
+        Map<String, SSLContext> context,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
@@ -201,8 +202,10 @@ public final class ServerStreamFactory implements StreamFactory
 
         if (route != null)
         {
+            final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+            String store = routeEx.store().asString();
             final long networkId = begin.streamId();
-            final SSLEngine tlsEngine = context.createSSLEngine();
+            final SSLEngine tlsEngine = context.get(store).createSSLEngine();
 
             tlsEngine.setUseClientMode(false);
 //            tlsEngine.setNeedClientAuth(true);
