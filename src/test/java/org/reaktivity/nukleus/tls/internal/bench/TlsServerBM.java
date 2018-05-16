@@ -109,7 +109,7 @@ public class TlsServerBM
 
         final Random random = new Random();
         this.targetRef = random.nextLong();
-        this.sourceRef = controller.routeServer("source", 0L, "target", targetRef, null, null).get();
+        this.sourceRef = controller.routeServer("source", 0L, "target", targetRef, null, null, null).get();
 
         final long sourceId = random.nextLong();
         final long correlationId = random.nextLong();
@@ -125,7 +125,7 @@ public class TlsServerBM
     {
         final TlsController controller = reaktor.controller(TlsController.class);
 
-        controller.unrouteServer("source", sourceRef, "target", targetRef, null, null).get();
+        controller.unrouteServer("source", sourceRef, "target", targetRef, null, null, null).get();
 
         this.source = null;
         this.target = null;

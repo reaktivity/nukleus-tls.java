@@ -100,6 +100,7 @@ public final class TlsController implements Controller
         long sourceRef,
         String target,
         long targetRef,
+        String store,
         String hostname,
         String applicationProtocol)
     {
@@ -112,7 +113,7 @@ public final class TlsController implements Controller
                 .sourceRef(sourceRef)
                 .target(target)
                 .targetRef(targetRef)
-                .extension(b -> b.set(visitRouteEx(hostname, applicationProtocol)))
+                .extension(b -> b.set(visitRouteEx(store, hostname, applicationProtocol)))
                 .build();
 
         return controllerSpi.doRoute(route.typeId(), route.buffer(), route.offset(), route.sizeof());
@@ -123,6 +124,7 @@ public final class TlsController implements Controller
         long sourceRef,
         String target,
         long targetRef,
+        String store,
         String hostname,
         String applicationProtocol)
     {
@@ -135,7 +137,7 @@ public final class TlsController implements Controller
                 .sourceRef(sourceRef)
                 .target(target)
                 .targetRef(targetRef)
-                .extension(b -> b.set(visitRouteEx(hostname, applicationProtocol)))
+                .extension(b -> b.set(visitRouteEx(store, hostname, applicationProtocol)))
                 .build();
 
         return controllerSpi.doRoute(route.typeId(), route.buffer(), route.offset(), route.sizeof());
@@ -146,6 +148,7 @@ public final class TlsController implements Controller
         long sourceRef,
         String target,
         long targetRef,
+        String store,
         String hostname,
         String applicationProtocol)
     {
@@ -158,7 +161,7 @@ public final class TlsController implements Controller
                                      .sourceRef(sourceRef)
                                      .target(target)
                                      .targetRef(targetRef)
-                                     .extension(b -> b.set(visitRouteEx(hostname, applicationProtocol)))
+                                     .extension(b -> b.set(visitRouteEx(store, hostname, applicationProtocol)))
                                      .build();
 
         return controllerSpi.doUnroute(unroute.typeId(), unroute.buffer(), unroute.offset(), unroute.sizeof());
@@ -169,6 +172,7 @@ public final class TlsController implements Controller
         long sourceRef,
         String target,
         long targetRef,
+        String store,
         String hostname,
         String applicationProtocol)
     {
@@ -181,7 +185,7 @@ public final class TlsController implements Controller
                                      .sourceRef(sourceRef)
                                      .target(target)
                                      .targetRef(targetRef)
-                                     .extension(b -> b.set(visitRouteEx(hostname, applicationProtocol)))
+                                     .extension(b -> b.set(visitRouteEx(store, hostname, applicationProtocol)))
                                      .build();
 
         return controllerSpi.doUnroute(unroute.typeId(), unroute.buffer(), unroute.offset(), unroute.sizeof());
@@ -199,11 +203,13 @@ public final class TlsController implements Controller
     }
 
     private Flyweight.Builder.Visitor visitRouteEx(
+        String store,
         String hostname,
         String applicationProtocol)
     {
         return (buffer, offset, limit) ->
             routeExRW.wrap(buffer, offset, limit)
+                     .store(store)
                      .hostname(hostname)
                      .applicationProtocol(applicationProtocol)
                      .build()

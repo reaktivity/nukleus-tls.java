@@ -64,7 +64,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
     {
         final TlsConfiguration tlsConfig = new TlsConfiguration(config);
         final Path directory = config.directory();
-        final SSLContext context = initContext(directory, tlsConfig);
+        final SSLContext context = null;
 
         final ServerStreamFactoryBuilder serverStreamFactoryBuilder =
             new ServerStreamFactoryBuilder(
@@ -72,8 +72,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
 
         final ClientStreamFactoryBuilder clientStreamFactoryBuilder =
             new ClientStreamFactoryBuilder(
-                tlsConfig,
-                context);
+                tlsConfig);
 
         return builder.streamFactory(SERVER, serverStreamFactoryBuilder)
                       .routeHandler(SERVER, serverStreamFactoryBuilder::handleRoute)

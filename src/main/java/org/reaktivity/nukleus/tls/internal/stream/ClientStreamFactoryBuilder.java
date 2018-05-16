@@ -15,6 +15,8 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
@@ -32,16 +34,20 @@ import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
+import org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
+import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
 
 public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final SSLContext context;
+    private final Map<String, SSLContext> context;
     private final Long2ObjectHashMap<ClientStreamFactory.ClientHandshake> correlations;
 
+    private final RouteFW routeRO = new RouteFW();
     private final UnrouteFW unrouteRO = new UnrouteFW();
+    private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
 
     private final Long2ObjectHashMap<LongSupplier> framesWrittenByteRouteId;
     private final Long2ObjectHashMap<LongSupplier> framesReadByteRouteId;
@@ -62,11 +68,10 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     private Function<RouteFW, LongConsumer> supplyReadBytesAccumulator;
 
     public ClientStreamFactoryBuilder(
-        TlsConfiguration config,
-        SSLContext context)
+        TlsConfiguration config)
     {
         this.config = config;
-        this.context = context;
+        this.context = new HashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
 
         this.framesWrittenByteRouteId = new Long2ObjectHashMap<>();
@@ -147,6 +152,14 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     {
         switch(msgTypeId)
         {
+            case RouteFW.TYPE_ID:
+            {
+                final RouteFW route = routeRO.wrap(buffer, index, index + length);
+                final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+                final String store = routeEx.store().asString();
+                context.computeIfAbsent(store, (x) -> TlsNukleusFactorySpi.initContext(config.config.directory(), config, store));
+            }
+            break;
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);

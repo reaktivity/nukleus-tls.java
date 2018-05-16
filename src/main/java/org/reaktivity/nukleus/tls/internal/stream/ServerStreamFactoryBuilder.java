@@ -15,28 +15,7 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.nio.file.Path;
-import java.security.KeyStore;
-import java.security.SecureRandom;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.function.IntUnaryOperator;
-import java.util.function.LongConsumer;
-import java.util.function.LongFunction;
-import java.util.function.LongSupplier;
-import java.util.function.Supplier;
-
-import javax.net.ssl.KeyManager;
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
-
 import org.agrona.DirectBuffer;
-import org.agrona.LangUtil;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.reaktivity.nukleus.buffer.BufferPool;
@@ -50,7 +29,15 @@ import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
 
-import static java.lang.System.getProperty;
+import javax.net.ssl.SSLContext;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.function.IntUnaryOperator;
+import java.util.function.LongConsumer;
+import java.util.function.LongFunction;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 {
@@ -166,15 +153,19 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         switch(msgTypeId)
         {
             case RouteFW.TYPE_ID:
+            {
                 final RouteFW route = routeRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 final String store = routeEx.store().asString();
                 context.computeIfAbsent(store, (x) -> TlsNukleusFactorySpi.initContext(config.config.directory(), config, store));
-                break;
-
+            }
+            break;
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
+                final TlsRouteExFW routeEx = unroute.extension().get(tlsRouteExRO::wrap);
+                final String store = routeEx.store().asString();
+                context.remove(store);          // TODO remove based on reference count
                 final long routeId = unroute.correlationId();
                 bytesWrittenByteRouteId.remove(routeId);
                 bytesReadByteRouteId.remove(routeId);

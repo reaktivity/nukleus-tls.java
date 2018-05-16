@@ -56,7 +56,7 @@ public class ClientIT
         "${server}/connection.established/server" })
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEstablishConnection() throws Exception
     {
         k3po.finish();
@@ -69,7 +69,7 @@ public class ClientIT
             "${server}/connection.established.with.alpn/server" })
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEstablishConnectionWithAlpn() throws Exception
     {
         k3po.finish();
@@ -82,7 +82,7 @@ public class ClientIT
             "${server}/connection.established.no.hostname.no.alpn/server" })
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEstablishConnectionWithNoHostnameNoAlpn() throws Exception
     {
         k3po.finish();
@@ -102,7 +102,7 @@ public class ClientIT
             "${server}/connection.established/server" })
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldNegotiateWithNoALPNAsNoProtocolRouteExists() throws Exception
     {
         k3po.finish();
@@ -123,7 +123,7 @@ public class ClientIT
             "${server}/connection.established/server" })
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldFailNoALPNNoDefaultRoute() throws Exception
     {
         k3po.finish();
@@ -143,7 +143,7 @@ public class ClientIT
             "${server}/connection.established/server" })
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldSucceedNoALPNDefaultRoute() throws Exception
     {
         k3po.finish();
@@ -156,7 +156,7 @@ public class ClientIT
         "${server}/connection.established/server" })
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"",
+        "serverAccept \"nukleus://target/streams/tls\"",
         "authorization 0x0001_000000000000L"})
     public void shouldEstablishConnectionWithAuthorization() throws Exception
     {
@@ -170,7 +170,7 @@ public class ClientIT
         "${server}/echo.payload.length.10k/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();
@@ -183,7 +183,7 @@ public class ClientIT
         "${server}/echo.payload.length.10k/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEchoPayloadLength10kWithAuthorization() throws Exception
     {
         k3po.finish();
@@ -196,7 +196,7 @@ public class ClientIT
         "${server}/echo.payload.length.100k/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEchoPayloadLength100k() throws Exception
     {
         k3po.finish();
@@ -209,7 +209,7 @@ public class ClientIT
         "${server}/echo.payload.length.1000k/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEchoPayloadLength1000k() throws Exception
     {
         k3po.finish();
@@ -223,7 +223,7 @@ public class ClientIT
         "${server}/server.sent.write.close/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveServerSentWriteClose() throws Exception
     {
         k3po.finish();
@@ -237,7 +237,7 @@ public class ClientIT
             "${server}/server.sent.write.close.before.correlated/server"})
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveServerSentWriteCloseBeforeCorrelated() throws Exception
     {
         k3po.finish();
@@ -250,7 +250,7 @@ public class ClientIT
         "${server}/client.sent.write.close/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveClientSentWriteClose() throws Exception
     {
         k3po.finish();
@@ -263,7 +263,7 @@ public class ClientIT
             "${server}/client.sent.write.close.before.correlated/server"})
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveClientSentWriteCloseBeforeCorrelated() throws Exception
     {
         k3po.finish();
@@ -276,7 +276,7 @@ public class ClientIT
         "${server}/server.sent.write.abort/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveServerSentWriteAbort() throws Exception
     {
         k3po.finish();
@@ -289,7 +289,7 @@ public class ClientIT
             "${server}/server.sent.write.abort.before.correlated/server"})
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveServerSentWriteAbortBeforeCorrelated() throws Exception
     {
         k3po.finish();
@@ -302,7 +302,7 @@ public class ClientIT
         "${server}/client.sent.write.abort/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveClientSentWriteAbort() throws Exception
     {
         k3po.finish();
@@ -315,7 +315,7 @@ public class ClientIT
             "${server}/client.sent.write.abort.before.correlated/server"})
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveClientSentWriteAbortBeforeCorrelated() throws Exception
     {
         k3po.finish();
@@ -329,7 +329,7 @@ public class ClientIT
         "${server}/server.sent.read.abort/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveServerSentReadAbort() throws Exception
     {
         k3po.finish();
@@ -343,7 +343,7 @@ public class ClientIT
             "${server}/server.sent.read.abort.before.correlated/server"})
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveServerSentReadAbortBeforeCorrelated() throws Exception
     {
         k3po.finish();
@@ -357,7 +357,7 @@ public class ClientIT
         "${server}/client.sent.read.abort/server"})
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveClientSentReadAbort() throws Exception
     {
         k3po.finish();
@@ -371,7 +371,7 @@ public class ClientIT
             "${server}/client.sent.read.abort.before.correlated/server"})
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldReceiveClientSentReadAbortBeforeCorrelated() throws Exception
     {
         k3po.finish();

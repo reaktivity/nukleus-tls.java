@@ -23,6 +23,7 @@ import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -94,7 +95,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
-    private final SSLContext context;
+    private final Map<String, SSLContext> context;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
@@ -116,7 +117,7 @@ public final class ClientStreamFactory implements StreamFactory
 
     public ClientStreamFactory(
         TlsConfiguration config,
-        SSLContext context,
+        Map<String, SSLContext> context,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
@@ -221,17 +222,18 @@ public final class ClientStreamFactory implements StreamFactory
 
         if (route != null)
         {
+            final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+            String store = routeEx.store().asString();
+
             String tlsHostname = tlsBeginEx.hostname().asString();
             if (tlsHostname == null)
             {
-                final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 tlsHostname = routeEx.hostname().asString();
             }
 
             String tlsApplicationProtocol = tlsBeginEx.applicationProtocol().asString();
             if (tlsApplicationProtocol == null)
             {
-                final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 tlsApplicationProtocol = routeEx.applicationProtocol().asString();
             }
 
@@ -245,7 +247,10 @@ public final class ClientStreamFactory implements StreamFactory
             final LongConsumer writeBytesAccumulator = supplyWriteBytesAccumulator.apply(route);
             final LongConsumer readBytesAccumulator = supplyReadBytesAccumulator.apply(route);
 
+            final SSLEngine tlsEngine = context.get(store).createSSLEngine(tlsHostname, -1);
+
             newStream = new ClientAcceptStream(
+                tlsEngine,
                 tlsHostname,
                 tlsApplicationProtocol,
                 defaultRoute,
@@ -315,6 +320,7 @@ public final class ClientStreamFactory implements StreamFactory
         private long applicationTraceId;
 
         private ClientAcceptStream(
+            SSLEngine tlsEngine,
             String tlsHostname,
             String tlsApplicationProtocol,
             boolean defaultRoute,
@@ -328,6 +334,7 @@ public final class ClientStreamFactory implements StreamFactory
             LongConsumer writeBytesAccumulator,
             LongConsumer readBytesAccumulator)
         {
+            this.tlsEngine = tlsEngine;
             this.tlsHostname = tlsHostname;
             this.tlsApplicationProtocol = tlsApplicationProtocol;
             this.defaultRoute = defaultRoute;
@@ -408,7 +415,6 @@ public final class ClientStreamFactory implements StreamFactory
                 final long newNetworkId = supplyStreamId.getAsLong();
                 final long newCorrelationId = supplyCorrelationId.getAsLong();
 
-                final SSLEngine tlsEngine = context.createSSLEngine(tlsHostname, -1);
                 tlsEngine.setUseClientMode(true);
 
                 final SSLParameters tlsParameters = tlsEngine.getSSLParameters();
