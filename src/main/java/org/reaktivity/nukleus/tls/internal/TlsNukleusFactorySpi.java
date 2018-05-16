@@ -92,7 +92,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
         {
             String keyStorePassword = getProperty(PROPERTY_TLS_KEYSTORE_PASSWORD, DEFAULT_TLS_KEYSTORE_PASSWORD);
             String keyStoreFilename = getProperty(PROPERTY_TLS_KEYSTORE, DEFAULT_TLS_KEYSTORE);
-            File keyStoreFile = directory.resolve("tls").resolve(keyStoreFilename).toFile();
+            File keyStoreFile = resolve(directory, store, keyStoreFilename);
 
             KeyManager[] keyManagers = null;
             if (keyStoreFile.exists())
@@ -107,7 +107,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
 
             String trustStorePassword = getProperty(PROPERTY_TLS_TRUSTSTORE_PASSWORD, DEFAULT_TLS_TRUSTSTORE_PASSWORD);
             String trustStoreFilename = System.getProperty(PROPERTY_TLS_TRUSTSTORE, DEFAULT_TLS_TRUSTSTORE);
-            File trustStoreFile = directory.resolve("tls").resolve(trustStoreFilename).toFile();
+            File trustStoreFile = resolve(directory, store, trustStoreFilename);
 
             TrustManager[] trustManagers = null;
             if (trustStoreFile.exists())
@@ -131,4 +131,15 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
 
         return context;
     }
+
+    private static File resolve(
+        Path directory,
+        String store,
+        String storeFilename)
+    {
+        return store == null
+                ? directory.resolve("tls").resolve(storeFilename).toFile()
+                : directory.resolve("tls").resolve(store).resolve(storeFilename).toFile();
+    }
+
 }
