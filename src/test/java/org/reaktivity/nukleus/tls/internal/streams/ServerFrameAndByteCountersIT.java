@@ -60,7 +60,7 @@ public class ServerFrameAndByteCountersIT
         "${server}/echo.payload.length.10k/server"})
     @ScriptProperty({
         "newClientAcceptRef ${newServerConnectRef}",
-        "clientAccept \"nukleus://target/streams/tls#source\"" })
+        "clientAccept \"nukleus://target/streams/tls\"" })
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();
