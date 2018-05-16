@@ -23,7 +23,6 @@ import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
-import org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi;
 import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactory.ServerHandshake;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
@@ -39,10 +38,13 @@ import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import static org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi.initContext;
+
 public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
     private final Map<String, SSLContext> context;
+    private final Map<String, Integer> routes;
     private final Long2ObjectHashMap<ServerHandshake> correlations;
 
     private final UnrouteFW unrouteRO = new UnrouteFW();
@@ -72,6 +74,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     {
         this.config = config;
         this.context = new HashMap<>();
+        this.routes = new HashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
 
         this.framesWrittenByteRouteId = new Long2ObjectHashMap<>();
@@ -157,7 +160,8 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
                 final RouteFW route = routeRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 final String store = routeEx.store().asString();
-                context.computeIfAbsent(store, (x) -> TlsNukleusFactorySpi.initContext(config.config.directory(), config, store));
+                routes.merge(store, 1, (old, inc) -> old + inc);
+                context.computeIfAbsent(store, (x) -> initContext(config.config.directory(), config, store));
             }
             break;
             case UnrouteFW.TYPE_ID:
@@ -165,7 +169,12 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = unroute.extension().get(tlsRouteExRO::wrap);
                 final String store = routeEx.store().asString();
-                context.remove(store);          // TODO remove based on reference count
+                routes.merge(store, -1, (old, inc) -> old + inc);
+                if (routes.get(store) == 0)
+                {
+                    routes.remove(store);
+                    context.remove(store);
+                }
                 final long routeId = unroute.correlationId();
                 bytesWrittenByteRouteId.remove(routeId);
                 bytesReadByteRouteId.remove(routeId);
