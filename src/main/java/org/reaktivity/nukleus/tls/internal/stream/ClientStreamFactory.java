@@ -182,10 +182,7 @@ public final class ClientStreamFactory implements StreamFactory
         final long applicationRef = begin.sourceRef();
         final String applicationName = begin.source().asString();
         final long authorization = begin.authorization();
-        // Ignoring extension data until there is a way to find a specific extension in the whole
-        // extension data
-        // final OctetsFW extension = begin.extension();
-        // final TlsBeginExFW tlsBeginEx = extension.extension.get(tlsBeginExRO::wrap);
+        // Ignoring extension data, see reaktivity/nukleus-tls.java#47
         final TlsBeginExFW tlsBeginEx = tlsBeginExRO.wrap(NO_EXTENSION, 0, NO_EXTENSION.capacity());
 
         final boolean defaultRoute;
