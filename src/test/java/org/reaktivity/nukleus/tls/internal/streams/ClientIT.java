@@ -64,12 +64,12 @@ public class ClientIT
 
     @Test
     @Specification({
-            "${route}/client.default.scope/controller",
-            "${client}/connection.established/client",
-            "${server}/connection.established/server" })
+        "${route}/client.default.scope/controller",
+        "${client}/connection.established/client",
+        "${server}/connection.established/server" })
     @ScriptProperty({
-            "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls\"" })
+        "newServerAcceptRef ${newClientConnectRef}",
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEstablishConnectionDefaultScope() throws Exception
     {
         k3po.finish();
@@ -88,6 +88,20 @@ public class ClientIT
         k3po.finish();
     }
 
+    @Test
+    @Specification({
+            "${route}/client/controller",
+            "${client}/connection.established.with.extension.data/client",
+            "${server}/connection.established.with.extension.data/server" })
+    @ScriptProperty({
+            "newServerAcceptRef ${newClientConnectRef}",
+            "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldEstablishConnectionWithExtensionData() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Ignore("Ignoring until BEGIN extension data is considered")
     @Test
     @Specification({
             "${route}/client.alpn/controller",
