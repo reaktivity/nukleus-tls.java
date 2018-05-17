@@ -67,6 +67,19 @@ public class ServerIT
         k3po.finish();
     }
 
+    @Test
+    @Specification({
+        "${route}/server/controller",
+        "${client}/connection.established/client",
+        "${server}/connection.established/server" })
+    @ScriptProperty({
+        "newClientAcceptRef ${newServerConnectRef}",
+        "clientAccept \"nukleus://target/streams/tls\"" })
+    public void shouldEstablishConnectionDefaultScope() throws Exception
+    {
+        k3po.finish();
+    }
+
     /*
      * route for protocol2
      * client sends ALPN w/ protocol2
