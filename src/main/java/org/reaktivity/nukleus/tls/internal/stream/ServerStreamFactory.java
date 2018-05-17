@@ -203,9 +203,9 @@ public final class ServerStreamFactory implements StreamFactory
         if (route != null)
         {
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-            String store = routeEx.store().asString();
+            String scope = routeEx.scopeId().asString();
             final long networkId = begin.streamId();
-            final SSLEngine tlsEngine = context.get(store).createSSLEngine();
+            final SSLEngine tlsEngine = context.get(scope).createSSLEngine();
 
             tlsEngine.setUseClientMode(false);
 //            tlsEngine.setNeedClientAuth(true);

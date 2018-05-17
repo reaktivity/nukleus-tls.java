@@ -223,7 +223,7 @@ public final class ClientStreamFactory implements StreamFactory
         if (route != null)
         {
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-            String store = routeEx.store().asString();
+            String scope = routeEx.scopeId().asString();
 
             String tlsHostname = tlsBeginEx.hostname().asString();
             if (tlsHostname == null)
@@ -247,7 +247,7 @@ public final class ClientStreamFactory implements StreamFactory
             final LongConsumer writeBytesAccumulator = supplyWriteBytesAccumulator.apply(route);
             final LongConsumer readBytesAccumulator = supplyReadBytesAccumulator.apply(route);
 
-            final SSLEngine tlsEngine = context.get(store).createSSLEngine(tlsHostname, -1);
+            final SSLEngine tlsEngine = context.get(scope).createSSLEngine(tlsHostname, -1);
 
             newStream = new ClientAcceptStream(
                 tlsEngine,

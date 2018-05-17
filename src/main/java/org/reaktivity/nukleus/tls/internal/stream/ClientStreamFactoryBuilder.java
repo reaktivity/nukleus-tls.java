@@ -159,21 +159,21 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
             {
                 final RouteFW route = routeRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-                final String store = routeEx.store().asString();
-                routes.merge(store, 1, (old, inc) -> old + inc);
-                context.computeIfAbsent(store, (x) -> initContext(config.config.directory(), config, store));
+                final String scope = routeEx.scopeId().asString();
+                routes.merge(scope, 1, (old, inc) -> old + inc);
+                context.computeIfAbsent(scope, (x) -> initContext(config.config.directory(), config, scope));
             }
             break;
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = unroute.extension().get(tlsRouteExRO::wrap);
-                final String store = routeEx.store().asString();
-                routes.merge(store, -1, (old, inc) -> old + inc);
-                if (routes.get(store) == 0)
+                final String scope = routeEx.scopeId().asString();
+                routes.merge(scope, -1, (old, inc) -> old + inc);
+                if (routes.get(scope) == 0)
                 {
-                    routes.remove(store);
-                    context.remove(store);
+                    routes.remove(scope);
+                    context.remove(scope);
                 }
                 final long routeId = unroute.correlationId();
                 bytesWrittenByteRouteId.remove(routeId);

@@ -63,8 +63,6 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
         NukleusBuilder builder)
     {
         final TlsConfiguration tlsConfig = new TlsConfiguration(config);
-        final Path directory = config.directory();
-        final SSLContext context = null;
 
         final ServerStreamFactoryBuilder serverStreamFactoryBuilder =
             new ServerStreamFactoryBuilder(
@@ -84,7 +82,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
     public static SSLContext initContext(
         Path directory,
         TlsConfiguration tlsConfig,
-        String store)
+        String scope)
     {
         SSLContext context = null;
 
@@ -92,7 +90,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
         {
             String keyStorePassword = getProperty(PROPERTY_TLS_KEYSTORE_PASSWORD, DEFAULT_TLS_KEYSTORE_PASSWORD);
             String keyStoreFilename = getProperty(PROPERTY_TLS_KEYSTORE, DEFAULT_TLS_KEYSTORE);
-            File keyStoreFile = resolve(directory, store, keyStoreFilename);
+            File keyStoreFile = resolve(directory, scope, keyStoreFilename);
 
             KeyManager[] keyManagers = null;
             if (keyStoreFile.exists())
@@ -107,7 +105,7 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
 
             String trustStorePassword = getProperty(PROPERTY_TLS_TRUSTSTORE_PASSWORD, DEFAULT_TLS_TRUSTSTORE_PASSWORD);
             String trustStoreFilename = System.getProperty(PROPERTY_TLS_TRUSTSTORE, DEFAULT_TLS_TRUSTSTORE);
-            File trustStoreFile = resolve(directory, store, trustStoreFilename);
+            File trustStoreFile = resolve(directory, scope, trustStoreFilename);
 
             TrustManager[] trustManagers = null;
             if (trustStoreFile.exists())
@@ -134,12 +132,12 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
 
     private static File resolve(
         Path directory,
-        String store,
+        String scope,
         String storeFilename)
     {
-        return store == null
+        return scope == null
                 ? directory.resolve("tls").resolve(storeFilename).toFile()
-                : directory.resolve("tls").resolve(store).resolve(storeFilename).toFile();
+                : directory.resolve("tls").resolve("scopes").resolve(scope).resolve(storeFilename).toFile();
     }
 
 }

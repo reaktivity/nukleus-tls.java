@@ -203,13 +203,13 @@ public final class TlsController implements Controller
     }
 
     private Flyweight.Builder.Visitor visitRouteEx(
-        String store,
+        String scope,
         String hostname,
         String applicationProtocol)
     {
         return (buffer, offset, limit) ->
             routeExRW.wrap(buffer, offset, limit)
-                     .store(store)
+                     .scopeId(scope)
                      .hostname(hostname)
                      .applicationProtocol(applicationProtocol)
                      .build()
