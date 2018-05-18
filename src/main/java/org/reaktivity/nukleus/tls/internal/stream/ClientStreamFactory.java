@@ -309,7 +309,7 @@ public final class ClientStreamFactory implements StreamFactory
         private final LongConsumer writeBytesAccumulator;
         private final LongConsumer readBytesAccumulator;
 
-        private SSLEngine tlsEngine;
+        private final SSLEngine tlsEngine;
         private MessageConsumer streamState;
 
         private long networkId;
@@ -452,7 +452,6 @@ public final class ClientStreamFactory implements StreamFactory
                         begin.extension());
                 router.setThrottle(networkName, newNetworkId, newHandshake::handleThrottle);
 
-                this.tlsEngine = tlsEngine;
                 this.networkId = newNetworkId;
                 this.streamState = this::afterBegin;
 
