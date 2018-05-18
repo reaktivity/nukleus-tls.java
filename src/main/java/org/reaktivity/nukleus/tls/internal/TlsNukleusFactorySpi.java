@@ -65,12 +65,10 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
         final TlsConfiguration tlsConfig = new TlsConfiguration(config);
 
         final ServerStreamFactoryBuilder serverStreamFactoryBuilder =
-            new ServerStreamFactoryBuilder(
-                tlsConfig);
+            new ServerStreamFactoryBuilder(tlsConfig);
 
         final ClientStreamFactoryBuilder clientStreamFactoryBuilder =
-            new ClientStreamFactoryBuilder(
-                tlsConfig);
+            new ClientStreamFactoryBuilder(tlsConfig);
 
         return builder.streamFactory(SERVER, serverStreamFactoryBuilder)
                       .routeHandler(SERVER, serverStreamFactoryBuilder::handleRoute)

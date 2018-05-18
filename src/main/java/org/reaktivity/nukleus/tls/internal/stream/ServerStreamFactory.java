@@ -99,7 +99,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
-    private final Map<String, SSLContext> context;
+    private final Map<String, SSLContext> contextsByScope;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
@@ -122,7 +122,7 @@ public final class ServerStreamFactory implements StreamFactory
 
     public ServerStreamFactory(
         TlsConfiguration config,
-        Map<String, SSLContext> context,
+        Map<String, SSLContext> contextsByScope,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
@@ -134,7 +134,7 @@ public final class ServerStreamFactory implements StreamFactory
         Function<RouteFW, LongSupplier> supplyWriteFrameCounter,
         Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator)
     {
-        this.context = requireNonNull(context);
+        this.contextsByScope = requireNonNull(contextsByScope);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
         this.networkPool = requireNonNull(bufferPool);
@@ -205,7 +205,7 @@ public final class ServerStreamFactory implements StreamFactory
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             String scope = routeEx.scopeId().asString();
             final long networkId = begin.streamId();
-            final SSLEngine tlsEngine = context.get(scope).createSSLEngine();
+            final SSLEngine tlsEngine = contextsByScope.get(scope).createSSLEngine();
 
             tlsEngine.setUseClientMode(false);
 //            tlsEngine.setNeedClientAuth(true);
