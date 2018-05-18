@@ -16,6 +16,7 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import org.agrona.DirectBuffer;
+import org.agrona.LangUtil;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.MutableInteger;
@@ -29,7 +30,16 @@ import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
 
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import java.io.File;
+import java.io.FileInputStream;
+import java.nio.file.Path;
+import java.security.KeyStore;
+import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
@@ -39,10 +49,20 @@ import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
-import static org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi.initContext;
+import static java.lang.System.getProperty;
 
 public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 {
+    private static final String PROPERTY_TLS_KEYSTORE = "tls.keystore";
+    private static final String PROPERTY_TLS_KEYSTORE_PASSWORD = "tls.keystore.password";
+    private static final String PROPERTY_TLS_TRUSTSTORE = "tls.truststore";
+    private static final String PROPERTY_TLS_TRUSTSTORE_PASSWORD = "tls.truststore.password";
+
+    private static final String DEFAULT_TLS_KEYSTORE = "keys";
+    private static final String DEFAULT_TLS_KEYSTORE_PASSWORD = "generated";
+    private static final String DEFAULT_TLS_TRUSTSTORE = "trust";
+    private static final String DEFAULT_TLS_TRUSTSTORE_PASSWORD = "generated";
+
     private final TlsConfiguration config;
     private final Map<String, SSLContext> contextsByScope;
     private final Map<String, MutableInteger> routesByScope;
@@ -248,6 +268,67 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             supplyReadBytesAccumulator,
             supplyWriteFrameCounter,
             supplyWriteBytesAccumulator);
+    }
+
+    static SSLContext initContext(
+        TlsConfiguration tlsConfig,
+        String scope)
+    {
+        Path directory = tlsConfig.directory();
+        SSLContext context = null;
+
+        try
+        {
+            String keyStorePassword = getProperty(PROPERTY_TLS_KEYSTORE_PASSWORD, DEFAULT_TLS_KEYSTORE_PASSWORD);
+            String keyStoreFilename = getProperty(PROPERTY_TLS_KEYSTORE, DEFAULT_TLS_KEYSTORE);
+            File keyStoreFile = resolve(directory, scope, keyStoreFilename);
+
+            KeyManager[] keyManagers = null;
+            if (keyStoreFile.exists())
+            {
+                KeyStore keyStore = KeyStore.getInstance("JKS");
+                keyStore.load(new FileInputStream(keyStoreFile), keyStorePassword.toCharArray());
+                KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(
+                        tlsConfig.keyManagerAlgorithm());
+                keyManagerFactory.init(keyStore, keyStorePassword.toCharArray());
+                keyManagers = keyManagerFactory.getKeyManagers();
+            }
+
+            String trustStorePassword = getProperty(PROPERTY_TLS_TRUSTSTORE_PASSWORD, DEFAULT_TLS_TRUSTSTORE_PASSWORD);
+            String trustStoreFilename = System.getProperty(PROPERTY_TLS_TRUSTSTORE, DEFAULT_TLS_TRUSTSTORE);
+            File trustStoreFile = resolve(directory, scope, trustStoreFilename);
+
+            TrustManager[] trustManagers = null;
+            if (trustStoreFile.exists())
+            {
+                KeyStore trustStore = KeyStore.getInstance("JKS");
+                trustStore.load(new FileInputStream(trustStoreFile), trustStorePassword.toCharArray());
+                // TODO: TLS Alert Record, code 112 / scope trustStore to match routes?
+                TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
+                        TrustManagerFactory.getDefaultAlgorithm());
+                trustManagerFactory.init(trustStore);
+                trustManagers = trustManagerFactory.getTrustManagers();
+            }
+
+            context = SSLContext.getInstance("TLS");
+            context.init(keyManagers, trustManagers, new SecureRandom());
+        }
+        catch (Exception ex)
+        {
+            LangUtil.rethrowUnchecked(ex);
+        }
+
+        return context;
+    }
+
+    private static File resolve(
+        Path directory,
+        String scope,
+        String storeFilename)
+    {
+        return scope == null
+                ? directory.resolve("tls").resolve(storeFilename).toFile()
+                : directory.resolve("tls").resolve("scopes").resolve(scope).resolve(storeFilename).toFile();
     }
 
 }

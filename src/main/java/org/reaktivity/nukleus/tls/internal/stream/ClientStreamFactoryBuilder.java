@@ -39,7 +39,7 @@ import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
 
-import static org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi.initContext;
+import static org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuilder.initContext;
 
 public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 {
