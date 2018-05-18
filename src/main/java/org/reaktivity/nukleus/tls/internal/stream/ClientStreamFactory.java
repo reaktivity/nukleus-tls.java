@@ -96,7 +96,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
-    private final Map<String, SSLContext> contextsByScope;
+    private final Map<String, SSLContext> contextsByStore;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
@@ -118,7 +118,7 @@ public final class ClientStreamFactory implements StreamFactory
 
     public ClientStreamFactory(
         TlsConfiguration config,
-        Map<String, SSLContext> contextsByScope,
+        Map<String, SSLContext> contextsByStore,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
@@ -130,7 +130,7 @@ public final class ClientStreamFactory implements StreamFactory
         Function<RouteFW, LongSupplier> supplyWriteFrameCounter,
         Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator)
     {
-        this.contextsByScope = requireNonNull(contextsByScope);
+        this.contextsByStore = requireNonNull(contextsByStore);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
         this.networkPool = requireNonNull(bufferPool);
@@ -225,7 +225,7 @@ public final class ClientStreamFactory implements StreamFactory
         if (route != null)
         {
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-            String scope = routeEx.scopeId().asString();
+            String store = routeEx.store().asString();
 
             String tlsHostname = tlsBeginEx.hostname().asString();
             if (tlsHostname == null)
@@ -249,7 +249,7 @@ public final class ClientStreamFactory implements StreamFactory
             final LongConsumer writeBytesAccumulator = supplyWriteBytesAccumulator.apply(route);
             final LongConsumer readBytesAccumulator = supplyReadBytesAccumulator.apply(route);
 
-            final SSLEngine tlsEngine = contextsByScope.get(scope).createSSLEngine(tlsHostname, -1);
+            final SSLEngine tlsEngine = contextsByStore.get(store).createSSLEngine(tlsHostname, -1);
 
             newStream = new ClientAcceptStream(
                 tlsEngine,

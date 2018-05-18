@@ -75,7 +75,7 @@ public class ServerIT
     @ScriptProperty({
         "newClientAcceptRef ${newServerConnectRef}",
         "clientAccept \"nukleus://target/streams/tls\"" })
-    public void shouldEstablishConnectionDefaultScope() throws Exception
+    public void shouldEstablishConnectionDefaultStore() throws Exception
     {
         k3po.finish();
     }

@@ -64,8 +64,8 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private static final String DEFAULT_TLS_TRUSTSTORE_PASSWORD = "generated";
 
     private final TlsConfiguration config;
-    private final Map<String, SSLContext> contextsByScope;
-    private final Map<String, MutableInteger> routesByScope;
+    private final Map<String, SSLContext> contextsByStore;
+    private final Map<String, MutableInteger> routesByStore;
     private final Long2ObjectHashMap<ServerHandshake> correlations;
 
     private final UnrouteFW unrouteRO = new UnrouteFW();
@@ -94,8 +94,8 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         TlsConfiguration config)
     {
         this.config = config;
-        this.contextsByScope = new HashMap<>();
-        this.routesByScope = new HashMap<>();
+        this.contextsByStore = new HashMap<>();
+        this.routesByStore = new HashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
 
         this.framesWrittenByteRouteId = new Long2ObjectHashMap<>();
@@ -180,22 +180,22 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             {
                 final RouteFW route = routeRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-                final String scope = routeEx.scopeId().asString();
-                MutableInteger routesCount = routesByScope.computeIfAbsent(scope, s -> new MutableInteger());
+                final String store = routeEx.store().asString();
+                MutableInteger routesCount = routesByStore.computeIfAbsent(store, s -> new MutableInteger());
                 routesCount.value++;
-                contextsByScope.computeIfAbsent(scope, s -> initContext(config, scope));
+                contextsByStore.computeIfAbsent(store, s -> initContext(config, store));
             }
             break;
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = unroute.extension().get(tlsRouteExRO::wrap);
-                final String scope = routeEx.scopeId().asString();
-                MutableInteger routesCount = routesByScope.computeIfPresent(scope, (s, c) -> decrement(c));
+                final String store = routeEx.store().asString();
+                MutableInteger routesCount = routesByStore.computeIfPresent(store, (s, c) -> decrement(c));
                 if (routesCount != null && routesCount.value == 0)
                 {
-                    routesByScope.remove(scope);
-                    contextsByScope.remove(scope);
+                    routesByStore.remove(store);
+                    contextsByStore.remove(store);
                 }
                 final long routeId = unroute.correlationId();
                 bytesWrittenByteRouteId.remove(routeId);
@@ -257,7 +257,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
         return new ServerStreamFactory(
             config,
-            contextsByScope,
+            contextsByStore,
             router,
             writeBuffer,
             bufferPool,
@@ -272,7 +272,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
     static SSLContext initContext(
         TlsConfiguration tlsConfig,
-        String scope)
+        String store)
     {
         Path directory = tlsConfig.directory();
         SSLContext context = null;
@@ -281,7 +281,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         {
             String keyStorePassword = getProperty(PROPERTY_TLS_KEYSTORE_PASSWORD, DEFAULT_TLS_KEYSTORE_PASSWORD);
             String keyStoreFilename = getProperty(PROPERTY_TLS_KEYSTORE, DEFAULT_TLS_KEYSTORE);
-            File keyStoreFile = resolve(directory, scope, keyStoreFilename);
+            File keyStoreFile = resolve(directory, store, keyStoreFilename);
 
             KeyManager[] keyManagers = null;
             if (keyStoreFile.exists())
@@ -296,7 +296,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
             String trustStorePassword = getProperty(PROPERTY_TLS_TRUSTSTORE_PASSWORD, DEFAULT_TLS_TRUSTSTORE_PASSWORD);
             String trustStoreFilename = System.getProperty(PROPERTY_TLS_TRUSTSTORE, DEFAULT_TLS_TRUSTSTORE);
-            File trustStoreFile = resolve(directory, scope, trustStoreFilename);
+            File trustStoreFile = resolve(directory, store, trustStoreFilename);
 
             TrustManager[] trustManagers = null;
             if (trustStoreFile.exists())
@@ -323,12 +323,12 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
     private static File resolve(
         Path directory,
-        String scope,
+        String store,
         String storeFilename)
     {
-        return scope == null
+        return store == null
                 ? directory.resolve("tls").resolve(storeFilename).toFile()
-                : directory.resolve("tls").resolve("scopes").resolve(scope).resolve(storeFilename).toFile();
+                : directory.resolve("tls").resolve("stores").resolve(store).resolve(storeFilename).toFile();
     }
 
 }

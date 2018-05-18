@@ -44,8 +44,8 @@ import static org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuil
 public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final Map<String, SSLContext> contextsByScope;
-    private final Map<String, MutableInteger> routesByScope;
+    private final Map<String, SSLContext> contextsByStore;
+    private final Map<String, MutableInteger> routesByStore;
     private final Long2ObjectHashMap<ClientStreamFactory.ClientHandshake> correlations;
 
     private final RouteFW routeRO = new RouteFW();
@@ -74,8 +74,8 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
         TlsConfiguration config)
     {
         this.config = config;
-        this.contextsByScope = new HashMap<>();
-        this.routesByScope = new HashMap<>();
+        this.contextsByStore = new HashMap<>();
+        this.routesByStore = new HashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
 
         this.framesWrittenByteRouteId = new Long2ObjectHashMap<>();
@@ -160,22 +160,22 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
             {
                 final RouteFW route = routeRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-                final String scope = routeEx.scopeId().asString();
-                MutableInteger routesCount = routesByScope.computeIfAbsent(scope, s -> new MutableInteger());
+                final String store = routeEx.store().asString();
+                MutableInteger routesCount = routesByStore.computeIfAbsent(store, s -> new MutableInteger());
                 routesCount.value++;
-                contextsByScope.computeIfAbsent(scope, s -> initContext(config, scope));
+                contextsByStore.computeIfAbsent(store, s -> initContext(config, store));
             }
             break;
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = unroute.extension().get(tlsRouteExRO::wrap);
-                final String scope = routeEx.scopeId().asString();
-                MutableInteger routesCount = routesByScope.computeIfPresent(scope, (s, c) -> decrement(c));
+                final String store = routeEx.store().asString();
+                MutableInteger routesCount = routesByStore.computeIfPresent(store, (s, c) -> decrement(c));
                 if (routesCount != null && routesCount.value == 0)
                 {
-                    routesByScope.remove(scope);
-                    contextsByScope.remove(scope);
+                    routesByStore.remove(store);
+                    contextsByStore.remove(store);
                 }
                 final long routeId = unroute.correlationId();
                 bytesWrittenByteRouteId.remove(routeId);
@@ -237,7 +237,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 
         return new ClientStreamFactory(
             config,
-            contextsByScope,
+            contextsByStore,
             router,
             writeBuffer,
             bufferPool,

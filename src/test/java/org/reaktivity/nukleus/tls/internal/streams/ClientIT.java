@@ -64,20 +64,20 @@ public class ClientIT
 
     @Test
     @Specification({
-        "${route}/client.default.scope/controller",
+        "${route}/client.default.store/controller",
         "${client}/connection.established/client",
         "${server}/connection.established/server" })
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
         "serverAccept \"nukleus://target/streams/tls\"" })
-    public void shouldEstablishConnectionDefaultScope() throws Exception
+    public void shouldEstablishConnectionDefaultStore() throws Exception
     {
         k3po.finish();
     }
 
     @Test
     @Specification({
-        "${route}/client.default.scope/controller",
+        "${route}/client.default.store/controller",
         "${client}/client.auth/client",
         "${server}/client.auth/server" })
     @ScriptProperty({
