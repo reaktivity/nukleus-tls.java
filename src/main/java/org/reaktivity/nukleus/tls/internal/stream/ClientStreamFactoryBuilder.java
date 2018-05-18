@@ -163,7 +163,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
                 final String scope = routeEx.scopeId().asString();
                 MutableInteger routesCount = routesByScope.computeIfAbsent(scope, s -> new MutableInteger());
                 routesCount.value++;
-                contextsByScope.computeIfAbsent(scope, s -> initContext(config.directory(), config, scope));
+                contextsByScope.computeIfAbsent(scope, s -> initContext(config, scope));
             }
             break;
             case UnrouteFW.TYPE_ID:

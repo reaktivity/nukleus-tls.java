@@ -78,10 +78,10 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
     }
 
     public static SSLContext initContext(
-        Path directory,
         TlsConfiguration tlsConfig,
         String scope)
     {
+        Path directory = tlsConfig.directory();
         SSLContext context = null;
 
         try
