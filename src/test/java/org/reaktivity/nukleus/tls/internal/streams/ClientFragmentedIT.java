@@ -50,7 +50,7 @@ public class ClientFragmentedIT
             .clean();
 
     @Rule
-    public final TestRule chain = outerRule(reaktor).around(k3po).around(timeout);
+    public final TestRule chain = outerRule(timeout).around(reaktor).around(k3po);
 
     @Test
     @Specification({
