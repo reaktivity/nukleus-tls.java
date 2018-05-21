@@ -82,7 +82,7 @@ public class ClientIT
         "${server}/client.auth/server" })
     @ScriptProperty({
         "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls#source\"" })
+        "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEstablishConnectionWithClientAuth() throws Exception
     {
         k3po.finish();
@@ -95,7 +95,7 @@ public class ClientIT
             "${server}/connection.established.with.extension.data/server" })
     @ScriptProperty({
             "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls#source\"" })
+            "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEstablishConnectionWithExtensionData() throws Exception
     {
         k3po.finish();
