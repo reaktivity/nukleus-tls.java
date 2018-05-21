@@ -15,6 +15,8 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
@@ -27,21 +29,28 @@ import javax.net.ssl.SSLContext;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
+import org.agrona.collections.MutableInteger;
 import org.reaktivity.nukleus.buffer.BufferPool;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
+import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
+
+import static org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuilder.initContext;
 
 public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final SSLContext context;
+    private final Map<String, SSLContext> contextsByStore;
+    private final Map<String, MutableInteger> routesByStore;
     private final Long2ObjectHashMap<ClientStreamFactory.ClientHandshake> correlations;
 
+    private final RouteFW routeRO = new RouteFW();
     private final UnrouteFW unrouteRO = new UnrouteFW();
+    private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
 
     private final Long2ObjectHashMap<LongSupplier> framesWrittenByteRouteId;
     private final Long2ObjectHashMap<LongSupplier> framesReadByteRouteId;
@@ -62,11 +71,11 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     private Function<RouteFW, LongConsumer> supplyReadBytesAccumulator;
 
     public ClientStreamFactoryBuilder(
-        TlsConfiguration config,
-        SSLContext context)
+        TlsConfiguration config)
     {
         this.config = config;
-        this.context = context;
+        this.contextsByStore = new HashMap<>();
+        this.routesByStore = new HashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
 
         this.framesWrittenByteRouteId = new Long2ObjectHashMap<>();
@@ -147,9 +156,27 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     {
         switch(msgTypeId)
         {
+            case RouteFW.TYPE_ID:
+            {
+                final RouteFW route = routeRO.wrap(buffer, index, index + length);
+                final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+                final String store = routeEx.store().asString();
+                MutableInteger routesCount = routesByStore.computeIfAbsent(store, s -> new MutableInteger());
+                routesCount.value++;
+                contextsByStore.computeIfAbsent(store, s -> initContext(config, store));
+            }
+            break;
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
+                final TlsRouteExFW routeEx = unroute.extension().get(tlsRouteExRO::wrap);
+                final String store = routeEx.store().asString();
+                MutableInteger routesCount = routesByStore.computeIfPresent(store, (s, c) -> decrement(c));
+                if (routesCount != null && routesCount.value == 0)
+                {
+                    routesByStore.remove(store);
+                    contextsByStore.remove(store);
+                }
                 final long routeId = unroute.correlationId();
                 bytesWrittenByteRouteId.remove(routeId);
                 bytesReadByteRouteId.remove(routeId);
@@ -159,6 +186,12 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
             break;
         }
         return true;
+    }
+
+    private MutableInteger decrement(MutableInteger routesCount)
+    {
+        routesCount.value--;
+        return routesCount;
     }
 
     @Override
@@ -204,7 +237,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 
         return new ClientStreamFactory(
             config,
-            context,
+            contextsByStore,
             router,
             writeBuffer,
             bufferPool,

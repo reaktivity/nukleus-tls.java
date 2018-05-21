@@ -47,7 +47,7 @@ public class ClientIT
             .clean();
 
     @Rule
-    public final TestRule chain = outerRule(reaktor).around(k3po).around(timeout);
+    public final TestRule chain = outerRule(timeout).around(reaktor).around(k3po);
 
     @Test
     @Specification({
@@ -58,6 +58,32 @@ public class ClientIT
         "newServerAcceptRef ${newClientConnectRef}",
         "serverAccept \"nukleus://target/streams/tls\"" })
     public void shouldEstablishConnection() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+        "${route}/client.default.store/controller",
+        "${client}/connection.established/client",
+        "${server}/connection.established/server" })
+    @ScriptProperty({
+        "newServerAcceptRef ${newClientConnectRef}",
+        "serverAccept \"nukleus://target/streams/tls\"" })
+    public void shouldEstablishConnectionDefaultStore() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+        "${route}/client.default.store/controller",
+        "${client}/client.auth/client",
+        "${server}/client.auth/server" })
+    @ScriptProperty({
+        "newServerAcceptRef ${newClientConnectRef}",
+        "serverAccept \"nukleus://target/streams/tls#source\"" })
+    public void shouldEstablishConnectionWithClientAuth() throws Exception
     {
         k3po.finish();
     }

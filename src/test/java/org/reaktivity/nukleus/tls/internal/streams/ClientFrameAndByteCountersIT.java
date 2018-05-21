@@ -51,7 +51,7 @@ public class ClientFrameAndByteCountersIT
     private final TlsCountersRule counters = new TlsCountersRule(reaktor);
 
     @Rule
-    public final TestRule chain = outerRule(reaktor).around(counters).around(k3po).around(timeout);
+    public final TestRule chain = outerRule(timeout).around(reaktor).around(counters).around(k3po);
 
     @Test
     @Specification({

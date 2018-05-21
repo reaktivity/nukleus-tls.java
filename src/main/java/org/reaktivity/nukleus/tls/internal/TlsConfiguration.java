@@ -39,7 +39,7 @@ public class TlsConfiguration extends Configuration
         return getInteger(HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME, HANDSHAKE_WINDOW_BYTES_DEFAULT);
     }
 
-    String keyManagerAlgorithm()
+    public String keyManagerAlgorithm()
     {
         return getProperty(KEY_MANAGER_ALGORITHM, KEY_MANAGER_ALGORITHM_DEFAULT);
     }

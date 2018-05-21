@@ -47,7 +47,7 @@ public class ServerIT
             .clean();
 
     @Rule
-    public final TestRule chain = outerRule(reaktor).around(k3po).around(timeout);
+    public final TestRule chain = outerRule(timeout).around(reaktor).around(k3po);
 
     /*
      * no route for protocol2, route for null protocol
@@ -63,6 +63,19 @@ public class ServerIT
         "newClientAcceptRef ${newServerConnectRef}",
         "clientAccept \"nukleus://target/streams/tls\"" })
     public void shouldEstablishConnection() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+        "${route}/server/controller",
+        "${client}/connection.established/client",
+        "${server}/connection.established/server" })
+    @ScriptProperty({
+        "newClientAcceptRef ${newServerConnectRef}",
+        "clientAccept \"nukleus://target/streams/tls\"" })
+    public void shouldEstablishConnectionDefaultStore() throws Exception
     {
         k3po.finish();
     }
