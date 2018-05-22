@@ -94,8 +94,7 @@ public class ClientIT
             "${client}/connection.established.with.extension.data/client",
             "${server}/connection.established.with.extension.data/server" })
     @ScriptProperty({
-            "newServerAcceptRef ${newClientConnectRef}",
-            "serverAccept \"nukleus://target/streams/tls\"" })
+            "newServerAcceptRef ${newClientConnectRef}" })
     public void shouldEstablishConnectionWithExtensionData() throws Exception
     {
         k3po.finish();
