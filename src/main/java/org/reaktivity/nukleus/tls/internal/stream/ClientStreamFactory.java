@@ -912,7 +912,7 @@ public final class ClientStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 networkReplySlotOffset = 0;
-                doReset(networkReplyThrottle, networkReplyId);
+                doReset(applicationThrottle, applicationId);
                 doAbort(networkTarget, networkId, networkAuthorization);
             }
             finally
