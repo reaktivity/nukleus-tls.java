@@ -858,7 +858,8 @@ public final class ServerStreamFactory implements StreamFactory
                 }
             }
 
-            final int networkCredit = applicationBudget - networkBudget - networkSlotOffset;
+            final int networkCredit = Math.min(applicationBudget, networkPool.slotCapacity())
+                    - networkBudget - networkSlotOffset;
 
             if (networkCredit > 0)
             {
