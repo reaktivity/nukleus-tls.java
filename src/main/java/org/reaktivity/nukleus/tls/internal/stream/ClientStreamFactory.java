@@ -1095,8 +1095,6 @@ public final class ClientStreamFactory implements StreamFactory
                 this.readBytesAccumulator = handshake.readBytesAccumulator;
 
                 networkReplyBudget += handshakeWindowBytes;
-                assert networkReplySlotOffset + networkReplyBudget <= networkPool.slotCapacity();
-
                 doWindow(networkReplyThrottle, networkReplyId, networkReplyBudget, networkReplyPadding);
 
                 handshake.onNetworkReply(networkReplyThrottle, networkReplyId, this::handleStatus,
@@ -1122,7 +1120,6 @@ public final class ClientStreamFactory implements StreamFactory
         void setNetworkReplyBudget(int networkReplyBudget)
         {
             this.networkReplyBudget = networkReplyBudget;
-            assert networkReplySlotOffset + networkReplyBudget <= networkPool.slotCapacity();
         }
 
         private void handleData(
@@ -1232,7 +1229,6 @@ public final class ClientStreamFactory implements StreamFactory
                                 if (networkWindowBytesUpdate > 0)
                                 {
                                     networkReplyBudget += networkWindowBytesUpdate;
-                                    assert networkReplySlotOffset + networkReplyBudget <= networkPool.slotCapacity();
                                     doWindow(networkReplyThrottle, networkReplyId, networkWindowBytesUpdate,
                                             networkReplyPadding);
                                 }
@@ -1490,8 +1486,6 @@ public final class ClientStreamFactory implements StreamFactory
             if (networkCredit > 0)
             {
                 networkReplyBudget += networkCredit;
-                assert networkReplySlotOffset + networkReplyBudget <= networkPool.slotCapacity();
-
                 doWindow(networkReplyThrottle, networkReplyId, window.trace(), networkCredit, networkReplyPadding);
             }
         }
