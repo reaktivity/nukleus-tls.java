@@ -878,6 +878,12 @@ public final class ClientStreamFactory implements StreamFactory
                     loop:
                     while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
+                        if (tlsEngine.isOutboundDone())
+                        {
+                            // tlsEngine.unwrap() throws IllegalStateException after tlsEngine.closeOutbound()
+                            throw new SSLException("SSLEngine closed");
+                        }
+
                         outAppByteBuffer.rewind();
                         SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
 
@@ -928,20 +934,9 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            try
-            {
-                doCloseOutbound(tlsEngine, networkTarget, networkId, end.trace(), networkPaddingSupplier.getAsInt(),
-                        networkAuthorization, networkReplyDoneHandler,
-                        writeFrameCounter, writeBytesAccumulator);
-            }
-            catch (SSLException ex)
-            {
-                doAbort(networkTarget, networkId, networkAuthorization);
-            }
-            finally
-            {
-                doReset(networkThrottle, networkId);
-            }
+            correlations.remove(networkCorrelationId);
+            tlsEngine.closeOutbound();
+            doAbort(networkTarget, networkId, end.trace(), networkAuthorization);
         }
 
         private void handleAbort(

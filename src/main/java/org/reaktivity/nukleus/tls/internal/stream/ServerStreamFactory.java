@@ -1121,29 +1121,15 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            try
-            {
-                doCloseOutbound(
-                    tlsEngine,
-                    networkReply,
-                    networkReplyId,
-                    networkTraceId,
-                    networkReplyPadding,
-                    end.authorization(),
-                    NOP,
-                    writeFrameCounter,
-                    writeBytesAccumulator);
-            }
-            catch (SSLException ex)
-            {
-                doAbort(networkReply, networkReplyId, 0L);
-            }
+            tlsEngine.closeOutbound();
+            doAbort(networkReply, networkReplyId, 0L);
         }
 
         private void handleAbort(
             AbortFW abort)
         {
             tlsEngine.closeOutbound();
+            doAbort(networkReply, networkReplyId, 0L);
         }
 
         private void updateNetworkReplyWindow(
