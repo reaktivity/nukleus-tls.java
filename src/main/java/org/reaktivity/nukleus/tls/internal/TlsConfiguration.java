@@ -25,7 +25,7 @@ public class TlsConfiguration extends Configuration
     public static final String HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME = "nukleus.tls.handshake.window.frames";
     public static final String KEY_MANAGER_ALGORITHM = "nukleus.tls.key.manager.algorithm";
 
-    public static final int HANDSHAKE_PARALLELISM_DEFAULT = 0;
+    public static final int HANDSHAKE_PARALLELISM_DEFAULT = 1;
     public static final int HANDSHAKE_WINDOW_BYTES_DEFAULT = 65536;
     // PKIX has support for choosing server certificate using SNI in a keystore with multiple keys
     public static final String KEY_MANAGER_ALGORITHM_DEFAULT = "PKIX";
