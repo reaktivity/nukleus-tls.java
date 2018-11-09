@@ -1305,7 +1305,16 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 else
                 {
-                    statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkReplyWindow);
+                    try
+                    {
+                        statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkReplyWindow);
+                    }
+                    catch (Exception ex)
+                    {
+                        // catches SSLException re-thrown as unchecked
+                        doReset(networkThrottle, networkId);
+                        doAbort(networkReply, networkReplyId, 0L);
+                    }
                 }
             }
         }
