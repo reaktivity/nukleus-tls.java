@@ -27,8 +27,6 @@ import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuilder;
 
 public final class TlsNukleusFactorySpi implements NukleusFactorySpi
 {
-
-
     @Override
     public String name()
     {
@@ -42,19 +40,19 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
     {
         final TlsConfiguration tlsConfig = new TlsConfiguration(config);
 
+        final TlsExecutor executor = new TlsExecutor(tlsConfig);
+
         final ServerStreamFactoryBuilder serverStreamFactoryBuilder =
-            new ServerStreamFactoryBuilder(tlsConfig);
+            new ServerStreamFactoryBuilder(tlsConfig, executor::executeTask);
 
         final ClientStreamFactoryBuilder clientStreamFactoryBuilder =
-            new ClientStreamFactoryBuilder(tlsConfig);
+            new ClientStreamFactoryBuilder(tlsConfig, executor::executeTask);
 
         return builder.streamFactory(SERVER, serverStreamFactoryBuilder)
                       .routeHandler(SERVER, serverStreamFactoryBuilder::handleRoute)
                       .streamFactory(CLIENT, clientStreamFactoryBuilder)
                       .routeHandler(CLIENT, clientStreamFactoryBuilder::handleRoute)
+                      .inject(executor)
                       .build();
     }
-
-
-
 }

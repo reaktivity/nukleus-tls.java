@@ -15,8 +15,11 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
+import static org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuilder.initContext;
+
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
@@ -39,18 +42,17 @@ import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
 
-import static org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuilder.initContext;
-
 public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 {
-    private final TlsConfiguration config;
-    private final Map<String, SSLContext> contextsByStore;
-    private final Map<String, MutableInteger> routesByStore;
-    private final Long2ObjectHashMap<ClientStreamFactory.ClientHandshake> correlations;
-
     private final RouteFW routeRO = new RouteFW();
     private final UnrouteFW unrouteRO = new UnrouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
+
+    private final TlsConfiguration config;
+    private final BiConsumer<Runnable, Runnable> executeTask;
+    private final Map<String, SSLContext> contextsByStore;
+    private final Map<String, MutableInteger> routesByStore;
+    private final Long2ObjectHashMap<ClientStreamFactory.ClientHandshake> correlations;
 
     private final Long2ObjectHashMap<LongSupplier> framesWrittenByteRouteId;
     private final Long2ObjectHashMap<LongSupplier> framesReadByteRouteId;
@@ -71,9 +73,11 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     private Function<RouteFW, LongConsumer> supplyReadBytesAccumulator;
 
     public ClientStreamFactoryBuilder(
-        TlsConfiguration config)
+        TlsConfiguration config,
+        BiConsumer<Runnable, Runnable> executeTask)
     {
         this.config = config;
+        this.executeTask = executeTask;
         this.contextsByStore = new HashMap<>();
         this.routesByStore = new HashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
@@ -237,6 +241,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 
         return new ClientStreamFactory(
             config,
+            executeTask,
             contextsByStore,
             router,
             writeBuffer,

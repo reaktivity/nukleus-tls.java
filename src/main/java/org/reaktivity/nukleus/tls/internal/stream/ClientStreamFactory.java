@@ -18,6 +18,7 @@ package org.reaktivity.nukleus.tls.internal.stream;
 import static java.nio.ByteBuffer.allocateDirect;
 import static java.util.Arrays.asList;
 import static java.util.Objects.requireNonNull;
+import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING;
 import static javax.net.ssl.SSLEngineResult.Status.BUFFER_UNDERFLOW;
 import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
@@ -38,6 +39,7 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
+import javax.net.ssl.SSLEngineResult.Status;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLParameters;
 
@@ -96,6 +98,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
+    private final BiConsumer<Runnable, Runnable> executeTask;
     private final Map<String, SSLContext> contextsByStore;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -118,6 +121,7 @@ public final class ClientStreamFactory implements StreamFactory
 
     public ClientStreamFactory(
         TlsConfiguration config,
+        BiConsumer<Runnable, Runnable> executeTask,
         Map<String, SSLContext> contextsByStore,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
@@ -130,6 +134,7 @@ public final class ClientStreamFactory implements StreamFactory
         Function<RouteFW, LongSupplier> supplyWriteFrameCounter,
         Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator)
     {
+        this.executeTask = requireNonNull(executeTask);
         this.contextsByStore = requireNonNull(contextsByStore);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
@@ -641,6 +646,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         private Consumer<WindowFW> windowHandler;
         private BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler;
+        private int pendingTasks;
 
         IntSupplier networkReplyBudgetSupplier;
         IntSupplier networkReplyPaddingSupplier;
@@ -794,7 +800,11 @@ public final class ClientStreamFactory implements StreamFactory
             networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt()+window.credit());
             networkPaddingConsumer.accept(window.padding());
 
-            statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
+            // tlsEngine.getHandshakeStatus() will block if delegated task is executing
+            if (pendingTasks == 0)
+            {
+                statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
+            }
         }
 
         private void handleReset(
@@ -872,41 +882,9 @@ public final class ClientStreamFactory implements StreamFactory
                     final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkReplySlot);
                     inNetBuffer.putBytes(networkReplySlotOffset, payload.buffer(), payload.offset(), payloadSize);
                     final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkReplySlot);
-                    final int inNetByteBufferPosition = inNetByteBuffer.position();
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset + payloadSize);
 
-                    loop:
-                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
-                    {
-                        if (tlsEngine.isOutboundDone())
-                        {
-                            // tlsEngine.unwrap() throws IllegalStateException after tlsEngine.closeOutbound()
-                            throw new SSLException("SSLEngine closed");
-                        }
-
-                        outAppByteBuffer.rewind();
-                        SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-
-                        if (outAppByteBuffer.position() != 0)
-                        {
-                            doReset(networkReplyThrottle, networkReplyId);
-                            break loop;
-                        }
-
-                        switch (result.getStatus())
-                        {
-                        case BUFFER_UNDERFLOW:
-                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
-                            final int totalBytesRemaining = inNetByteBuffer.remaining();
-                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
-                            networkReplySlotOffset = totalBytesRemaining;
-                            break loop;
-                        default:
-                            networkReplySlotOffset = 0;
-                            statusHandler.accept(result.getHandshakeStatus(), this::updateNetworkWindow);
-                            break;
-                        }
-                    }
+                    processNetwork(inNetBuffer, inNetByteBuffer);
 
                     int networkReplyBudgetCredit = dataLength + networkReplyPaddingSupplier.getAsInt();
                     networkReplyBudgetConsumer.accept(
@@ -927,6 +905,54 @@ public final class ClientStreamFactory implements StreamFactory
                 {
                     networkPool.release(networkReplySlot);
                     networkReplySlot = NO_SLOT;
+                }
+            }
+        }
+
+        private void processNetwork(
+            final MutableDirectBuffer inNetBuffer,
+            final ByteBuffer inNetByteBuffer) throws SSLException
+        {
+            final int inNetByteBufferPosition = inNetByteBuffer.position();
+
+            loop:
+            while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+            {
+                if (tlsEngine.isOutboundDone())
+                {
+                    // tlsEngine.unwrap() throws IllegalStateException after tlsEngine.closeOutbound()
+                    throw new SSLException("SSLEngine closed");
+                }
+
+                HandshakeStatus handshakeStatus = NOT_HANDSHAKING;
+                Status status = BUFFER_UNDERFLOW;
+
+                if (pendingTasks == 0)
+                {
+                    outAppByteBuffer.rewind();
+                    SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+                    status = result.getStatus();
+                    handshakeStatus = result.getHandshakeStatus();
+                }
+
+                if (outAppByteBuffer.position() != 0)
+                {
+                    doReset(networkReplyThrottle, networkReplyId);
+                    break loop;
+                }
+
+                switch (status)
+                {
+                case BUFFER_UNDERFLOW:
+                    final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
+                    final int totalBytesRemaining = inNetByteBuffer.remaining();
+                    alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
+                    networkReplySlotOffset = totalBytesRemaining;
+                    break loop;
+                default:
+                    networkReplySlotOffset = 0;
+                    statusHandler.accept(handshakeStatus, this::updateNetworkWindow);
+                    break;
                 }
             }
         }
@@ -956,6 +982,43 @@ public final class ClientStreamFactory implements StreamFactory
                 final int networkBudget = networkBudgetSupplier.getAsInt();
                 final int networkPadding = networkPaddingSupplier.getAsInt();
                 networkBudgetConsumer.accept(networkBudget - bytesProduced - networkPadding);
+            }
+        }
+
+        private void flushHandshake()
+        {
+            pendingTasks--;
+
+            if (pendingTasks == 0)
+            {
+                if (networkReplySlot != NO_SLOT)
+                {
+                    try
+                    {
+                        final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkReplySlot);
+                        final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkReplySlot);
+                        inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset);
+                        processNetwork(inNetBuffer, inNetByteBuffer);
+                    }
+                    catch (SSLException ex)
+                    {
+                        networkReplySlotOffset = 0;
+                        doReset(applicationThrottle, applicationId);
+                        doAbort(networkTarget, networkId, networkAuthorization);
+                    }
+                    finally
+                    {
+                        if (networkReplySlotOffset == 0 && networkReplySlot != NO_SLOT)
+                        {
+                            networkPool.release(networkReplySlot);
+                            networkReplySlot = NO_SLOT;
+                        }
+                    }
+                }
+                else
+                {
+                    statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
+                }
             }
         }
     }
@@ -999,6 +1062,7 @@ public final class ClientStreamFactory implements StreamFactory
         private LongConsumer readBytesAccumulator;
 
         private long networkReplyTraceId;
+        private ClientHandshake handshake;
 
         private ClientConnectReplyStream(
             MessageConsumer networkReplyThrottle,
@@ -1073,6 +1137,7 @@ public final class ClientStreamFactory implements StreamFactory
             if (handshake != null)
             {
                 this.tlsEngine = handshake.tlsEngine;
+                this.handshake = handshake;
                 this.applicationProtocol = handshake.applicationProtocol;
                 this.defaultRoute = handshake.defaultRoute;
                 this.networkTarget = handshake.networkTarget;
@@ -1296,7 +1361,7 @@ public final class ClientStreamFactory implements StreamFactory
             }
         }
 
-        private HandshakeStatus handleStatus(
+        private void handleStatus(
             HandshakeStatus status,
             Consumer<SSLEngineResult> resultHandler)
         {
@@ -1310,7 +1375,20 @@ public final class ClientStreamFactory implements StreamFactory
                             runnable != null;
                             runnable = tlsEngine.getDelegatedTask())
                     {
-                        runnable.run();
+                        if (handshake != null)
+                        {
+                            handshake.pendingTasks++;
+                            executeTask.accept(runnable, this::flushHandshake);
+                        }
+                        else
+                        {
+                            runnable.run();
+                        }
+                    }
+
+                    if (handshake != null && handshake.pendingTasks != 0)
+                    {
+                        break loop;
                     }
 
                     status = tlsEngine.getHandshakeStatus();
@@ -1348,8 +1426,6 @@ public final class ClientStreamFactory implements StreamFactory
                     break loop;
                 }
             }
-
-            return status;
         }
 
         private void handleFinished()
@@ -1365,6 +1441,7 @@ public final class ClientStreamFactory implements StreamFactory
                 this.applicationReplyId = newApplicationReplyId;
 
                 this.streamState = this::afterHandshake;
+                this.handshake = null;
                 this.doBeginApplicationReply = null;
             }
             else
@@ -1377,8 +1454,6 @@ public final class ClientStreamFactory implements StreamFactory
         {
             if (applicationReplySlotOffset > 0)
             {
-
-
                 final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationReplySlot);
 
                 final int applicationWindow =
@@ -1499,6 +1574,14 @@ public final class ClientStreamFactory implements StreamFactory
             finally
             {
                 doReset(networkReplyThrottle, networkReplyId, reset.trace());
+            }
+        }
+
+        private void flushHandshake()
+        {
+            if (handshake != null)
+            {
+                handshake.flushHandshake();
             }
         }
     }
