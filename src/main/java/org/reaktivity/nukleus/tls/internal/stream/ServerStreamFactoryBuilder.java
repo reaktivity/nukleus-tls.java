@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2017 The Reaktivity Project
+ * Copyright 2016-2018 The Reaktivity Project
  *
  * The Reaktivity Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -14,6 +14,29 @@
  * under the License.
  */
 package org.reaktivity.nukleus.tls.internal.stream;
+
+import static java.lang.System.getProperty;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.nio.file.Path;
+import java.security.KeyStore;
+import java.security.SecureRandom;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+import java.util.function.IntUnaryOperator;
+import java.util.function.LongConsumer;
+import java.util.function.LongFunction;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
+
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
 
 import org.agrona.DirectBuffer;
 import org.agrona.LangUtil;
@@ -30,27 +53,6 @@ import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
 
-import javax.net.ssl.KeyManager;
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
-import java.io.File;
-import java.io.FileInputStream;
-import java.nio.file.Path;
-import java.security.KeyStore;
-import java.security.SecureRandom;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.function.IntUnaryOperator;
-import java.util.function.LongConsumer;
-import java.util.function.LongFunction;
-import java.util.function.LongSupplier;
-import java.util.function.Supplier;
-
-import static java.lang.System.getProperty;
-
 public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 {
     private static final String PROPERTY_TLS_KEYSTORE = "tls.keystore";
@@ -63,14 +65,15 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private static final String DEFAULT_TLS_TRUSTSTORE = "trust";
     private static final String DEFAULT_TLS_TRUSTSTORE_PASSWORD = "generated";
 
-    private final TlsConfiguration config;
-    private final Map<String, SSLContext> contextsByStore;
-    private final Map<String, MutableInteger> routesByStore;
-    private final Long2ObjectHashMap<ServerHandshake> correlations;
-
     private final UnrouteFW unrouteRO = new UnrouteFW();
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
+
+    private final TlsConfiguration config;
+    private final BiConsumer<Runnable, Runnable> executeTask;
+    private final Map<String, SSLContext> contextsByStore;
+    private final Map<String, MutableInteger> routesByStore;
+    private final Long2ObjectHashMap<ServerHandshake> correlations;
 
     private final Long2ObjectHashMap<LongSupplier> framesWrittenByteRouteId;
     private final Long2ObjectHashMap<LongSupplier> framesReadByteRouteId;
@@ -91,9 +94,11 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private Function<String, LongConsumer> supplyAccumulator;
 
     public ServerStreamFactoryBuilder(
-        TlsConfiguration config)
+        TlsConfiguration config,
+        BiConsumer<Runnable, Runnable> executeTask)
     {
         this.config = config;
+        this.executeTask = executeTask;
         this.contextsByStore = new HashMap<>();
         this.routesByStore = new HashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
@@ -257,6 +262,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
         return new ServerStreamFactory(
             config,
+            executeTask,
             contextsByStore,
             router,
             writeBuffer,

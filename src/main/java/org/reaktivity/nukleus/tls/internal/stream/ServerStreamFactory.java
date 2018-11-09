@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2017 The Reaktivity Project
+ * Copyright 2016-2018 The Reaktivity Project
  *
  * The Reaktivity Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -99,6 +99,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
+    private final BiConsumer<Runnable, Runnable> executeTask;
     private final Map<String, SSLContext> contextsByStore;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -122,6 +123,7 @@ public final class ServerStreamFactory implements StreamFactory
 
     public ServerStreamFactory(
         TlsConfiguration config,
+        BiConsumer<Runnable, Runnable> executeTask,
         Map<String, SSLContext> contextsByStore,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
@@ -134,6 +136,7 @@ public final class ServerStreamFactory implements StreamFactory
         Function<RouteFW, LongSupplier> supplyWriteFrameCounter,
         Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator)
     {
+        this.executeTask = requireNonNull(executeTask);
         this.contextsByStore = requireNonNull(contextsByStore);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
@@ -274,7 +277,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final long authorization;
 
         private MessageConsumer streamState;
-        private ServerHandshake handshake;
+        private volatile ServerHandshake handshake;
 
         private int networkBudget;
         private int networkPadding;
@@ -607,14 +610,16 @@ public final class ServerStreamFactory implements StreamFactory
         {
             if (!tlsEngine.isInboundDone())
             {
-                try
+                // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
+                // but invalidates TLS session, preventing future abbreviated TLS handshakes from same client
+
+                doEnd(applicationTarget, applicationId, end.trace(), authorization);
+
+                final ServerHandshake correlation = correlations.remove(this.applicationCorrelationId);
+                if (correlation != null)
                 {
-                    doCloseInbound(tlsEngine);
-                    doEnd(applicationTarget, applicationId, end.trace(), authorization);
-                }
-                catch (SSLException ex)
-                {
-                    doAbort(applicationTarget, applicationId, authorization);
+                    tlsEngine.closeOutbound();
+                    doEnd(networkReply, networkReplyId, end.trace(), end.authorization());
                 }
             }
         }
@@ -650,7 +655,20 @@ public final class ServerStreamFactory implements StreamFactory
                             runnable != null;
                             runnable = tlsEngine.getDelegatedTask())
                     {
-                        runnable.run();
+                        if (handshake != null)
+                        {
+                            handshake.pendingTasks++;
+                            executeTask.accept(runnable, this::flushHandshake);
+                        }
+                        else
+                        {
+                            runnable.run();
+                        }
+                    }
+
+                    if (handshake != null && handshake.pendingTasks != 0)
+                    {
+                        break loop;
                     }
 
                     status = tlsEngine.getHandshakeStatus();
@@ -925,6 +943,14 @@ public final class ServerStreamFactory implements StreamFactory
         {
             this.networkPadding = networkPadding;
         }
+
+        private void flushHandshake()
+        {
+            if (handshake != null)
+            {
+                handshake.flushHandshake();
+            }
+        }
     }
 
     public final class ServerHandshake
@@ -944,6 +970,8 @@ public final class ServerStreamFactory implements StreamFactory
         private final LongSupplier readFrameCounter;
         private final LongConsumer writeBytesAccumulator;
         private final LongConsumer readBytesAccumulator;
+
+        private int pendingTasks;
 
         private int networkSlot = NO_SLOT;
         private int networkSlotOffset;
@@ -1058,44 +1086,11 @@ public final class ServerStreamFactory implements StreamFactory
 
                     final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkSlot);
                     inNetBuffer.putBytes(networkSlotOffset, payload.buffer(), payload.offset(), payloadSize);
+
                     final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkSlot);
-                    final int inNetByteBufferPosition = inNetByteBuffer.position();
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset + payloadSize);
 
-                    loop:
-                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
-                    {
-                        outAppByteBuffer.rewind();
-                        HandshakeStatus handshakeStatus = NOT_HANDSHAKING;
-                        SSLEngineResult.Status status = BUFFER_UNDERFLOW;
-                        if (tlsEngine.getHandshakeStatus() != NOT_HANDSHAKING && tlsEngine.getHandshakeStatus() != FINISHED)
-                        {
-                            SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-                            status = result.getStatus();
-                            handshakeStatus = result.getHandshakeStatus();
-                        }
-
-                        if (outAppByteBuffer.position() != 0)
-                        {
-                            doReset(networkThrottle, networkId);
-                            doAbort(networkReply, networkReplyId, 0L);
-                            break loop;
-                        }
-
-                        switch (status)
-                        {
-                        case BUFFER_UNDERFLOW:
-                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
-                            final int totalBytesRemaining = inNetByteBuffer.remaining();
-                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
-                            networkSlotOffset = totalBytesRemaining;
-                            break loop;
-                        default:
-                            networkSlotOffset = inNetByteBuffer.remaining();
-                            statusHandler.accept(handshakeStatus, this::updateNetworkReplyWindow);
-                            break;
-                        }
-                    }
+                    processNetwork(inNetBuffer, inNetByteBuffer);
 
                     networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt() + data.length());
 
@@ -1114,6 +1109,51 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     networkPool.release(networkSlot);
                     networkSlot = NO_SLOT;
+                }
+            }
+        }
+
+        private void processNetwork(
+            final MutableDirectBuffer inNetBuffer,
+            final ByteBuffer inNetByteBuffer) throws SSLException
+        {
+            final int inNetByteBufferPosition = inNetByteBuffer.position();
+
+            loop:
+            while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+            {
+                outAppByteBuffer.rewind();
+                HandshakeStatus handshakeStatus = NOT_HANDSHAKING;
+                SSLEngineResult.Status status = BUFFER_UNDERFLOW;
+
+                if (pendingTasks == 0 &&
+                        tlsEngine.getHandshakeStatus() != NOT_HANDSHAKING &&
+                        tlsEngine.getHandshakeStatus() != FINISHED)
+                {
+                    SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+                    status = result.getStatus();
+                    handshakeStatus = result.getHandshakeStatus();
+                }
+
+                if (outAppByteBuffer.position() != 0)
+                {
+                    doReset(networkThrottle, networkId);
+                    doAbort(networkReply, networkReplyId, 0L);
+                    break loop;
+                }
+
+                switch (status)
+                {
+                case BUFFER_UNDERFLOW:
+                    final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
+                    final int totalBytesRemaining = inNetByteBuffer.remaining();
+                    alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
+                    networkSlotOffset = totalBytesRemaining;
+                    break loop;
+                default:
+                    networkSlotOffset = inNetByteBuffer.remaining();
+                    statusHandler.accept(handshakeStatus, this::updateNetworkReplyWindow);
+                    break;
                 }
             }
         }
@@ -1203,7 +1243,11 @@ public final class ServerStreamFactory implements StreamFactory
             networkReplyBudget += window.credit();
             networkReplyPadding = window.padding();
 
-            statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkReplyWindow);
+            // tlsEngine.getHandshakeStatus() will block if delegated task is executing
+            if (pendingTasks == 0)
+            {
+                statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkReplyWindow);
+            }
         }
 
         private void handleReset(
@@ -1227,6 +1271,43 @@ public final class ServerStreamFactory implements StreamFactory
             ResetFW reset)
         {
             networkReplyDoneHandler.accept(0);
+        }
+
+        private void flushHandshake()
+        {
+            pendingTasks--;
+
+            if (pendingTasks == 0)
+            {
+                if (networkSlot != NO_SLOT)
+                {
+                    try
+                    {
+                        final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkSlot);
+                        final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkSlot);
+                        inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset);
+                        processNetwork(inNetBuffer, inNetByteBuffer);
+                    }
+                    catch (SSLException | UnsupportedOperationException ex)
+                    {
+                        networkSlotOffset = 0;
+                        doReset(networkThrottle, networkId);
+                        doAbort(networkReply, networkReplyId, 0L);
+                    }
+                    finally
+                    {
+                        if (networkSlotOffset == 0 && networkSlot != NO_SLOT)
+                        {
+                            networkPool.release(networkSlot);
+                            networkSlot = NO_SLOT;
+                        }
+                    }
+                }
+                else
+                {
+                    statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkReplyWindow);
+                }
+            }
         }
     }
 
@@ -1712,8 +1793,7 @@ public final class ServerStreamFactory implements StreamFactory
         long authorization,
         LongConsumer networkReplyDoneHandler,
         LongSupplier writeFrameCounter,
-        LongConsumer writeBytesAccumulator
-        ) throws SSLException
+        LongConsumer writeBytesAccumulator) throws SSLException
     {
         tlsEngine.closeOutbound();
         outNetByteBuffer.rewind();

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2017 The Reaktivity Project
+ * Copyright 2016-2018 The Reaktivity Project
  *
  * The Reaktivity Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -19,11 +19,13 @@ import org.reaktivity.nukleus.Configuration;
 
 public class TlsConfiguration extends Configuration
 {
+    public static final String HANDSHAKE_PARALLELISM_PROPERTY_NAME = "nukleus.tls.handshake.parallelism";
     public static final String HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME = "nukleus.tls.handshake.window.bytes";
 
     public static final String HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME = "nukleus.tls.handshake.window.frames";
     public static final String KEY_MANAGER_ALGORITHM = "nukleus.tls.key.manager.algorithm";
 
+    public static final int HANDSHAKE_PARALLELISM_DEFAULT = 0;
     public static final int HANDSHAKE_WINDOW_BYTES_DEFAULT = 65536;
     // PKIX has support for choosing server certificate using SNI in a keystore with multiple keys
     public static final String KEY_MANAGER_ALGORITHM_DEFAULT = "PKIX";
@@ -32,6 +34,11 @@ public class TlsConfiguration extends Configuration
         Configuration config)
     {
         super(config);
+    }
+
+    public int handshakeParallelism()
+    {
+        return getInteger(HANDSHAKE_PARALLELISM_PROPERTY_NAME, HANDSHAKE_PARALLELISM_DEFAULT);
     }
 
     public int handshakeWindowBytes()
