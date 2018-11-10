@@ -29,7 +29,8 @@ public final class TlsExecutor implements Nukleus
 
     private final Deque<Runnable> queue;
     private final Executor executor;
-    private volatile int workQueued;
+
+    private int workQueued;
 
     public TlsExecutor(
         TlsConfiguration config)
@@ -55,10 +56,10 @@ public final class TlsExecutor implements Nukleus
                 finally
                 {
                     queue.addLast(notify);
-                    workQueued++;
                 }
             }
         });
+        workQueued++;
     }
 
     @Override
