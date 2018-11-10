@@ -1017,7 +1017,16 @@ public final class ClientStreamFactory implements StreamFactory
                 }
                 else
                 {
-                    statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
+                    try
+                    {
+                        statusHandler.accept(tlsEngine.getHandshakeStatus(), this::updateNetworkWindow);
+                    }
+                    catch (Exception ex)
+                    {
+                        // catches SSLException re-thrown as unchecked
+                        doReset(applicationThrottle, applicationId);
+                        doAbort(networkTarget, networkId, networkAuthorization);
+                    }
                 }
             }
         }
