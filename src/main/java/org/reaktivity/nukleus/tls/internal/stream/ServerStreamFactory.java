@@ -208,27 +208,31 @@ public final class ServerStreamFactory implements StreamFactory
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             String store = routeEx.store().asString();
             final long networkId = begin.streamId();
-            final SSLEngine tlsEngine = contextsByStore.get(store).createSSLEngine();
+            final SSLContext sslContext = contextsByStore.get(store);
+            if (sslContext != null)
+            {
+                final SSLEngine tlsEngine = sslContext.createSSLEngine();
 
-            tlsEngine.setUseClientMode(false);
-//            tlsEngine.setNeedClientAuth(true);
+                tlsEngine.setUseClientMode(false);
+                // tlsEngine.setNeedClientAuth(true);
 
-            final LongSupplier writeFrameCounter = supplyWriteFrameCounter.apply(route);
-            final LongSupplier readFrameCounter = supplyReadFrameCounter.apply(route);
-            final LongConsumer writeBytesAccumulator = supplyWriteBytesAccumulator.apply(route);
-            final LongConsumer readBytesAccumulator = supplyReadBytesAccumulator.apply(route);
+                final LongSupplier writeFrameCounter = supplyWriteFrameCounter.apply(route);
+                final LongSupplier readFrameCounter = supplyReadFrameCounter.apply(route);
+                final LongConsumer writeBytesAccumulator = supplyWriteBytesAccumulator.apply(route);
+                final LongConsumer readBytesAccumulator = supplyReadBytesAccumulator.apply(route);
 
-            newStream = new ServerAcceptStream(
-                tlsEngine,
-                networkThrottle,
-                networkId,
-                authorization,
-                networkRef,
-                writeFrameCounter,
-                readFrameCounter,
-                writeBytesAccumulator,
-                readBytesAccumulator
+                newStream = new ServerAcceptStream(
+                        tlsEngine,
+                        networkThrottle,
+                        networkId,
+                        authorization,
+                        networkRef,
+                        writeFrameCounter,
+                        readFrameCounter,
+                        writeBytesAccumulator,
+                        readBytesAccumulator
                 )::handleStream;
+            }
         }
 
         return newStream;
