@@ -19,36 +19,40 @@ import org.reaktivity.nukleus.Configuration;
 
 public class TlsConfiguration extends Configuration
 {
-    public static final String HANDSHAKE_PARALLELISM_PROPERTY_NAME = "nukleus.tls.handshake.parallelism";
-    public static final String HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME = "nukleus.tls.handshake.window.bytes";
+    public static final IntPropertyDef TLS_HANDSHAKE_PARALLELISM;
+    public static final IntPropertyDef TLS_HANDSHAKE_WINDOW_BYTES;
+    public static final PropertyDef<String> TLS_KEY_MANAGER_ALGORITHM;
 
-    public static final String HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME = "nukleus.tls.handshake.window.frames";
-    public static final String KEY_MANAGER_ALGORITHM = "nukleus.tls.key.manager.algorithm";
+    private static final ConfigurationDef TLS_CONFIG;
 
-    public static final int HANDSHAKE_PARALLELISM_DEFAULT = 1;
-    public static final int HANDSHAKE_WINDOW_BYTES_DEFAULT = 65536;
-    // PKIX has support for choosing server certificate using SNI in a keystore with multiple keys
-    public static final String KEY_MANAGER_ALGORITHM_DEFAULT = "PKIX";
+    static
+    {
+        final ConfigurationDef config = new ConfigurationDef("nukleus.tls");
+        TLS_HANDSHAKE_PARALLELISM = config.property("handshake.parallelism", 1);
+        TLS_HANDSHAKE_WINDOW_BYTES = config.property("handshake.window.bytes", 65536);
+        TLS_KEY_MANAGER_ALGORITHM = config.property("handshake.key.manager.algorithm", "PKIX");
+        TLS_CONFIG = config;
+    }
 
     public TlsConfiguration(
         Configuration config)
     {
-        super(config);
+        super(TLS_CONFIG, config);
     }
 
     public int handshakeParallelism()
     {
-        return getInteger(HANDSHAKE_PARALLELISM_PROPERTY_NAME, HANDSHAKE_PARALLELISM_DEFAULT);
+        return TLS_HANDSHAKE_PARALLELISM.getAsInt(this);
     }
 
     public int handshakeWindowBytes()
     {
-        return getInteger(HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME, HANDSHAKE_WINDOW_BYTES_DEFAULT);
+        return TLS_HANDSHAKE_WINDOW_BYTES.getAsInt(this);
     }
 
     public String keyManagerAlgorithm()
     {
-        return getProperty(KEY_MANAGER_ALGORITHM, KEY_MANAGER_ALGORITHM_DEFAULT);
+        return TLS_KEY_MANAGER_ALGORITHM.get(this);
     }
 
 }
