@@ -17,8 +17,7 @@ package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
-import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME;
-import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME;
+import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_WINDOW_BYTES;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -44,8 +43,7 @@ public class ServerFragmentedIT
             .commandBufferCapacity(1024)
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(1024)
-            .configure(HANDSHAKE_WINDOW_BYTES_PROPERTY_NAME, 8)
-            .configure(HANDSHAKE_WINDOW_FRAMES_PROPERTY_NAME, 8)
+            .configure(TLS_HANDSHAKE_WINDOW_BYTES, 8)
             .nukleus("tls"::equals)
             .clean();
 
