@@ -19,16 +19,14 @@ import static java.util.concurrent.Executors.newFixedThreadPool;
 
 import java.util.Deque;
 import java.util.concurrent.ConcurrentLinkedDeque;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 
 import org.reaktivity.nukleus.Nukleus;
 
 public final class TlsExecutor implements Nukleus
 {
-    private static final Executor IMMEDIATE = Runnable::run;
-
     private final Deque<Runnable> queue;
-    private final Executor executor;
+    private final ExecutorService executor;
 
     private int workQueued;
 
@@ -36,7 +34,7 @@ public final class TlsExecutor implements Nukleus
         TlsConfiguration config)
     {
         final int handshakeParallelism = config.handshakeParallelism();
-        this.executor = handshakeParallelism <= 0 ? IMMEDIATE : newFixedThreadPool(handshakeParallelism);
+        this.executor = handshakeParallelism <= 0 ? null : newFixedThreadPool(handshakeParallelism);
         this.queue = new ConcurrentLinkedDeque<>();
     }
 
@@ -44,22 +42,15 @@ public final class TlsExecutor implements Nukleus
         Runnable task,
         Runnable notify)
     {
-        executor.execute(new Runnable()
+        if (executor != null)
         {
-            @Override
-            public void run()
-            {
-                try
-                {
-                    task.run();
-                }
-                finally
-                {
-                    queue.addLast(notify);
-                }
-            }
-        });
-        workQueued++;
+            queueTask(task, notify);
+        }
+        else
+        {
+            task.run();
+            notify.run();
+        }
     }
 
     @Override
@@ -92,5 +83,31 @@ public final class TlsExecutor implements Nukleus
     @Override
     public void close()
     {
+        if (executor != null)
+        {
+            executor.shutdownNow();
+        }
+    }
+
+    private void queueTask(
+        Runnable task,
+        Runnable notify)
+    {
+        executor.execute(new Runnable()
+        {
+            @Override
+            public void run()
+            {
+                try
+                {
+                    task.run();
+                }
+                finally
+                {
+                    queue.addLast(notify);
+                }
+            }
+        });
+        workQueued++;
     }
 }
