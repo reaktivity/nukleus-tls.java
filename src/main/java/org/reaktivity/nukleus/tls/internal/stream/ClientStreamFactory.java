@@ -33,6 +33,7 @@ import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
+import java.util.function.LongUnaryOperator;
 
 import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SSLContext;
@@ -104,7 +105,8 @@ public final class ClientStreamFactory implements StreamFactory
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
     private final BufferPool applicationPool;
-    private final LongSupplier supplyStreamId;
+    private final LongSupplier supplyInitialId;
+    private final LongUnaryOperator supplyReplyId;
     private final LongSupplier supplyCorrelationId;
     private final int handshakeWindowBytes;
 
@@ -126,7 +128,8 @@ public final class ClientStreamFactory implements StreamFactory
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
-        LongSupplier supplyStreamId,
+        LongSupplier supplyInitialId,
+        LongUnaryOperator supplyReplyId,
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ClientHandshake> correlations,
         Function<RouteFW, LongSupplier> supplyReadFrameCounter,
@@ -140,7 +143,8 @@ public final class ClientStreamFactory implements StreamFactory
         this.writeBuffer = requireNonNull(writeBuffer);
         this.networkPool = requireNonNull(bufferPool);
         this.applicationPool = requireNonNull(bufferPool).duplicate();
-        this.supplyStreamId = requireNonNull(supplyStreamId);
+        this.supplyInitialId = requireNonNull(supplyInitialId);
+        this.supplyReplyId = requireNonNull(supplyReplyId);
         this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
         this.correlations = requireNonNull(correlations);
         this.handshakeWindowBytes = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
@@ -281,7 +285,7 @@ public final class ClientStreamFactory implements StreamFactory
         final MessageConsumer networkReplyThrottle)
     {
         final long networkReplyId = begin.streamId();
-        final long authorization =- begin.authorization();
+        final long authorization = begin.authorization();
 
         return new ClientConnectReplyStream(networkReplyThrottle, networkReplyId, authorization)::handleStream;
     }
@@ -419,7 +423,7 @@ public final class ClientStreamFactory implements StreamFactory
                 final long applicationCorrelationId = begin.correlationId();
                 final long authorization = begin.authorization();
 
-                final long newNetworkId = supplyStreamId.getAsLong();
+                final long newNetworkId = supplyInitialId.getAsLong();
                 final long newCorrelationId = supplyCorrelationId.getAsLong();
 
                 tlsEngine.setUseClientMode(true);
@@ -1445,7 +1449,7 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 // no ALPN negotiation && default route OR
                 // negotiated protocol from ALPN matches with our route
-                final long newApplicationReplyId = supplyStreamId.getAsLong();
+                final long newApplicationReplyId = supplyReplyId.applyAsLong(handshake.applicationId);
                 this.applicationReply = this.doBeginApplicationReply.apply(this::handleThrottle, newApplicationReplyId);
                 this.applicationReplyId = newApplicationReplyId;
 

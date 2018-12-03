@@ -35,6 +35,7 @@ import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
+import java.util.function.LongUnaryOperator;
 
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SNIHostName;
@@ -105,7 +106,8 @@ public final class ServerStreamFactory implements StreamFactory
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
     private final BufferPool applicationPool;
-    private final LongSupplier supplyStreamId;
+    private final LongSupplier supplyInitialId;
+    private LongUnaryOperator supplyReplyId;
     private final LongSupplier supplyCorrelationId;
     private final int handshakeBudget;
 
@@ -128,7 +130,8 @@ public final class ServerStreamFactory implements StreamFactory
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
-        LongSupplier supplyStreamId,
+        LongSupplier supplyInitialId,
+        LongUnaryOperator supplyReplyId,
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ServerHandshake> correlations,
         Function<RouteFW, LongSupplier> supplyReadFrameCounter,
@@ -142,7 +145,8 @@ public final class ServerStreamFactory implements StreamFactory
         this.writeBuffer = requireNonNull(writeBuffer);
         this.networkPool = requireNonNull(bufferPool);
         this.applicationPool = requireNonNull(bufferPool).duplicate();
-        this.supplyStreamId = requireNonNull(supplyStreamId);
+        this.supplyInitialId = requireNonNull(supplyInitialId);
+        this.supplyReplyId = requireNonNull(supplyReplyId);
         this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
         this.correlations = requireNonNull(correlations);
         this.handshakeBudget = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
@@ -363,7 +367,7 @@ public final class ServerStreamFactory implements StreamFactory
                 this.networkCorrelationId = begin.correlationId();
 
                 final MessageConsumer networkReply = router.supplyTarget(networkReplyName);
-                final long newNetworkReplyId = supplyStreamId.getAsLong();
+                final long newNetworkReplyId = supplyReplyId.applyAsLong(networkId);
 
                 final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkThrottle, networkId,
                         networkReplyName, networkReply, newNetworkReplyId,
@@ -751,7 +755,7 @@ public final class ServerStreamFactory implements StreamFactory
                 final long newCorrelationId = supplyCorrelationId.getAsLong();
                 correlations.put(newCorrelationId, handshake);
 
-                final long newApplicationId = supplyStreamId.getAsLong();
+                final long newApplicationId = supplyInitialId.getAsLong();
 
                 doTlsBegin(applicationTarget, newApplicationId, networkTraceId, authorization, applicationRef,
                         newCorrelationId, tlsHostname, tlsApplicationProtocol);
