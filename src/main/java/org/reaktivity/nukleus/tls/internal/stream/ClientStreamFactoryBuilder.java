@@ -25,6 +25,7 @@ import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
 import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
+import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 
 import javax.net.ssl.SSLContext;
@@ -61,7 +62,8 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 
     private RouteManager router;
     private MutableDirectBuffer writeBuffer;
-    private LongSupplier supplyStreamId;
+    private LongSupplier supplyInitialId;
+    private LongUnaryOperator supplyReplyId;
     private LongSupplier supplyCorrelationId;
     private Supplier<BufferPool> supplyBufferPool;
     private Function<String, LongSupplier> supplyCounter;
@@ -105,21 +107,31 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public ClientStreamFactoryBuilder setStreamIdSupplier(
-        LongSupplier supplyStreamId)
+    public ClientStreamFactoryBuilder setInitialIdSupplier(
+        LongSupplier supplyInitialId)
     {
-        this.supplyStreamId = supplyStreamId;
+        this.supplyInitialId = supplyInitialId;
         return this;
     }
 
     @Override
-    public ClientStreamFactoryBuilder setGroupBudgetClaimer(LongFunction<IntUnaryOperator> groupBudgetClaimer)
+    public StreamFactoryBuilder setReplyIdSupplier(
+        LongUnaryOperator supplyReplyId)
+    {
+        this.supplyReplyId = supplyReplyId;
+        return this;
+    }
+
+    @Override
+    public ClientStreamFactoryBuilder setGroupBudgetClaimer(
+        LongFunction<IntUnaryOperator> groupBudgetClaimer)
     {
         return this;
     }
 
     @Override
-    public ClientStreamFactoryBuilder setGroupBudgetReleaser(LongFunction<IntUnaryOperator> groupBudgetReleaser)
+    public ClientStreamFactoryBuilder setGroupBudgetReleaser(
+        LongFunction<IntUnaryOperator> groupBudgetReleaser)
     {
         return this;
     }
@@ -246,7 +258,8 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
             router,
             writeBuffer,
             bufferPool,
-            supplyStreamId,
+            supplyInitialId,
+            supplyReplyId,
             supplyCorrelationId,
             correlations,
             supplyReadFrameCounter,
