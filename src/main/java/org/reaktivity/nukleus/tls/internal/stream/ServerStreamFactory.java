@@ -198,7 +198,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         final MessagePredicate filter = (t, b, o, l) ->
         {
-            final RouteFW route = routeRO.wrap(b, o, l);
+            final RouteFW route = routeRO.wrap(b, o, o + l);
             return networkRef == route.sourceRef() &&
                     acceptName.equals(route.source().asString());
         };
@@ -409,7 +409,7 @@ public final class ServerStreamFactory implements StreamFactory
         {
             final MessagePredicate alpnFilter = (t, b, o, l) ->
             {
-                final RouteFW route = routeRO.wrap(b, o, l);
+                final RouteFW route = routeRO.wrap(b, o, o + l);
                 if (networkRef == route.sourceRef() && networkReplyName.equals(route.source().asString()))
                 {
                     ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getHandshakeSession();
@@ -733,7 +733,7 @@ public final class ServerStreamFactory implements StreamFactory
 
             final MessagePredicate filter = (t, b, o, l) ->
             {
-                final RouteFW route = routeRO.wrap(b, o, l);
+                final RouteFW route = routeRO.wrap(b, o, o + l);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 final String hostname = routeEx.hostname().asString();
                 final String applicationProtocol = routeEx.applicationProtocol().asString();
