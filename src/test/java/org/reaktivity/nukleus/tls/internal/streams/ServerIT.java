@@ -357,7 +357,6 @@ public class ServerIT
         k3po.finish();
     }
 
-    @Ignore("ABORT vs RESET read order not yet guaranteed to match write order")
     @Test
     @Specification({
         "${route}/server/controller",
