@@ -100,7 +100,7 @@ public class ClientIT
         k3po.finish();
     }
 
-    @Ignore("Ignoring until BEGIN extension data is considered")
+    @Ignore("reaktivity/nukleus-tls.java#47")
     @Test
     @Specification({
             "${route}/client.alpn/controller",
@@ -254,7 +254,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    @Ignore("handshake doesn't succeed due to write close race")
     @Test
     @Specification({
         "${route}/client/controller",
@@ -268,7 +267,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    @Ignore("handshake doesn't succeed due to write close race")
     @Test
     @Specification({
             "${route}/client/controller",
@@ -360,7 +358,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    @Ignore("DATA vs RESET read order not yet guaranteed to match write order")
     @Test
     @Specification({
         "${route}/client/controller",
@@ -374,7 +371,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    @Ignore("DATA vs RESET read order not yet guaranteed to match write order")
     @Test
     @Specification({
             "${route}/client/controller",
@@ -388,7 +384,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    @Ignore("DATA vs RESET read order not yet guaranteed to match write order")
     @Test
     @Specification({
         "${route}/client/controller",
@@ -402,7 +397,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    @Ignore("DATA vs RESET read order not yet guaranteed to match write order")
     @Test
     @Specification({
             "${route}/client/controller",
