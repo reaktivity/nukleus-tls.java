@@ -199,7 +199,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         final MessagePredicate defaultRouteFilter = (t, b, o, l) ->
         {
-            final RouteFW route = routeRO.wrap(b, o, l);
+            final RouteFW route = routeRO.wrap(b, o, o + l);
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
             final String applicationProtocol = routeEx.applicationProtocol().asString();
@@ -213,7 +213,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         final MessagePredicate filter = (t, b, o, l) ->
         {
-            final RouteFW route = routeRO.wrap(b, o, l);
+            final RouteFW route = routeRO.wrap(b, o, o + l);
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
             final String applicationProtocol = routeEx.applicationProtocol().asString();
