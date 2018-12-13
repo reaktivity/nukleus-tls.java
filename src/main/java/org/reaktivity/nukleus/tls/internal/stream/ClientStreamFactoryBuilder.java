@@ -20,9 +20,7 @@ import static org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuil
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiConsumer;
-import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
-import java.util.function.LongConsumer;
 import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
@@ -55,24 +53,12 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     private final Map<String, MutableInteger> routesByStore;
     private final Long2ObjectHashMap<ClientStreamFactory.ClientHandshake> correlations;
 
-    private final Long2ObjectHashMap<LongSupplier> framesWrittenByteRouteId;
-    private final Long2ObjectHashMap<LongSupplier> framesReadByteRouteId;
-    private final Long2ObjectHashMap<LongConsumer> bytesWrittenByteRouteId;
-    private final Long2ObjectHashMap<LongConsumer> bytesReadByteRouteId;
-
     private RouteManager router;
     private MutableDirectBuffer writeBuffer;
     private LongSupplier supplyInitialId;
     private LongUnaryOperator supplyReplyId;
     private LongSupplier supplyCorrelationId;
     private Supplier<BufferPool> supplyBufferPool;
-    private Function<String, LongSupplier> supplyCounter;
-    private Function<String, LongConsumer> supplyAccumulator;
-
-    private Function<RouteFW, LongSupplier> supplyWriteFrameCounter;
-    private Function<RouteFW, LongSupplier> supplyReadFrameCounter;
-    private Function<RouteFW, LongConsumer> supplyWriteBytesAccumulator;
-    private Function<RouteFW, LongConsumer> supplyReadBytesAccumulator;
 
     public ClientStreamFactoryBuilder(
         TlsConfiguration config,
@@ -83,11 +69,6 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
         this.contextsByStore = new HashMap<>();
         this.routesByStore = new HashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
-
-        this.framesWrittenByteRouteId = new Long2ObjectHashMap<>();
-        this.framesReadByteRouteId = new Long2ObjectHashMap<>();
-        this.bytesWrittenByteRouteId = new Long2ObjectHashMap<>();
-        this.bytesReadByteRouteId = new Long2ObjectHashMap<>();
     }
 
     @Override
@@ -152,22 +133,6 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
         return this;
     }
 
-    @Override
-    public StreamFactoryBuilder setCounterSupplier(
-        Function<String, LongSupplier> supplyCounter)
-    {
-        this.supplyCounter = supplyCounter;
-        return this;
-    }
-
-    @Override
-    public StreamFactoryBuilder setAccumulatorSupplier(
-            Function<String, LongConsumer> supplyAccumulator)
-    {
-        this.supplyAccumulator = supplyAccumulator;
-        return this;
-    }
-
     public boolean handleRoute(int msgTypeId, DirectBuffer buffer, int index, int length)
     {
         switch(msgTypeId)
@@ -193,11 +158,6 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
                     routesByStore.remove(store);
                     contextsByStore.remove(store);
                 }
-                final long routeId = unroute.correlationId();
-                bytesWrittenByteRouteId.remove(routeId);
-                bytesReadByteRouteId.remove(routeId);
-                framesWrittenByteRouteId.remove(routeId);
-                framesReadByteRouteId.remove(routeId);
             }
             break;
         }
@@ -215,42 +175,6 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     {
         final BufferPool bufferPool = supplyBufferPool.get();
 
-        if (supplyWriteFrameCounter == null)
-        {
-            this.supplyWriteFrameCounter = r ->
-            {
-                final long routeId = r.correlationId();
-                return framesWrittenByteRouteId.computeIfAbsent(
-                        routeId,
-                        t -> supplyCounter.apply(String.format("%d.frames.written", t)));
-            };
-            this.supplyReadFrameCounter = r ->
-            {
-                final long routeId = r.correlationId();
-                return framesReadByteRouteId.computeIfAbsent(
-                        routeId,
-                        t -> supplyCounter.apply(String.format("%d.frames.read", t)));
-            };
-        }
-
-        if (supplyWriteBytesAccumulator == null)
-        {
-            this.supplyWriteBytesAccumulator = r ->
-            {
-                final long routeId = r.correlationId();
-                return bytesWrittenByteRouteId.computeIfAbsent(
-                        routeId,
-                        t -> supplyAccumulator.apply(String.format("%d.bytes.written", t)));
-            };
-            this.supplyReadBytesAccumulator = r ->
-            {
-                final long routeId = r.correlationId();
-                return bytesReadByteRouteId.computeIfAbsent(
-                        routeId,
-                        t -> supplyAccumulator.apply(String.format("%d.bytes.read", t)));
-            };
-        }
-
         return new ClientStreamFactory(
             config,
             executeTask,
@@ -261,10 +185,6 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
             supplyInitialId,
             supplyReplyId,
             supplyCorrelationId,
-            correlations,
-            supplyReadFrameCounter,
-            supplyReadBytesAccumulator,
-            supplyWriteFrameCounter,
-            supplyWriteBytesAccumulator);
+            correlations);
     }
 }

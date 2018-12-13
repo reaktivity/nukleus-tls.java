@@ -42,9 +42,8 @@ public class ClientIT
             .directory("target/nukleus-itests")
             .commandBufferCapacity(1024)
             .responseBufferCapacity(1024)
-            .counterValuesBufferCapacity(1024)
-            .nukleus("tls"::equals)
-            .clean();
+            .counterValuesBufferCapacity(4096)
+            .nukleus("tls"::equals);
 
     @Rule
     public final TestRule chain = outerRule(timeout).around(reaktor).around(k3po);

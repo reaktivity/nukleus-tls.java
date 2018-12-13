@@ -16,7 +16,9 @@
 package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.junit.Assert.assertTrue;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.junit.Assert.assertThat;
 import static org.junit.rules.RuleChain.outerRule;
 
 import org.junit.Rule;
@@ -27,11 +29,12 @@ import org.junit.rules.Timeout;
 import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
-import org.reaktivity.nukleus.tls.internal.test.TlsCountersRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
 
-public class ServerFrameAndByteCountersIT
+public class ServerRouteCountersIT
 {
+    private static final int SERVER_ROUTE_ID = 0x00000001;
+
     private final K3poRule k3po = new K3poRule()
             .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
             .addScriptRoot("client", "org/reaktivity/specification/tls")
@@ -44,14 +47,12 @@ public class ServerFrameAndByteCountersIT
             .controller("tls"::equals)
             .commandBufferCapacity(1024)
             .responseBufferCapacity(1024)
-            .counterValuesBufferCapacity(1024)
+            .counterValuesBufferCapacity(4096)
             .nukleus("tls"::equals)
             .clean();
 
-    private final TlsCountersRule counters = new TlsCountersRule(reaktor);
-
     @Rule
-    public final TestRule chain = outerRule(timeout).around(reaktor).around(counters).around(k3po);
+    public final TestRule chain = outerRule(timeout).around(reaktor).around(k3po);
 
     @Test
     @Specification({
@@ -64,16 +65,10 @@ public class ServerFrameAndByteCountersIT
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();
-        long bytesRead = counters.bytesRead(0);
-        long bytesWritten = counters.bytesWritten(0);
-        long framesRead = counters.framesRead(0);
-        long framesWritten = counters.framesWritten(0);
 
-        // Values are not consistent across JVMs/Machines
-        assertTrue(bytesRead > 10000);
-        assertTrue(bytesWritten > 10000);
-        assertTrue(framesRead > 3);
-        assertTrue(framesWritten > 3);
+        assertThat(reaktor.bytesWritten("tls", SERVER_ROUTE_ID), equalTo(10240L));
+        assertThat(reaktor.bytesRead("tls", SERVER_ROUTE_ID), equalTo(10240L));
+        assertThat(reaktor.framesWritten("tls", SERVER_ROUTE_ID), greaterThanOrEqualTo(1L));
+        assertThat(reaktor.framesRead("tls", SERVER_ROUTE_ID), greaterThanOrEqualTo(1L));
     }
-
 }
