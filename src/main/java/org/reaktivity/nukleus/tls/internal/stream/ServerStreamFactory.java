@@ -106,9 +106,10 @@ public final class ServerStreamFactory implements StreamFactory
     private final BufferPool networkPool;
     private final BufferPool applicationPool;
     private final LongSupplier supplyInitialId;
-    private LongUnaryOperator supplyReplyId;
+    private final LongSupplier supplyTrace;
     private final LongSupplier supplyCorrelationId;
     private final int handshakeBudget;
+    private LongUnaryOperator supplyReplyId;
 
     private final Long2ObjectHashMap<ServerHandshake> correlations;
     private final MessageFunction<RouteFW> wrapRoute;
@@ -127,8 +128,10 @@ public final class ServerStreamFactory implements StreamFactory
         LongSupplier supplyInitialId,
         LongUnaryOperator supplyReplyId,
         LongSupplier supplyCorrelationId,
-        Long2ObjectHashMap<ServerHandshake> correlations)
+        Long2ObjectHashMap<ServerHandshake> correlations,
+        LongSupplier supplyTrace)
     {
+        this.supplyTrace = requireNonNull(supplyTrace);
         this.executeTask = requireNonNull(executeTask);
         this.contextsByStore = requireNonNull(contextsByStore);
         this.router = requireNonNull(router);
@@ -1698,7 +1701,7 @@ public final class ServerStreamFactory implements StreamFactory
         final long streamId,
         final long authorization)
     {
-        doAbort(receiver, routeId, streamId, 0, authorization);
+        doAbort(receiver, routeId, streamId, supplyTrace.getAsLong(), authorization);
     }
 
     private void doWindow(
@@ -1728,7 +1731,7 @@ public final class ServerStreamFactory implements StreamFactory
         final int credit,
         final int padding)
     {
-        doWindow(sender, routeId, streamId, 0, credit, padding);
+        doWindow(sender, routeId, streamId, supplyTrace.getAsLong(), credit, padding);
     }
 
     private void doReset(
@@ -1751,7 +1754,7 @@ public final class ServerStreamFactory implements StreamFactory
         final long routeId,
         final long streamId)
     {
-        doReset(sender, routeId, streamId, 0);
+        doReset(sender, routeId, streamId, supplyTrace.getAsLong());
     }
 
     private void doCloseInbound(
