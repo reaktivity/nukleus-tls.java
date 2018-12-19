@@ -367,7 +367,7 @@ public final class ServerStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 doReset(networkThrottle, networkRouteId, networkId);
-                doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+                doAbort(networkReply, networkRouteId, networkReplyId, begin.trace(), 0L);
             }
         }
 
@@ -1041,7 +1041,7 @@ public final class ServerStreamFactory implements StreamFactory
                     doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId, networkTraceId, networkReplyPadding,
                             data.authorization(), NOP);
                     doReset(networkThrottle, networkRouteId, networkId);
-                    doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+                    doAbort(networkReply, networkRouteId, networkReplyId, networkTraceId, 0L);
                 }
                 else
                 {
@@ -1065,7 +1065,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 networkSlotOffset = 0;
                 doReset(networkThrottle, networkRouteId, networkId);
-                doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+                doAbort(networkReply, networkRouteId, networkReplyId, networkTraceId, 0L);
             }
             finally
             {
@@ -1126,14 +1126,14 @@ public final class ServerStreamFactory implements StreamFactory
             EndFW end)
         {
             tlsEngine.closeOutbound();
-            doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+            doAbort(networkReply, networkRouteId, networkReplyId, end.trace(), 0L);
         }
 
         private void handleAbort(
             AbortFW abort)
         {
             tlsEngine.closeOutbound();
-            doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+            doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
         }
 
         private void updateNetworkReplyWindow(
@@ -1448,7 +1448,7 @@ public final class ServerStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId);
-                doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+                doAbort(networkReply, networkRouteId, networkReplyId, data.trace(), 0L);
             }
         }
 
@@ -1465,7 +1465,7 @@ public final class ServerStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 // END is from application reply, so no need to clean that stream
-                doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+                doAbort(networkReply, networkRouteId, networkReplyId, end.trace(), 0L);
             }
         }
 
