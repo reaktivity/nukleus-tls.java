@@ -58,6 +58,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     private LongSupplier supplyInitialId;
     private LongUnaryOperator supplyReplyId;
     private LongSupplier supplyCorrelationId;
+    private LongSupplier supplyTrace;
     private Supplier<BufferPool> supplyBufferPool;
 
     public ClientStreamFactoryBuilder(
@@ -100,6 +101,14 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
         LongUnaryOperator supplyReplyId)
     {
         this.supplyReplyId = supplyReplyId;
+        return this;
+    }
+
+    @Override
+    public StreamFactoryBuilder setTraceSupplier(
+            LongSupplier supplyTrace)
+    {
+        this.supplyTrace = supplyTrace;
         return this;
     }
 
@@ -185,6 +194,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
             supplyInitialId,
             supplyReplyId,
             supplyCorrelationId,
-            correlations);
+            correlations,
+            supplyTrace);
     }
 }

@@ -80,6 +80,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private LongUnaryOperator supplyReplyId;
     private LongSupplier supplyCorrelationId;
     private Supplier<BufferPool> supplyBufferPool;
+    private LongSupplier supplyTrace;
 
     public ServerStreamFactoryBuilder(
         TlsConfiguration config,
@@ -105,6 +106,14 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         MutableDirectBuffer writeBuffer)
     {
         this.writeBuffer = writeBuffer;
+        return this;
+    }
+
+    @Override
+    public StreamFactoryBuilder setTraceSupplier(
+            LongSupplier supplyTrace)
+    {
+        this.supplyTrace = supplyTrace;
         return this;
     }
 
@@ -205,7 +214,8 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             supplyInitialId,
             supplyReplyId,
             supplyCorrelationId,
-            correlations);
+            correlations,
+            supplyTrace);
     }
 
     static SSLContext initContext(
