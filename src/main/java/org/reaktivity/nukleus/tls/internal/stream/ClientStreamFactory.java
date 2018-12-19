@@ -105,6 +105,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final BufferPool networkPool;
     private final BufferPool applicationPool;
     private final LongSupplier supplyInitialId;
+    private final LongSupplier supplyTrace;
     private final LongUnaryOperator supplyReplyId;
     private final LongSupplier supplyCorrelationId;
     private final int handshakeWindowBytes;
@@ -125,8 +126,10 @@ public final class ClientStreamFactory implements StreamFactory
         LongSupplier supplyInitialId,
         LongUnaryOperator supplyReplyId,
         LongSupplier supplyCorrelationId,
-        Long2ObjectHashMap<ClientHandshake> correlations)
+        Long2ObjectHashMap<ClientHandshake> correlations,
+        LongSupplier supplyTrace)
     {
+        this.supplyTrace = requireNonNull(supplyTrace);
         this.executeTask = requireNonNull(executeTask);
         this.contextsByStore = requireNonNull(contextsByStore);
         this.router = requireNonNull(router);
@@ -485,7 +488,7 @@ public final class ClientStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 doReset(applicationThrottle, applicationRouteId, applicationId);
-                doAbort(networkTarget, networkRouteId, networkId, authorization);
+                doAbort(networkTarget, networkRouteId, networkId, applicationTraceId, authorization);
             }
         }
 
@@ -501,7 +504,7 @@ public final class ClientStreamFactory implements StreamFactory
             }
             catch (SSLException ex)
             {
-                doAbort(networkTarget, networkRouteId, networkId, authorization);
+                doAbort(networkTarget, networkRouteId, networkId, end.trace(), authorization);
             }
         }
 
@@ -1570,7 +1573,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         if (tlsEngine.isOutboundDone())
         {
-            doEnd(networkTarget, networkRouteId, networkId, authorization);
+            doEnd(networkTarget, networkRouteId, networkId, traceId, authorization);
             networkReplyDoneHandler.run();
         }
     }
@@ -1689,7 +1692,7 @@ public final class ClientStreamFactory implements StreamFactory
         final long streamId,
         final long authorization)
     {
-        doEnd(receiver, routeId, streamId, 0, authorization);
+        doEnd(receiver, routeId, streamId, supplyTrace.getAsLong(), authorization);
     }
 
     private void doAbort(
@@ -1715,7 +1718,7 @@ public final class ClientStreamFactory implements StreamFactory
         final long streamId,
         final long authorization)
     {
-        doAbort(receiver, routeId, streamId, 0, authorization);
+        doAbort(receiver, routeId, streamId, supplyTrace.getAsLong(), authorization);
     }
 
     private void doWindow(
@@ -1729,6 +1732,7 @@ public final class ClientStreamFactory implements StreamFactory
         final WindowFW window = windowRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .routeId(routeId)
                 .streamId(streamId)
+                .trace(traceId)
                 .credit(credit)
                 .padding(padding)
                 .groupId(0)
@@ -1744,7 +1748,7 @@ public final class ClientStreamFactory implements StreamFactory
         final int credit,
         final int padding)
     {
-        doWindow(sender, routeId, streamId, 0, credit, padding);
+        doWindow(sender, routeId, streamId, supplyTrace.getAsLong(), credit, padding);
     }
 
     private void doReset(
@@ -1767,7 +1771,7 @@ public final class ClientStreamFactory implements StreamFactory
         final long routeId,
         final long streamId)
     {
-        doReset(sender, routeId, streamId, 0);
+        doReset(sender, routeId, streamId, supplyTrace.getAsLong());
     }
 
     private void doCloseOutbound(
