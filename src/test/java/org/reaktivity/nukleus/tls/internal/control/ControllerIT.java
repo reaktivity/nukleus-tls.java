@@ -18,8 +18,6 @@ package org.reaktivity.nukleus.tls.internal.control;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
 
-import java.util.Random;
-
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.DisableOnDebug;
@@ -56,12 +54,10 @@ public class ControllerIT
     })
     public void shouldRouteServer() throws Exception
     {
-        long targetRef = new Random().nextLong();
-
         k3po.start();
 
         reaktor.controller(TlsController.class)
-                  .routeServer("source", 0L, "target", targetRef, "server", "localhost", null)
+                  .routeServer("tls#0", "target#0", "server", "localhost", null)
                   .get();
 
         k3po.finish();
@@ -73,12 +69,10 @@ public class ControllerIT
     })
     public void shouldRouteClient() throws Exception
     {
-        long targetRef = new Random().nextLong();
-
         k3po.start();
 
         reaktor.controller(TlsController.class)
-                  .routeClient("source", 0L, "target", targetRef, "client", "localhost", null)
+                  .routeClient("tls#0", "target#0", "client", "localhost", null)
                   .get();
 
         k3po.finish();
@@ -91,18 +85,16 @@ public class ControllerIT
     })
     public void shouldUnrouteServer() throws Exception
     {
-        long targetRef = new Random().nextLong();
-
         k3po.start();
 
-        long sourceRef = reaktor.controller(TlsController.class)
-                  .routeServer("source", 0L, "target", targetRef, "server", "localhost", null)
+        long routeId = reaktor.controller(TlsController.class)
+                  .routeServer("tls#0", "target#0", "server", "localhost", null)
                   .get();
 
         k3po.notifyBarrier("ROUTED_SERVER");
 
         reaktor.controller(TlsController.class)
-                  .unrouteServer("source", sourceRef, "target", targetRef, "server", "localhost", null)
+                  .unroute(routeId)
                   .get();
 
         k3po.finish();
@@ -115,18 +107,16 @@ public class ControllerIT
     })
     public void shouldUnrouteClient() throws Exception
     {
-        long targetRef = new Random().nextLong();
-
         k3po.start();
 
-        long sourceRef = reaktor.controller(TlsController.class)
-                  .routeClient("source", 0L, "target", targetRef, "client", "localhost", null)
+        long routeId = reaktor.controller(TlsController.class)
+                  .routeClient("tls#0", "target#0", "client", "localhost", null)
                   .get();
 
         k3po.notifyBarrier("ROUTED_CLIENT");
 
         reaktor.controller(TlsController.class)
-                  .unrouteClient("source", sourceRef, "target", targetRef, "client", "localhost", null)
+                  .unroute(routeId)
                   .get();
 
         k3po.finish();
