@@ -75,6 +75,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private final BiConsumer<Runnable, Runnable> executeTask;
     private final Map<String, SSLContext> contextsByStore;
     private final Map<String, MutableInteger> routesByStore;
+    private final Long2ObjectHashMap<String> storesByRouteId;
     private final Long2ObjectHashMap<ServerHandshake> correlations;
 
     private RouteManager router;
@@ -95,6 +96,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         this.executeTask = executeTask;
         this.contextsByStore = new HashMap<>();
         this.routesByStore = new HashMap<>();
+        this.storesByRouteId = new Long2ObjectHashMap<>();
         this.correlations = new Long2ObjectHashMap<>();
     }
 
@@ -191,6 +193,8 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
                 final RouteFW route = routeRO.wrap(buffer, index, index + length);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 final String store = routeEx.store().asString();
+                final long routeId = route.correlationId();
+                storesByRouteId.put(routeId, store);
                 MutableInteger routesCount = routesByStore.computeIfAbsent(store, s -> new MutableInteger());
                 routesCount.value++;
                 contextsByStore.computeIfAbsent(store, s -> initContext(config, store));
@@ -199,15 +203,14 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
-                final TlsRouteExFW routeEx = unroute.extension().get(tlsRouteExRO::wrap);
-                final String store = routeEx.store().asString();
+                final long routeId = unroute.routeId();
+                final String store = storesByRouteId.remove(routeId);
                 MutableInteger routesCount = routesByStore.computeIfPresent(store, (s, c) -> decrement(c));
                 if (routesCount != null && routesCount.value == 0)
                 {
                     routesByStore.remove(store);
                     contextsByStore.remove(store);
                 }
-                final long routeId = unroute.correlationId();
             }
             break;
         }

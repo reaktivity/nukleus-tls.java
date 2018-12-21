@@ -97,24 +97,24 @@ public class TlsServerBM
     private Source source;
     private Target target;
 
-    private long sourceRef;
+    private long routeId;
     private long targetRef;
 
     @Setup(Level.Trial)
     public void reinit() throws Exception
     {
         final TlsController controller = reaktor.controller(TlsController.class);
-        this.source = controller.supplySource("source", Source::new);
+//        this.source = controller.supplySource("source", Source::new);
         this.target = controller.supplyTarget("target", Target::new);
 
         final Random random = new Random();
         this.targetRef = random.nextLong();
-        this.sourceRef = controller.routeServer("source", 0L, "target", targetRef, null, null, null).get();
+        this.routeId = controller.routeServer("tls#0", "target#0", null, null, null).get();
 
         final long sourceId = random.nextLong();
         final long correlationId = random.nextLong();
 
-        source.reinit(sourceRef, sourceId, correlationId);
+        source.reinit(routeId, sourceId, correlationId);
         target.reinit();
 
         source.doBegin();
@@ -125,7 +125,7 @@ public class TlsServerBM
     {
         final TlsController controller = reaktor.controller(TlsController.class);
 
-        controller.unrouteServer("source", sourceRef, "target", targetRef, null, null, null).get();
+        controller.unroute(routeId).get();
 
         this.source = null;
         this.target = null;
@@ -182,9 +182,8 @@ public class TlsServerBM
 
             // TODO: move to doBegin to avoid writeBuffer overwrite with DataFW
             this.begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+                    .routeId(routeId)
                     .streamId(sourceId)
-                    .source("source")
-                    .sourceRef(sourceRef)
                     .correlationId(correlationId)
                     .extension(e -> e.set(visitTlsBeginEx("example.com")))
                     .build();

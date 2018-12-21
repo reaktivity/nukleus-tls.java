@@ -33,7 +33,7 @@ import org.reaktivity.reaktor.test.ReaktorRule;
 
 public class ClientRouteCountersIT
 {
-    private static final int CLIENT_ROUTE_ID = 0x10000001;
+    private static final long CLIENT_ROUTE_ID = 0x2000110000001L;
 
     private final K3poRule k3po = new K3poRule()
             .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
@@ -60,8 +60,7 @@ public class ClientRouteCountersIT
         "${client}/echo.payload.length.10k/client",
         "${server}/echo.payload.length.10k/server"})
     @ScriptProperty({
-        "newServerAcceptRef ${newClientConnectRef}",
-        "serverAccept \"nukleus://target/streams/tls\"" })
+        "serverAccept \"nukleus://streams/target#0\"" })
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();
