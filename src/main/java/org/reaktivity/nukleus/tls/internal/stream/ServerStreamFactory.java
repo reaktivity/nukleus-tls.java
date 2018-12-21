@@ -160,17 +160,17 @@ public final class ServerStreamFactory implements StreamFactory
         MessageConsumer throttle)
     {
         final BeginFW begin = beginRO.wrap(buffer, index, index + length);
-        final long sourceRef = begin.sourceRef();
+        final long streamId = begin.streamId();
 
         MessageConsumer newStream;
 
-        if (sourceRef == 0L)
+        if ((streamId & 0x8000_0000_0000_0000L) == 0L)
         {
-            newStream = newConnectReplyStream(begin, throttle);
+            newStream = newAcceptStream(begin, throttle);
         }
         else
         {
-            newStream = newAcceptStream(begin, throttle);
+            newStream = newConnectReplyStream(begin, throttle);
         }
 
         return newStream;
@@ -180,18 +180,11 @@ public final class ServerStreamFactory implements StreamFactory
         final BeginFW begin,
         final MessageConsumer networkThrottle)
     {
-        final long networkRef = begin.sourceRef();
-        final String acceptName = begin.source().asString();
+        final long routeId = begin.routeId();
         final long authorization = begin.authorization();
 
-        final MessagePredicate filter = (t, b, o, l) ->
-        {
-            final RouteFW route = routeRO.wrap(b, o, o + l);
-            return networkRef == route.sourceRef() &&
-                    acceptName.equals(route.source().asString());
-        };
-
-        final RouteFW route = router.resolve(authorization, filter, this::wrapRoute);
+        final MessagePredicate filter = (t, b, o, l) -> true;
+        final RouteFW route = router.resolve(routeId, authorization, filter, this::wrapRoute);
 
         MessageConsumer newStream = null;
 
@@ -214,8 +207,7 @@ public final class ServerStreamFactory implements StreamFactory
                         networkThrottle,
                         networkRouteId,
                         networkId,
-                        authorization,
-                        networkRef)::handleStream;
+                        authorization)::handleStream;
             }
         }
 
@@ -248,9 +240,8 @@ public final class ServerStreamFactory implements StreamFactory
         private final MessageConsumer networkThrottle;
         private final long networkRouteId;
         private final long networkId;
-        private final long networkRef;
+        private final long authorization;
 
-        private String networkReplyName;
         private MessageConsumer networkReply;
         private long networkReplyId;
 
@@ -260,7 +251,6 @@ public final class ServerStreamFactory implements StreamFactory
         private MessageConsumer applicationTarget;
         private long applicationRouteId;
         private long applicationId;
-        private final long authorization;
 
         private MessageConsumer streamState;
         private volatile ServerHandshake handshake;
@@ -292,15 +282,13 @@ public final class ServerStreamFactory implements StreamFactory
             MessageConsumer networkThrottle,
             long networkRouteId,
             long networkId,
-            long authorization,
-            long networkRef)
+            long authorization)
         {
             this.tlsEngine = tlsEngine;
             this.networkThrottle = networkThrottle;
             this.networkRouteId = networkRouteId;
             this.networkId = networkId;
             this.authorization = authorization;
-            this.networkRef = networkRef;
             this.streamState = this::beforeBegin;
         }
 
@@ -335,14 +323,13 @@ public final class ServerStreamFactory implements StreamFactory
         {
             try
             {
-                final String networkReplyName = begin.source().asString();
                 this.networkCorrelationId = begin.correlationId();
 
-                final MessageConsumer networkReply = router.supplyTarget(networkReplyName);
+                final MessageConsumer networkReply = router.supplySender(networkRouteId);
                 final long newNetworkReplyId = supplyReplyId.applyAsLong(networkId);
 
                 final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkThrottle, networkRouteId, networkId,
-                        networkReplyName, networkReply, newNetworkReplyId,
+                        networkReply, newNetworkReplyId,
                         this::handleStatus,
                         this::handleNetworkReplyDone, this::setNetworkReplyDoneHandler,
                         this::getNetworkBudget, this::getNetworkPadding,
@@ -351,11 +338,10 @@ public final class ServerStreamFactory implements StreamFactory
                 networkBudget += handshakeBudget;
                 doWindow(networkThrottle, networkRouteId, networkId, networkBudget, networkPadding);
 
-                doBegin(networkReply, networkRouteId, newNetworkReplyId, 0L, 0L, networkCorrelationId);
-                router.setThrottle(networkReplyName, newNetworkReplyId, newHandshake::handleThrottle);
+                doBegin(networkReply, networkRouteId, newNetworkReplyId, 0L, networkCorrelationId);
+                router.setThrottle(newNetworkReplyId, newHandshake::handleThrottle);
 
                 this.streamState = newHandshake::afterBegin;
-                this.networkReplyName = networkReplyName;
                 this.networkReply = networkReply;
                 this.networkReplyId = newNetworkReplyId;
                 this.handshake = newHandshake;
@@ -378,31 +364,25 @@ public final class ServerStreamFactory implements StreamFactory
             final MessagePredicate alpnFilter = (t, b, o, l) ->
             {
                 final RouteFW route = routeRO.wrap(b, o, o + l);
-                if (networkRef == route.sourceRef() && networkReplyName.equals(route.source().asString()))
+                ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getHandshakeSession();
+
+                List<SNIServerName> sniServerNames = tlsSession.getRequestedServerNames();
+                String peerHost = null;
+                if (sniServerNames.size() > 0)
                 {
-                    ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getHandshakeSession();
-
-                    List<SNIServerName> sniServerNames = tlsSession.getRequestedServerNames();
-                    String peerHost = null;
-                    if (sniServerNames.size() > 0)
-                    {
-                        SNIHostName sniHostName = (SNIHostName) sniServerNames.get(0);
-                        peerHost = sniHostName.getAsciiName();
-                    }
-
-                    final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-                    final String routeHostname = routeEx.hostname().asString();
-                    final String routeProtocol = routeEx.applicationProtocol().asString();
-
-                    if (routeHostname == null || Objects.equals(peerHost, routeHostname))
-                    {
-                        return routeProtocol == null || clientProtocols.contains(routeProtocol);
-                    }
+                    SNIHostName sniHostName = (SNIHostName) sniServerNames.get(0);
+                    peerHost = sniHostName.getAsciiName();
                 }
-                return false;
+
+                final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+                final String routeHostname = routeEx.hostname().asString();
+                final String routeProtocol = routeEx.applicationProtocol().asString();
+
+                return (routeHostname == null || Objects.equals(peerHost, routeHostname)) &&
+                       (routeProtocol == null || clientProtocols.contains(routeProtocol));
             };
 
-            RouteFW route = router.resolve(authorization, alpnFilter, wrapRoute);
+            RouteFW route = router.resolve(networkRouteId, authorization, alpnFilter, wrapRoute);
             if (route != null)
             {
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
@@ -703,29 +683,25 @@ public final class ServerStreamFactory implements StreamFactory
                 final String hostname = routeEx.hostname().asString();
                 final String applicationProtocol = routeEx.applicationProtocol().asString();
 
-                return networkRef == route.sourceRef() &&
-                        networkReplyName.equals(route.source().asString()) &&
-                        (hostname == null || Objects.equals(tlsHostname, hostname)) &&
+                return (hostname == null || Objects.equals(tlsHostname, hostname)) &&
                         (applicationProtocol == null || Objects.equals(tlsApplicationProtocol, applicationProtocol));
             };
 
-            final RouteFW route = router.resolve(authorization, filter, wrapRoute);
+            final RouteFW route = router.resolve(networkRouteId, authorization, filter, wrapRoute);
 
             if (route != null)
             {
                 final long applicationRouteId = route.correlationId();
-                final String applicationName = route.target().asString();
-                final MessageConsumer applicationTarget = router.supplyTarget(applicationName);
-                final long applicationRef = route.targetRef();
+                final MessageConsumer applicationTarget = router.supplyReceiver(applicationRouteId);
 
                 final long newCorrelationId = supplyCorrelationId.getAsLong();
                 correlations.put(newCorrelationId, handshake);
 
                 final long newApplicationId = supplyInitialId.getAsLong();
 
-                doTlsBegin(applicationTarget, applicationRouteId, newApplicationId, networkTraceId, authorization, applicationRef,
+                doTlsBegin(applicationTarget, applicationRouteId, newApplicationId, networkTraceId, authorization,
                         newCorrelationId, tlsHostname, tlsApplicationProtocol);
-                router.setThrottle(applicationName, newApplicationId, this::handleThrottle);
+                router.setThrottle(newApplicationId, this::handleThrottle);
 
                 handshake.onFinished();
 
@@ -937,7 +913,6 @@ public final class ServerStreamFactory implements StreamFactory
         private final MessageConsumer networkThrottle;
         private final long networkRouteId;
         private final long networkId;
-        private final String networkReplyName;
         private final MessageConsumer networkReply;
         private final long networkReplyId;
         private final LongConsumer networkReplyDoneHandler;
@@ -963,7 +938,6 @@ public final class ServerStreamFactory implements StreamFactory
             MessageConsumer networkThrottle,
             long networkRouteId,
             long networkId,
-            String networkReplyName,
             MessageConsumer networkReply,
             long networkReplyId,
             BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler,
@@ -981,7 +955,6 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkThrottle = networkThrottle;
             this.networkRouteId = networkRouteId;
             this.networkId = networkId;
-            this.networkReplyName = networkReplyName;
             this.networkReply = networkReply;
             this.networkReplyId = networkReplyId;
             this.networkReplyDoneHandlerConsumer = networkReplyDoneHandlerConsumer;
@@ -1159,7 +1132,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void setNetworkThrottle(
             MessageConsumer newNetworkThrottle)
         {
-            router.setThrottle(networkReplyName, networkReplyId, newNetworkThrottle);
+            router.setThrottle(networkReplyId, newNetworkThrottle);
 
 
             //doWindow(newNetworkThrottle, networkReplyId, outNetworkWindowBudget, outNetworkWindowPadding);
@@ -1379,10 +1352,9 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleBegin(
             BeginFW begin)
         {
-            final long sourceRef = begin.sourceRef();
             final long correlationId = begin.correlationId();
 
-            final ServerHandshake handshake = sourceRef == 0L ? correlations.remove(correlationId) : null;
+            final ServerHandshake handshake = correlations.remove(correlationId);
             if (handshake != null)
             {
                 this.streamState = this::afterBegin;
@@ -1588,7 +1560,6 @@ public final class ServerStreamFactory implements StreamFactory
         long streamId,
         long traceId,
         long authorization,
-        long sourceRef,
         long correlationId,
         String hostname,
         String applicationProtocol)
@@ -1598,8 +1569,6 @@ public final class ServerStreamFactory implements StreamFactory
                 .streamId(streamId)
                 .trace(traceId)
                 .authorization(authorization)
-                .source("tls")
-                .sourceRef(sourceRef)
                 .correlationId(correlationId)
                 .extension(e -> e.set(visitTlsBeginEx(hostname, applicationProtocol)))
                 .build();
@@ -1624,15 +1593,12 @@ public final class ServerStreamFactory implements StreamFactory
         final long routeId,
         final long streamId,
         final long authorization,
-        final long targetRef,
         final long correlationId)
     {
         final BeginFW begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .routeId(routeId)
                 .streamId(streamId)
                 .authorization(authorization)
-                .source("tls")
-                .sourceRef(targetRef)
                 .correlationId(correlationId)
                 .build();
 

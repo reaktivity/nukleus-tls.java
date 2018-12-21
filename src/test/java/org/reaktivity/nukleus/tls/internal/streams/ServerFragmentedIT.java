@@ -56,8 +56,7 @@ public class ServerFragmentedIT
         "${client}/connection.established/client",
         "${server}/connection.established/server" })
     @ScriptProperty({
-        "newClientAcceptRef ${newServerConnectRef}",
-        "clientAccept \"nukleus://target/streams/tls\"" })
+        "clientAccept \"nukleus://streams/target#0\"" })
     public void shouldEstablishConnection() throws Exception
     {
         k3po.finish();
