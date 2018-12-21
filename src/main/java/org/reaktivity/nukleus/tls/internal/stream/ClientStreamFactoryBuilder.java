@@ -20,7 +20,9 @@ import static org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuil
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
+import java.util.function.LongConsumer;
 import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
@@ -37,6 +39,7 @@ import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
+import org.reaktivity.nukleus.tls.internal.TlsCounters;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
@@ -60,6 +63,8 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     private LongSupplier supplyCorrelationId;
     private LongSupplier supplyTrace;
     private Supplier<BufferPool> supplyBufferPool;
+    private Function<String, LongSupplier> supplyCounter;
+    private Function<String, LongConsumer> supplyAccumulator;
 
     public ClientStreamFactoryBuilder(
         TlsConfiguration config,
@@ -142,6 +147,22 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
         return this;
     }
 
+    @Override
+    public StreamFactoryBuilder setCounterSupplier(
+            Function<String, LongSupplier> supplyCounter)
+    {
+        this.supplyCounter = supplyCounter;
+        return this;
+    }
+
+    @Override
+    public StreamFactoryBuilder setAccumulatorSupplier(
+            Function<String, LongConsumer> supplyAccumulator)
+    {
+        this.supplyAccumulator = supplyAccumulator;
+        return this;
+    }
+
     public boolean handleRoute(int msgTypeId, DirectBuffer buffer, int index, int length)
     {
         switch(msgTypeId)
@@ -183,6 +204,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     public StreamFactory build()
     {
         final BufferPool bufferPool = supplyBufferPool.get();
+        final TlsCounters counters = new TlsCounters(supplyCounter, supplyAccumulator);
 
         return new ClientStreamFactory(
             config,
@@ -195,6 +217,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
             supplyReplyId,
             supplyCorrelationId,
             correlations,
-            supplyTrace);
+            supplyTrace,
+            counters);
     }
 }

@@ -56,6 +56,7 @@ import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
+import org.reaktivity.nukleus.tls.internal.TlsCounters;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
@@ -67,6 +68,7 @@ import org.reaktivity.nukleus.tls.internal.types.stream.EndFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
+import org.reaktivity.reaktor.internal.buffer.CountingBufferPool;
 
 public final class ServerStreamFactory implements StreamFactory
 {
@@ -129,15 +131,18 @@ public final class ServerStreamFactory implements StreamFactory
         LongUnaryOperator supplyReplyId,
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ServerHandshake> correlations,
-        LongSupplier supplyTrace)
+        LongSupplier supplyTrace,
+        TlsCounters counters)
     {
         this.supplyTrace = requireNonNull(supplyTrace);
         this.executeTask = requireNonNull(executeTask);
         this.contextsByStore = requireNonNull(contextsByStore);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
-        this.networkPool = requireNonNull(bufferPool);
-        this.applicationPool = requireNonNull(bufferPool).duplicate();
+        this.networkPool = new CountingBufferPool(
+                bufferPool, counters.serverNetworkAcquires, counters.serverNetworkReleases);
+        this.applicationPool = new CountingBufferPool(
+                bufferPool.duplicate(), counters.serverApplicationAcquires, counters.serverApplicationReleases);
         this.supplyInitialId = requireNonNull(supplyInitialId);
         this.supplyReplyId = requireNonNull(supplyReplyId);
         this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
