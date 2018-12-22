@@ -25,7 +25,9 @@ import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
+import java.util.function.LongConsumer;
 import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
@@ -47,6 +49,7 @@ import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
+import org.reaktivity.nukleus.tls.internal.TlsCounters;
 import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactory.ServerHandshake;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
@@ -82,6 +85,8 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private LongSupplier supplyCorrelationId;
     private Supplier<BufferPool> supplyBufferPool;
     private LongSupplier supplyTrace;
+    private Function<String, LongSupplier> supplyCounter;
+    private Function<String, LongConsumer> supplyAccumulator;
 
     public ServerStreamFactoryBuilder(
         TlsConfiguration config,
@@ -132,6 +137,22 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         LongUnaryOperator supplyReplyId)
     {
         this.supplyReplyId = supplyReplyId;
+        return this;
+    }
+
+    @Override
+    public StreamFactoryBuilder setCounterSupplier(
+            Function<String, LongSupplier> supplyCounter)
+    {
+        this.supplyCounter = supplyCounter;
+        return this;
+    }
+
+    @Override
+    public StreamFactoryBuilder setAccumulatorSupplier(
+            Function<String, LongConsumer> supplyAccumulator)
+    {
+        this.supplyAccumulator = supplyAccumulator;
         return this;
     }
 
@@ -206,6 +227,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     public StreamFactory build()
     {
         final BufferPool bufferPool = supplyBufferPool.get();
+        final TlsCounters counters = new TlsCounters(supplyCounter, supplyAccumulator);
 
         return new ServerStreamFactory(
             config,
@@ -218,7 +240,8 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             supplyReplyId,
             supplyCorrelationId,
             correlations,
-            supplyTrace);
+            supplyTrace,
+            counters);
     }
 
     static SSLContext initContext(
