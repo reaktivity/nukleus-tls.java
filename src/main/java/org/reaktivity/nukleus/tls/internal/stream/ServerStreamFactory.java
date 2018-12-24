@@ -25,9 +25,11 @@ import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Future;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
@@ -53,6 +55,7 @@ import org.reaktivity.nukleus.buffer.BufferPool;
 import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessageFunction;
 import org.reaktivity.nukleus.function.MessagePredicate;
+import org.reaktivity.nukleus.function.SignalingExecutor;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
@@ -66,6 +69,7 @@ import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.EndFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
 import org.reaktivity.reaktor.internal.buffer.CountingBufferPool;
@@ -76,6 +80,7 @@ public final class ServerStreamFactory implements StreamFactory
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
     private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
     private static final LongConsumer NOP = x -> {};
+    private static final long FLUSH_HANDSHAKE_SIGNAL = 1L;
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -84,6 +89,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final DataFW dataRO = new DataFW();
     private final EndFW endRO = new EndFW();
     private final AbortFW abortRO = new AbortFW();
+    private final SignalFW signalRO = new SignalFW();
 
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
     private final DataFW.Builder dataRW = new DataFW.Builder();
@@ -101,7 +107,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
-    private final BiConsumer<Runnable, Runnable> executeTask;
+    private final SignalingExecutor executor;
     private final Map<String, SSLContext> contextsByStore;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -122,7 +128,7 @@ public final class ServerStreamFactory implements StreamFactory
 
     public ServerStreamFactory(
         TlsConfiguration config,
-        BiConsumer<Runnable, Runnable> executeTask,
+        SignalingExecutor executor,
         Map<String, SSLContext> contextsByStore,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
@@ -135,7 +141,7 @@ public final class ServerStreamFactory implements StreamFactory
         TlsCounters counters)
     {
         this.supplyTrace = requireNonNull(supplyTrace);
-        this.executeTask = requireNonNull(executeTask);
+        this.executor = requireNonNull(executor);
         this.contextsByStore = requireNonNull(contextsByStore);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
@@ -616,7 +622,8 @@ public final class ServerStreamFactory implements StreamFactory
                         if (handshake != null)
                         {
                             handshake.pendingTasks++;
-                            executeTask.accept(runnable, this::flushHandshake);
+                            Future<?> future = executor.execute(runnable, networkRouteId, networkId, FLUSH_HANDSHAKE_SIGNAL);
+                            handshake.pendingFutures.add(future);
                         }
                         else
                         {
@@ -900,14 +907,6 @@ public final class ServerStreamFactory implements StreamFactory
         {
             this.networkPadding = networkPadding;
         }
-
-        private void flushHandshake()
-        {
-            if (handshake != null)
-            {
-                handshake.flushHandshake();
-            }
-        }
     }
 
     public final class ServerHandshake
@@ -922,6 +921,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final long networkReplyId;
         private final LongConsumer networkReplyDoneHandler;
         private final Consumer<LongConsumer> networkReplyDoneHandlerConsumer;
+        private final List<Future<?>> pendingFutures;
 
         private int pendingTasks;
 
@@ -966,6 +966,7 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkBudgetSupplier = networkBudgetSupplier;
             this.networkPaddingSupplier = networkPaddingSupplier;
             this.networkBudgetConsumer = networkBudgetConsumer;
+            this.pendingFutures = new ArrayList<>(3);
         }
 
         private void onFinished()
@@ -992,6 +993,10 @@ public final class ServerStreamFactory implements StreamFactory
             case AbortFW.TYPE_ID:
                 final AbortFW abort = abortRO.wrap(buffer, index, index + length);
                 handleAbort(abort);
+                break;
+            case SignalFW.TYPE_ID:
+                final SignalFW signal = signalRO.wrap(buffer, index, index + length);
+                handleSignal(signal);
                 break;
             default:
                 doReset(networkThrottle, networkRouteId, networkId);
@@ -1055,6 +1060,29 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
+        private void handleEnd(
+            EndFW end)
+        {
+            pendingFutures.forEach(f -> f.cancel(true));
+            tlsEngine.closeOutbound();
+            doAbort(networkReply, networkRouteId, networkReplyId, end.trace(), 0L);
+        }
+
+        private void handleAbort(
+            AbortFW abort)
+        {
+            pendingFutures.forEach(f -> f.cancel(true));
+            tlsEngine.closeOutbound();
+            doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
+        }
+
+        private void handleSignal(
+            SignalFW signal)
+        {
+            assert signal.signalId() == FLUSH_HANDSHAKE_SIGNAL;
+            flushHandshake();
+        }
+
         private void processNetwork(
             final MutableDirectBuffer inNetBuffer,
             final ByteBuffer inNetByteBuffer) throws SSLException
@@ -1098,20 +1126,6 @@ public final class ServerStreamFactory implements StreamFactory
                     break;
                 }
             }
-        }
-
-        private void handleEnd(
-            EndFW end)
-        {
-            tlsEngine.closeOutbound();
-            doAbort(networkReply, networkRouteId, networkReplyId, end.trace(), 0L);
-        }
-
-        private void handleAbort(
-            AbortFW abort)
-        {
-            tlsEngine.closeOutbound();
-            doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
         }
 
         private void updateNetworkReplyWindow(
@@ -1220,6 +1234,8 @@ public final class ServerStreamFactory implements StreamFactory
 
             if (pendingTasks == 0)
             {
+                pendingFutures.clear();
+
                 if (networkSlot != NO_SLOT)
                 {
                     try

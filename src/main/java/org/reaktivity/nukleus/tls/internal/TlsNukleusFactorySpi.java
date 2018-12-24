@@ -15,6 +15,7 @@
  */
 package org.reaktivity.nukleus.tls.internal;
 
+import static java.util.concurrent.Executors.newFixedThreadPool;
 import static org.reaktivity.nukleus.route.RouteKind.CLIENT;
 import static org.reaktivity.nukleus.route.RouteKind.SERVER;
 
@@ -40,20 +41,23 @@ public final class TlsNukleusFactorySpi implements NukleusFactorySpi
     {
         final TlsConfiguration tlsConfig = new TlsConfiguration(config);
 
-        final TlsExecutor executor = new TlsExecutor(tlsConfig);
+        final int handshakeParallelism = tlsConfig.handshakeParallelism();
+        if (handshakeParallelism > 0)
+        {
+            builder.executor(newFixedThreadPool(handshakeParallelism));
+        }
 
         final ServerStreamFactoryBuilder serverStreamFactoryBuilder =
-            new ServerStreamFactoryBuilder(tlsConfig, executor::executeTask);
+            new ServerStreamFactoryBuilder(tlsConfig);
 
         final ClientStreamFactoryBuilder clientStreamFactoryBuilder =
-            new ClientStreamFactoryBuilder(tlsConfig, executor::executeTask);
+            new ClientStreamFactoryBuilder(tlsConfig);
 
         return builder.configure(tlsConfig)
                       .streamFactory(SERVER, serverStreamFactoryBuilder)
                       .routeHandler(SERVER, serverStreamFactoryBuilder::handleRoute)
                       .streamFactory(CLIENT, clientStreamFactoryBuilder)
                       .routeHandler(CLIENT, clientStreamFactoryBuilder::handleRoute)
-                      .inject(executor)
                       .build();
     }
 }
