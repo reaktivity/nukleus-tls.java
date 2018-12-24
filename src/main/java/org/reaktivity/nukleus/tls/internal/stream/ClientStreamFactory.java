@@ -24,8 +24,11 @@ import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Future;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
@@ -50,6 +53,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.reaktivity.nukleus.buffer.BufferPool;
 import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessagePredicate;
+import org.reaktivity.nukleus.function.SignalingExecutor;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
@@ -63,6 +67,7 @@ import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.EndFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
 import org.reaktivity.nukleus.tls.internal.util.function.ObjectLongBiFunction;
@@ -74,6 +79,7 @@ public final class ClientStreamFactory implements StreamFactory
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
     private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
     private static final DirectBuffer NO_EXTENSION = new UnsafeBuffer(new byte[] {(byte)0xff, (byte)0xff});
+    private static final long FLUSH_HANDSHAKE_SIGNAL = 1L;
 
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
@@ -82,6 +88,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final DataFW dataRO = new DataFW();
     private final EndFW endRO = new EndFW();
     private final AbortFW abortRO = new AbortFW();
+    private final SignalFW signalRO = new SignalFW();
 
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
     private final DataFW.Builder dataRW = new DataFW.Builder();
@@ -100,7 +107,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
-    private final BiConsumer<Runnable, Runnable> executeTask;
+    private final SignalingExecutor executor;
     private final Map<String, SSLContext> contextsByStore;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -120,7 +127,7 @@ public final class ClientStreamFactory implements StreamFactory
 
     public ClientStreamFactory(
         TlsConfiguration config,
-        BiConsumer<Runnable, Runnable> executeTask,
+        SignalingExecutor executor,
         Map<String, SSLContext> contextsByStore,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
@@ -133,7 +140,7 @@ public final class ClientStreamFactory implements StreamFactory
         TlsCounters counters)
     {
         this.supplyTrace = requireNonNull(supplyTrace);
-        this.executeTask = requireNonNull(executeTask);
+        this.executor = requireNonNull(executor);
         this.contextsByStore = requireNonNull(contextsByStore);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
@@ -602,6 +609,7 @@ public final class ClientStreamFactory implements StreamFactory
         private final long networkCorrelationId;
 
         private final Runnable networkReplyDoneHandler;
+        private final List<Future<?>> pendingFutures;
 
         private MessageConsumer networkReplyThrottle;
         private long networkReplyId;
@@ -663,6 +671,7 @@ public final class ClientStreamFactory implements StreamFactory
             this.networkBudgetConsumer = networkBudgetConsumer;
             this.networkPaddingConsumer = networkPaddingConsumer;
             this.sendApplicationWindow = sendApplicationWindow;
+            this.pendingFutures = new ArrayList<>(3);
         }
 
         @Override
@@ -793,6 +802,10 @@ public final class ClientStreamFactory implements StreamFactory
                 final AbortFW abort = abortRO.wrap(buffer, index, index + length);
                 handleAbort(abort);
                 break;
+            case SignalFW.TYPE_ID:
+                final SignalFW signal = signalRO.wrap(buffer, index, index + length);
+                handleSignal(signal);
+                break;
             default:
                 doReset(networkReplyThrottle, networkRouteId, networkReplyId);
                 break;
@@ -856,6 +869,31 @@ public final class ClientStreamFactory implements StreamFactory
             }
         }
 
+        private void handleEnd(
+            EndFW end)
+        {
+            pendingFutures.forEach(f -> f.cancel(true));
+            correlations.remove(networkCorrelationId);
+            tlsEngine.closeOutbound();
+            doAbort(networkTarget, networkRouteId, networkId, end.trace(), networkAuthorization);
+        }
+
+        private void handleAbort(
+            AbortFW abort)
+        {
+            pendingFutures.forEach(f -> f.cancel(true));
+            correlations.remove(networkCorrelationId);
+            tlsEngine.closeOutbound();
+            doAbort(networkTarget, networkRouteId, networkId, abort.trace(), networkAuthorization);
+        }
+
+        private void handleSignal(
+            SignalFW signal)
+        {
+            assert signal.signalId() == FLUSH_HANDSHAKE_SIGNAL;
+            flushHandshake();
+        }
+
         private void processNetwork(
             final MutableDirectBuffer inNetBuffer,
             final ByteBuffer inNetByteBuffer) throws SSLException
@@ -904,22 +942,6 @@ public final class ClientStreamFactory implements StreamFactory
             }
         }
 
-        private void handleEnd(
-            EndFW end)
-        {
-            correlations.remove(networkCorrelationId);
-            tlsEngine.closeOutbound();
-            doAbort(networkTarget, networkRouteId, networkId, end.trace(), networkAuthorization);
-        }
-
-        private void handleAbort(
-            AbortFW abort)
-        {
-            correlations.remove(networkCorrelationId);
-            tlsEngine.closeOutbound();
-            doAbort(networkTarget, networkRouteId, networkId, abort.trace(), networkAuthorization);
-        }
-
         private void updateNetworkWindow(
             SSLEngineResult result)
         {
@@ -938,6 +960,8 @@ public final class ClientStreamFactory implements StreamFactory
 
             if (pendingTasks == 0)
             {
+                pendingFutures.clear();
+
                 if (networkReplySlot != NO_SLOT)
                 {
                     try
@@ -1326,7 +1350,8 @@ public final class ClientStreamFactory implements StreamFactory
                         if (handshake != null)
                         {
                             handshake.pendingTasks++;
-                            executeTask.accept(runnable, this::flushHandshake);
+                            Future<?> future = executor.execute(runnable, networkRouteId, networkReplyId, FLUSH_HANDSHAKE_SIGNAL);
+                            handshake.pendingFutures.add(future);
                         }
                         else
                         {
@@ -1525,14 +1550,6 @@ public final class ClientStreamFactory implements StreamFactory
                 doReset(networkReplyThrottle, networkRouteId, networkReplyId, reset.trace());
             }
         }
-
-        private void flushHandshake()
-        {
-            if (handshake != null)
-            {
-                handshake.flushHandshake();
-            }
-        }
     }
 
     private void flushNetwork(
@@ -1659,15 +1676,6 @@ public final class ClientStreamFactory implements StreamFactory
                                .build();
 
         receiver.accept(end.typeId(), end.buffer(), end.offset(), end.sizeof());
-    }
-
-    private void doEnd(
-        final MessageConsumer receiver,
-        final long routeId,
-        final long streamId,
-        final long authorization)
-    {
-        doEnd(receiver, routeId, streamId, supplyTrace.getAsLong(), authorization);
     }
 
     private void doAbort(

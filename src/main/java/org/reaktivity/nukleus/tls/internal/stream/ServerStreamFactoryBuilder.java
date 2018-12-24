@@ -24,7 +24,6 @@ import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
@@ -45,6 +44,7 @@ import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.MutableInteger;
 import org.reaktivity.nukleus.buffer.BufferPool;
+import org.reaktivity.nukleus.function.SignalingExecutor;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
@@ -72,13 +72,13 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
 
     private final TlsConfiguration config;
-    private final BiConsumer<Runnable, Runnable> executeTask;
     private final Map<String, SSLContext> contextsByStore;
     private final Map<String, MutableInteger> routesByStore;
     private final Long2ObjectHashMap<String> storesByRouteId;
     private final Long2ObjectHashMap<ServerHandshake> correlations;
 
     private RouteManager router;
+    private SignalingExecutor executor;
     private MutableDirectBuffer writeBuffer;
     private LongSupplier supplyInitialId;
     private LongUnaryOperator supplyReplyId;
@@ -89,11 +89,9 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private Function<String, LongConsumer> supplyAccumulator;
 
     public ServerStreamFactoryBuilder(
-        TlsConfiguration config,
-        BiConsumer<Runnable, Runnable> executeTask)
+        TlsConfiguration config)
     {
         this.config = config;
-        this.executeTask = executeTask;
         this.contextsByStore = new HashMap<>();
         this.routesByStore = new HashMap<>();
         this.storesByRouteId = new Long2ObjectHashMap<>();
@@ -105,6 +103,14 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         RouteManager router)
     {
         this.router = router;
+        return this;
+    }
+
+    @Override
+    public ServerStreamFactoryBuilder setExecutor(
+        SignalingExecutor executor)
+    {
+        this.executor = executor;
         return this;
     }
 
@@ -231,7 +237,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
         return new ServerStreamFactory(
             config,
-            executeTask,
+            executor,
             contextsByStore,
             router,
             writeBuffer,
