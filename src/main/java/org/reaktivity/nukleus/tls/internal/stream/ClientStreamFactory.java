@@ -248,18 +248,22 @@ public final class ClientStreamFactory implements StreamFactory
             final long applicationId = begin.streamId();
             final long applicationRouteId = begin.routeId();
 
-            final SSLEngine tlsEngine = contextsByStore.get(store).createSSLEngine(tlsHostname, -1);
+            final SSLContext context = contextsByStore.get(store);
+            if (context != null)
+            {
+                final SSLEngine tlsEngine = context.createSSLEngine(tlsHostname, -1);
 
-            newStream = new ClientAcceptStream(
-                tlsEngine,
-                tlsHostname,
-                tlsApplicationProtocol,
-                defaultRoute,
-                applicationRouteId,
-                applicationThrottle,
-                applicationId,
-                authorization,
-                networkRouteId)::handleStream;
+                newStream = new ClientAcceptStream(
+                    tlsEngine,
+                    tlsHostname,
+                    tlsApplicationProtocol,
+                    defaultRoute,
+                    applicationRouteId,
+                    applicationThrottle,
+                    applicationId,
+                    authorization,
+                    networkRouteId)::handleStream;
+            }
         }
 
         return newStream;
