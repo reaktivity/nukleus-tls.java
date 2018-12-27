@@ -27,11 +27,11 @@ import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Future;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 import java.util.function.LongConsumer;
@@ -108,7 +108,6 @@ public final class ServerStreamFactory implements StreamFactory
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
     private final SignalingExecutor executor;
-    private final Map<String, SSLContext> contextsByStore;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
@@ -125,11 +124,11 @@ public final class ServerStreamFactory implements StreamFactory
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
     private final DirectBuffer outNetBuffer;
+    private final Function<String, SSLContext> lookupContext;
 
     public ServerStreamFactory(
         TlsConfiguration config,
         SignalingExecutor executor,
-        Map<String, SSLContext> contextsByStore,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
@@ -138,11 +137,12 @@ public final class ServerStreamFactory implements StreamFactory
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ServerHandshake> correlations,
         LongSupplier supplyTrace,
+        Function<String, SSLContext> lookupContext,
         TlsCounters counters)
     {
         this.supplyTrace = requireNonNull(supplyTrace);
         this.executor = requireNonNull(executor);
-        this.contextsByStore = requireNonNull(contextsByStore);
+        this.lookupContext = requireNonNull(lookupContext);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
         this.networkPool = new CountingBufferPool(
@@ -204,7 +204,7 @@ public final class ServerStreamFactory implements StreamFactory
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             String store = routeEx.store().asString();
             final long networkId = begin.streamId();
-            final SSLContext sslContext = contextsByStore.get(store);
+            final SSLContext sslContext = lookupContext.apply(store);
             if (sslContext != null)
             {
                 final long networkRouteId = begin.routeId();

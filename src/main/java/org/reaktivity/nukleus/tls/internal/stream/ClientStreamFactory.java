@@ -26,11 +26,11 @@ import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Future;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 import java.util.function.LongConsumer;
@@ -107,8 +107,8 @@ public final class ClientStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
+    private final Function<String, SSLContext> lookupContext;
     private final SignalingExecutor executor;
-    private final Map<String, SSLContext> contextsByStore;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
@@ -128,7 +128,6 @@ public final class ClientStreamFactory implements StreamFactory
     public ClientStreamFactory(
         TlsConfiguration config,
         SignalingExecutor executor,
-        Map<String, SSLContext> contextsByStore,
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
@@ -137,11 +136,12 @@ public final class ClientStreamFactory implements StreamFactory
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ClientHandshake> correlations,
         LongSupplier supplyTrace,
+        Function<String, SSLContext> lookupContext,
         TlsCounters counters)
     {
         this.supplyTrace = requireNonNull(supplyTrace);
         this.executor = requireNonNull(executor);
-        this.contextsByStore = requireNonNull(contextsByStore);
+        this.lookupContext = requireNonNull(lookupContext);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
         this.networkPool = new CountingBufferPool(
@@ -248,7 +248,7 @@ public final class ClientStreamFactory implements StreamFactory
             final long applicationId = begin.streamId();
             final long applicationRouteId = begin.routeId();
 
-            final SSLContext context = contextsByStore.get(store);
+            final SSLContext context = lookupContext.apply(store);
             if (context != null)
             {
                 final SSLEngine tlsEngine = context.createSSLEngine(tlsHostname, -1);
