@@ -15,49 +15,22 @@
  */
 package org.reaktivity.nukleus.tls.internal;
 
-import static java.util.concurrent.Executors.newFixedThreadPool;
-import static org.reaktivity.nukleus.route.RouteKind.CLIENT;
-import static org.reaktivity.nukleus.route.RouteKind.SERVER;
-
 import org.reaktivity.nukleus.Configuration;
 import org.reaktivity.nukleus.Nukleus;
-import org.reaktivity.nukleus.NukleusBuilder;
 import org.reaktivity.nukleus.NukleusFactorySpi;
-import org.reaktivity.nukleus.tls.internal.stream.ClientStreamFactoryBuilder;
-import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuilder;
 
 public final class TlsNukleusFactorySpi implements NukleusFactorySpi
 {
     @Override
     public String name()
     {
-        return "tls";
+        return TlsNukleus.NAME;
     }
 
     @Override
     public Nukleus create(
-        Configuration config,
-        NukleusBuilder builder)
+        Configuration config)
     {
-        final TlsConfiguration tlsConfig = new TlsConfiguration(config);
-
-        final int handshakeParallelism = tlsConfig.handshakeParallelism();
-        if (handshakeParallelism > 0)
-        {
-            builder.executor(newFixedThreadPool(handshakeParallelism));
-        }
-
-        final ServerStreamFactoryBuilder serverStreamFactoryBuilder =
-            new ServerStreamFactoryBuilder(tlsConfig);
-
-        final ClientStreamFactoryBuilder clientStreamFactoryBuilder =
-            new ClientStreamFactoryBuilder(tlsConfig);
-
-        return builder.configure(tlsConfig)
-                      .streamFactory(SERVER, serverStreamFactoryBuilder)
-                      .routeHandler(SERVER, serverStreamFactoryBuilder::handleRoute)
-                      .streamFactory(CLIENT, clientStreamFactoryBuilder)
-                      .routeHandler(CLIENT, clientStreamFactoryBuilder::handleRoute)
-                      .build();
+        return new TlsNukleus(new TlsConfiguration(config));
     }
 }
