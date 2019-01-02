@@ -82,8 +82,8 @@ public final class ServerStreamFactory implements StreamFactory
     private static final LongConsumer NOP = x -> {};
     private static final long FLUSH_HANDSHAKE_SIGNAL = 1L;
 
-    private final RouteFW routeRO = new RouteFW();
-    private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
+    private final ThreadLocal<RouteFW> routeRO = ThreadLocal.withInitial(RouteFW::new);
+    private final ThreadLocal<TlsRouteExFW> tlsRouteExRO = ThreadLocal.withInitial(TlsRouteExFW::new);
 
     private final BeginFW beginRO = new BeginFW();
     private final DataFW dataRO = new DataFW();
@@ -201,6 +201,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         if (route != null)
         {
+            final TlsRouteExFW tlsRouteExRO = this.tlsRouteExRO.get();
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             String store = routeEx.store().asString();
             final long networkId = begin.streamId();
@@ -241,6 +242,7 @@ public final class ServerStreamFactory implements StreamFactory
         int index,
         int length)
     {
+        final RouteFW routeRO = this.routeRO.get();
         return routeRO.wrap(buffer, index, index + length);
     }
 
@@ -371,28 +373,31 @@ public final class ServerStreamFactory implements StreamFactory
         {
             final MessagePredicate alpnFilter = (t, b, o, l) ->
             {
+                final RouteFW routeRO = ServerStreamFactory.this.routeRO.get();
                 final RouteFW route = routeRO.wrap(b, o, o + l);
                 ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getHandshakeSession();
 
                 List<SNIServerName> sniServerNames = tlsSession.getRequestedServerNames();
-                String peerHost = null;
+                String hostname = null;
                 if (sniServerNames.size() > 0)
                 {
                     SNIHostName sniHostName = (SNIHostName) sniServerNames.get(0);
-                    peerHost = sniHostName.getAsciiName();
+                    hostname = sniHostName.getAsciiName();
                 }
 
+                final TlsRouteExFW tlsRouteExRO = ServerStreamFactory.this.tlsRouteExRO.get();
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 final String routeHostname = routeEx.hostname().asString();
                 final String routeProtocol = routeEx.applicationProtocol().asString();
 
-                return (routeHostname == null || Objects.equals(peerHost, routeHostname)) &&
+                return (routeHostname == null || Objects.equals(hostname, routeHostname)) &&
                        (routeProtocol == null || clientProtocols.contains(routeProtocol));
             };
 
             RouteFW route = router.resolve(networkRouteId, authorization, alpnFilter, wrapRoute);
             if (route != null)
             {
+                final TlsRouteExFW tlsRouteExRO = ServerStreamFactory.this.tlsRouteExRO.get();
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 String applicationProtocol = routeEx.applicationProtocol().asString();
                 // If the route is default (i.e. no application protocol), need to behave as if there is no ALPN
@@ -687,6 +692,8 @@ public final class ServerStreamFactory implements StreamFactory
 
             final MessagePredicate filter = (t, b, o, l) ->
             {
+                final RouteFW routeRO = ServerStreamFactory.this.routeRO.get();
+                final TlsRouteExFW tlsRouteExRO = ServerStreamFactory.this.tlsRouteExRO.get();
                 final RouteFW route = routeRO.wrap(b, o, o + l);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 final String hostname = routeEx.hostname().asString();
