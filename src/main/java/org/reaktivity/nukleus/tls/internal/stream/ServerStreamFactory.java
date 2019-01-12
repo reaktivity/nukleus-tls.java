@@ -326,7 +326,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doReset(networkReply, networkRouteId, networkId);
+                doNetworkReset(supplyTrace.getAsLong());
             }
         }
 
@@ -362,7 +362,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             catch (SSLException ex)
             {
-                doReset(networkReply, networkRouteId, networkId);
+                doNetworkReset(supplyTrace.getAsLong());
                 doAbort(networkReply, networkRouteId, networkReplyId, begin.trace(), 0L);
             }
         }
@@ -428,7 +428,7 @@ public final class ServerStreamFactory implements StreamFactory
                 handleAbort(abort);
                 break;
             default:
-                doReset(networkReply, networkRouteId, networkId);
+                doNetworkReset(supplyTrace.getAsLong());
                 break;
             }
         }
@@ -451,7 +451,7 @@ public final class ServerStreamFactory implements StreamFactory
                 if (networkSlot == NO_SLOT || networkBudget < 0)
                 {
                     doCloseInbound(tlsEngine);
-                    doReset(networkReply, networkRouteId, networkId);
+                    doNetworkReset(supplyTrace.getAsLong());
                     doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
                     networkSlotOffset = 0;
                 }
@@ -469,7 +469,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             catch (SSLException ex)
             {
-                doReset(networkReply, networkRouteId, networkId);
+                doNetworkReset(supplyTrace.getAsLong());
                 doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
                 networkSlotOffset = 0;
             }
@@ -497,7 +497,7 @@ public final class ServerStreamFactory implements StreamFactory
                 if (applicationSlot == NO_SLOT)
                 {
                     doCloseInbound(tlsEngine);
-                    doReset(networkReply, networkRouteId, networkId);
+                    doNetworkReset(supplyTrace.getAsLong());
                     doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
                     networkSlotOffset = 0;
                 }
@@ -528,7 +528,7 @@ public final class ServerStreamFactory implements StreamFactory
                                     result.getStatus() == BUFFER_UNDERFLOW)
                             {
                                 networkSlotOffset = 0;
-                                doReset(networkReply, networkRouteId, networkId);
+                                doNetworkReset(supplyTrace.getAsLong());
                                 doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
                                 doCloseInbound(tlsEngine);
                             }
@@ -574,6 +574,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
+            release();
             if (!tlsEngine.isInboundDone())
             {
                 // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
@@ -593,6 +594,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleAbort(
             AbortFW abort)
         {
+            release();
             try
             {
                 doCloseInbound(tlsEngine);
@@ -737,7 +739,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doReset(networkReply, networkRouteId, networkId);
+                doNetworkReset(supplyTrace.getAsLong());
                 doAbort(networkReply, networkRouteId, networkReplyId, 0L);
             }
         }
@@ -831,7 +833,7 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 catch (SSLException ex)
                 {
-                    doReset(networkReply, networkRouteId, networkId);
+                    doNetworkReset(supplyTrace.getAsLong());
                     doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
                 }
                 finally
@@ -867,7 +869,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             finally
             {
-                doReset(networkReply, networkRouteId, networkId, reset.trace());
+                doNetworkReset(reset.trace());
             }
         }
 
@@ -878,6 +880,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         private void handleNetworkReplyDone(long traceId)
         {
+            release();
             correlations.remove(applicationCorrelationId);
 
             if (networkReplyDoneHandler != null)
@@ -910,6 +913,29 @@ public final class ServerStreamFactory implements StreamFactory
         private void setNetworkPadding(int networkPadding)
         {
             this.networkPadding = networkPadding;
+        }
+
+        private void doNetworkReset(
+            long traceId)
+        {
+            release();
+            doReset(networkReply, networkRouteId, networkId, traceId);
+        }
+
+        private void release()
+        {
+            if (networkSlot != NO_SLOT)
+            {
+                networkPool.release(networkSlot);
+                networkSlot = NO_SLOT;
+                networkSlotOffset = 0;
+            }
+            if (applicationSlot != NO_SLOT)
+            {
+                applicationPool.release(applicationSlot);
+                applicationSlot = NO_SLOT;
+                applicationSlotOffset = 0;
+            }
         }
     }
 
@@ -1003,7 +1029,7 @@ public final class ServerStreamFactory implements StreamFactory
                 handleSignal(signal);
                 break;
             default:
-                doReset(networkThrottle, networkRouteId, networkId);
+                doNetworkReset(supplyTrace.getAsLong());
                 break;
             }
         }
@@ -1027,7 +1053,7 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId, networkTraceId, networkReplyPadding,
                             data.authorization(), NOP);
-                    doReset(networkThrottle, networkRouteId, networkId);
+                    doNetworkReset(supplyTrace.getAsLong());
                     doAbort(networkReply, networkRouteId, networkReplyId, networkTraceId, 0L);
                 }
                 else
@@ -1051,7 +1077,7 @@ public final class ServerStreamFactory implements StreamFactory
             catch (SSLException | UnsupportedOperationException ex)
             {
                 networkSlotOffset = 0;
-                doReset(networkThrottle, networkRouteId, networkId);
+                doNetworkReset(supplyTrace.getAsLong());
                 doAbort(networkReply, networkRouteId, networkReplyId, networkTraceId, 0L);
             }
             finally
@@ -1067,6 +1093,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
+            release();
             pendingFutures.forEach(f -> f.cancel(true));
             tlsEngine.closeOutbound();
             doAbort(networkReply, networkRouteId, networkReplyId, end.trace(), 0L);
@@ -1075,6 +1102,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleAbort(
             AbortFW abort)
         {
+            release();
             pendingFutures.forEach(f -> f.cancel(true));
             tlsEngine.closeOutbound();
             doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
@@ -1111,7 +1139,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                 if (outAppByteBuffer.position() != 0)
                 {
-                    doReset(networkThrottle, networkRouteId, networkId);
+                    doNetworkReset(supplyTrace.getAsLong());
                     doAbort(networkReply, networkRouteId, networkReplyId, 0L);
                     break loop;
                 }
@@ -1212,6 +1240,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleReset(
             ResetFW reset)
         {
+            release();
             try
             {
                 doCloseInbound(tlsEngine);
@@ -1229,6 +1258,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleResetAfterHandshake(
             ResetFW reset)
         {
+            release();
             networkReplyDoneHandler.accept(0);
         }
 
@@ -1252,7 +1282,7 @@ public final class ServerStreamFactory implements StreamFactory
                     catch (SSLException | UnsupportedOperationException ex)
                     {
                         networkSlotOffset = 0;
-                        doReset(networkThrottle, networkRouteId, networkId);
+                        doNetworkReset(supplyTrace.getAsLong());
                         doAbort(networkReply, networkRouteId, networkReplyId, 0L);
                     }
                     finally
@@ -1273,10 +1303,27 @@ public final class ServerStreamFactory implements StreamFactory
                     catch (Exception ex)
                     {
                         // catches SSLException re-thrown as unchecked
-                        doReset(networkThrottle, networkRouteId, networkId);
+                        doNetworkReset(supplyTrace.getAsLong());
                         doAbort(networkReply, networkRouteId, networkReplyId, 0L);
                     }
                 }
+            }
+        }
+
+        private void doNetworkReset(
+            long traceId)
+        {
+            release();
+            doReset(networkThrottle, networkRouteId, networkId, traceId);
+        }
+
+        private void release()
+        {
+            if (networkSlot != NO_SLOT)
+            {
+                networkPool.release(networkSlot);
+                networkSlot = NO_SLOT;
+                networkSlotOffset = 0;
             }
         }
     }
