@@ -592,7 +592,7 @@ public final class ServerStreamFactory implements StreamFactory
                             0, end.authorization(), NOP);
                     if (applicationReplyThrottle != null)
                     {
-                        doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId);
+                        doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId, supplyTrace.getAsLong());
                     }
                     else
                     {
@@ -622,7 +622,7 @@ public final class ServerStreamFactory implements StreamFactory
                                 0, abort.authorization(), NOP);
                         if (applicationReplyThrottle != null)
                         {
-                            doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId);
+                            doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId, supplyTrace.getAsLong());
                         }
                         else
                         {
