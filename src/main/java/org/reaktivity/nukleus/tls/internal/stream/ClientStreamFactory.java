@@ -1039,7 +1039,7 @@ public final class ClientStreamFactory implements StreamFactory
         private int applicationReplyBudget;
         private int applicationReplyPadding;
 
-        private int networkReplySlot;
+        private int networkReplySlot = NO_SLOT;
         private int networkReplySlotOffset;
 
         private SSLEngine tlsEngine;
