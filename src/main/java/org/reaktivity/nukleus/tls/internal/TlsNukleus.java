@@ -16,7 +16,6 @@
 package org.reaktivity.nukleus.tls.internal;
 
 import static java.lang.System.getProperty;
-import static java.util.concurrent.Executors.newFixedThreadPool;
 import static org.reaktivity.nukleus.route.RouteKind.CLIENT;
 import static org.reaktivity.nukleus.route.RouteKind.SERVER;
 
@@ -28,7 +27,6 @@ import java.security.SecureRandom;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
 
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
@@ -68,7 +66,6 @@ final class TlsNukleus implements Nukleus
 
     private final TlsConfiguration config;
     private final Map<RouteKind, MessagePredicate> routeHandlers;
-    private final ExecutorService executor;
     private final Map<String, MutableInteger> routesByStore;
     private final Long2ObjectHashMap<String> storesByRouteId;
     private final Map<String, SSLContext> contextsByStore;
@@ -77,9 +74,6 @@ final class TlsNukleus implements Nukleus
         TlsConfiguration config)
     {
         this.config = config;
-
-        final int parallelism = config.handshakeParallelism();
-        this.executor = parallelism > 0 ? newFixedThreadPool(parallelism) : null;
 
         this.routesByStore = new HashMap<>();
         this.storesByRouteId = new Long2ObjectHashMap<>();
@@ -101,12 +95,6 @@ final class TlsNukleus implements Nukleus
     public TlsConfiguration config()
     {
         return config;
-    }
-
-    @Override
-    public ExecutorService executor()
-    {
-        return executor;
     }
 
     @Override

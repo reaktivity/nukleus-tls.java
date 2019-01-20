@@ -38,8 +38,7 @@ public final class TlsControllerFactorySpi implements ControllerFactorySpi<TlsCo
         Configuration config,
         ControllerBuilder<TlsController> builder)
     {
-        return builder.setName(name())
-                      .setFactory(TlsController::new)
+        return builder.setFactory(TlsController::new)
                       .build();
     }
 }

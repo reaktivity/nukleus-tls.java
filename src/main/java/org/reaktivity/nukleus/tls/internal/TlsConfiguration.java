@@ -19,7 +19,6 @@ import org.reaktivity.nukleus.Configuration;
 
 public class TlsConfiguration extends Configuration
 {
-    public static final IntPropertyDef TLS_HANDSHAKE_PARALLELISM;
     public static final IntPropertyDef TLS_HANDSHAKE_WINDOW_BYTES;
     public static final PropertyDef<String> TLS_KEY_MANAGER_ALGORITHM;
 
@@ -28,7 +27,6 @@ public class TlsConfiguration extends Configuration
     static
     {
         final ConfigurationDef config = new ConfigurationDef("nukleus.tls");
-        TLS_HANDSHAKE_PARALLELISM = config.property("handshake.parallelism", 1);
         TLS_HANDSHAKE_WINDOW_BYTES = config.property("handshake.window.bytes", 65536);
         TLS_KEY_MANAGER_ALGORITHM = config.property("handshake.key.manager.algorithm", "PKIX");
         TLS_CONFIG = config;
@@ -38,11 +36,6 @@ public class TlsConfiguration extends Configuration
         Configuration config)
     {
         super(TLS_CONFIG, config);
-    }
-
-    public int handshakeParallelism()
-    {
-        return TLS_HANDSHAKE_PARALLELISM.getAsInt(this);
     }
 
     public int handshakeWindowBytes()

@@ -17,6 +17,7 @@ package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
+import static org.reaktivity.reaktor.test.ReaktorRule.EXTERNAL_AFFINITY_MASK;
 
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -43,7 +44,9 @@ public class ClientIT
             .commandBufferCapacity(1024)
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(4096)
-            .nukleus("tls"::equals);
+            .nukleus("tls"::equals)
+            .affinityMask("target#0", EXTERNAL_AFFINITY_MASK)
+            .clean();
 
     @Rule
     public final TestRule chain = outerRule(timeout).around(reaktor).around(k3po);
