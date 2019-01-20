@@ -40,13 +40,13 @@ public class TlsCounters
         this.supplyCounter = supplyCounter;
         this.supplyAccumulator = supplyAccumulator;
 
-        this.serverNetworkAcquires = supplyCounter.apply("server.network.acquires");
-        this.serverNetworkReleases = supplyCounter.apply("server.network.releases");
-        this.serverApplicationAcquires = supplyCounter.apply("server.application.acquires");
-        this.serverApplicationReleases = supplyCounter.apply("server.application.releases");
-        this.clientNetworkAcquires = supplyCounter.apply("client.network.acquires");
-        this.clientNetworkReleases = supplyCounter.apply("client.network.releases");
-        this.clientApplicationAcquires = supplyCounter.apply("client.application.acquires");
-        this.clientApplicationReleases = supplyCounter.apply("client.application.releases");
+        this.serverNetworkAcquires = supplyCounter.apply("tls.server.network.acquires");
+        this.serverNetworkReleases = supplyCounter.apply("tls.server.network.releases");
+        this.serverApplicationAcquires = supplyCounter.apply("tls.server.application.acquires");
+        this.serverApplicationReleases = supplyCounter.apply("tls.server.application.releases");
+        this.clientNetworkAcquires = supplyCounter.apply("tls.client.network.acquires");
+        this.clientNetworkReleases = supplyCounter.apply("tls.client.network.releases");
+        this.clientApplicationAcquires = supplyCounter.apply("tls.client.application.acquires");
+        this.clientApplicationReleases = supplyCounter.apply("tls.client.application.releases");
     }
 }

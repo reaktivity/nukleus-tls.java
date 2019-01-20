@@ -105,7 +105,7 @@ public class TlsServerBM
     {
         final TlsController controller = reaktor.controller(TlsController.class);
 //        this.source = controller.supplySource("source", Source::new);
-        this.target = controller.supplyTarget("target", Target::new);
+//        this.target = controller.supplyTarget("target", Target::new);
 
         final Random random = new Random();
         this.targetRef = random.nextLong();

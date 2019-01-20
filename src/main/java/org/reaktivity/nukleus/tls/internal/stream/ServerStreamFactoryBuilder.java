@@ -45,7 +45,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private RouteManager router;
     private SignalingExecutor executor;
     private MutableDirectBuffer writeBuffer;
-    private LongSupplier supplyInitialId;
+    private LongUnaryOperator supplyInitialId;
     private LongUnaryOperator supplyReplyId;
     private LongSupplier supplyCorrelationId;
     private Supplier<BufferPool> supplyBufferPool;
@@ -88,7 +88,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
     @Override
     public StreamFactoryBuilder setTraceSupplier(
-            LongSupplier supplyTrace)
+        LongSupplier supplyTrace)
     {
         this.supplyTrace = supplyTrace;
         return this;
@@ -96,7 +96,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
     @Override
     public ServerStreamFactoryBuilder setInitialIdSupplier(
-        LongSupplier supplyInitialId)
+        LongUnaryOperator supplyInitialId)
     {
         this.supplyInitialId = supplyInitialId;
         return this;

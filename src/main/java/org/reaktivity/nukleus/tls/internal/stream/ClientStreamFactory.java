@@ -113,10 +113,10 @@ public final class ClientStreamFactory implements StreamFactory
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
     private final BufferPool applicationPool;
-    private final LongSupplier supplyInitialId;
-    private final LongSupplier supplyTrace;
+    private final LongUnaryOperator supplyInitialId;
     private final LongUnaryOperator supplyReplyId;
     private final LongSupplier supplyCorrelationId;
+    private final LongSupplier supplyTrace;
     private final int handshakeWindowBytes;
 
     private final Long2ObjectHashMap<ClientHandshake> correlations;
@@ -131,7 +131,7 @@ public final class ClientStreamFactory implements StreamFactory
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
-        LongSupplier supplyInitialId,
+        LongUnaryOperator supplyInitialId,
         LongUnaryOperator supplyReplyId,
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ClientHandshake> correlations,
@@ -301,13 +301,12 @@ public final class ClientStreamFactory implements StreamFactory
         private final long applicationInitialId;
         private final long authorization;
 
-        private final MessageConsumer networkTarget;
         private final long networkRouteId;
+        private final long networkInitialId;
+        private final MessageConsumer networkTarget;
 
         private final SSLEngine tlsEngine;
         private MessageConsumer streamState;
-
-        private long networkId;
 
         private int applicationBudget;
         private int applicationPadding;
@@ -335,8 +334,9 @@ public final class ClientStreamFactory implements StreamFactory
             this.applicationReply = applicationReply;
             this.applicationInitialId = applicationInitialId;
             this.authorization = authorization;
-            this.networkTarget = router.supplyReceiver(networkRouteId);
             this.networkRouteId = networkRouteId;
+            this.networkInitialId = supplyInitialId.applyAsLong(networkRouteId);
+            this.networkTarget = router.supplyReceiver(networkInitialId);
             this.streamState = this::beforeBegin;
         }
 
@@ -400,7 +400,6 @@ public final class ClientStreamFactory implements StreamFactory
                 final long applicationCorrelationId = begin.correlationId();
                 final long authorization = begin.authorization();
 
-                final long newNetworkInitialId = supplyInitialId.getAsLong();
                 final long newCorrelationId = supplyCorrelationId.getAsLong();
 
                 tlsEngine.setUseClientMode(true);
@@ -421,7 +420,7 @@ public final class ClientStreamFactory implements StreamFactory
                 tlsEngine.setSSLParameters(tlsParameters);
 
                 final ClientHandshake newHandshake = new ClientHandshake(tlsEngine, tlsApplicationProtocol, defaultRoute,
-                        networkRouteId, newNetworkInitialId,
+                        networkRouteId, networkInitialId,
                         authorization, applicationRouteId, applicationCorrelationId,
                         newCorrelationId, this::handleThrottle,
                         applicationReply, applicationInitialId, this::handleNetworkReplyDone,
@@ -431,11 +430,10 @@ public final class ClientStreamFactory implements StreamFactory
 
                 correlations.put(newCorrelationId, newHandshake);
 
-                doBegin(networkTarget, networkRouteId, newNetworkInitialId, begin.trace(), authorization, newCorrelationId,
+                doBegin(networkTarget, networkRouteId, networkInitialId, begin.trace(), authorization, newCorrelationId,
                         begin.extension());
-                router.setThrottle(newNetworkInitialId, newHandshake::handleThrottle);
+                router.setThrottle(networkInitialId, newHandshake::handleThrottle);
 
-                this.networkId = newNetworkInitialId;
                 this.streamState = this::afterBegin;
 
                 tlsEngine.beginHandshake();
@@ -443,7 +441,7 @@ public final class ClientStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 doReset(applicationReply, applicationRouteId, applicationInitialId);
-                doAbort(networkTarget, networkRouteId, networkId, authorization);
+                doAbort(networkTarget, networkRouteId, networkInitialId, authorization);
             }
         }
 
@@ -458,8 +456,8 @@ public final class ClientStreamFactory implements StreamFactory
                 if (applicationBudget < 0)
                 {
                     doReset(applicationReply, applicationRouteId, applicationInitialId);
-                    doCloseOutbound(tlsEngine, networkTarget, networkRouteId, networkId, applicationTraceId, networkPadding,
-                            authorization, this::handleNetworkReplyDone);
+                    doCloseOutbound(tlsEngine, networkTarget, networkRouteId, networkInitialId, applicationTraceId,
+                            networkPadding, authorization, this::handleNetworkReplyDone);
                 }
                 else
                 {
@@ -480,7 +478,7 @@ public final class ClientStreamFactory implements StreamFactory
                             networkBudget -= result.bytesProduced() + networkPadding;
                         }
 
-                        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkRouteId, networkId,
+                        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkRouteId, networkInitialId,
                                 applicationTraceId, networkPadding, authorization, this::handleNetworkReplyDone);
                     }
                 }
@@ -488,7 +486,7 @@ public final class ClientStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 doReset(applicationReply, applicationRouteId, applicationInitialId);
-                doAbort(networkTarget, networkRouteId, networkId, applicationTraceId, authorization);
+                doAbort(networkTarget, networkRouteId, networkInitialId, applicationTraceId, authorization);
             }
         }
 
@@ -499,12 +497,12 @@ public final class ClientStreamFactory implements StreamFactory
 
             try
             {
-                doCloseOutbound(tlsEngine, networkTarget, networkRouteId, networkId, end.trace(), networkPadding,
+                doCloseOutbound(tlsEngine, networkTarget, networkRouteId, networkInitialId, end.trace(), networkPadding,
                         authorization, this::handleNetworkReplyDone);
             }
             catch (SSLException ex)
             {
-                doAbort(networkTarget, networkRouteId, networkId, end.trace(), authorization);
+                doAbort(networkTarget, networkRouteId, networkInitialId, end.trace(), authorization);
             }
         }
 
@@ -512,7 +510,7 @@ public final class ClientStreamFactory implements StreamFactory
             AbortFW abort)
         {
             tlsEngine.closeOutbound();
-            doAbort(networkTarget, networkRouteId, networkId, abort.trace(), authorization);
+            doAbort(networkTarget, networkRouteId, networkInitialId, abort.trace(), authorization);
         }
 
         private void handleThrottle(
@@ -659,7 +657,7 @@ public final class ClientStreamFactory implements StreamFactory
             this.tlsEngine = tlsEngine;
             this.applicationProtocol = applicationProtocol;
             this.defaultRoute = defaultRoute;
-            this.networkTarget = router.supplyReceiver(networkRouteId);
+            this.networkTarget = router.supplyReceiver(networkInitialId);
             this.networkRouteId = networkRouteId;
             this.networkInitialId = networkInitialId;
             this.networkAuthorization = authorization;

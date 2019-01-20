@@ -112,11 +112,11 @@ public final class ServerStreamFactory implements StreamFactory
     private final MutableDirectBuffer writeBuffer;
     private final BufferPool networkPool;
     private final BufferPool applicationPool;
-    private final LongSupplier supplyInitialId;
-    private final LongSupplier supplyTrace;
+    private final LongUnaryOperator supplyInitialId;
+    private final LongUnaryOperator supplyReplyId;
     private final LongSupplier supplyCorrelationId;
+    private final LongSupplier supplyTrace;
     private final int handshakeBudget;
-    private LongUnaryOperator supplyReplyId;
 
     private final Long2ObjectHashMap<ServerHandshake> correlations;
     private final MessageFunction<RouteFW> wrapRoute;
@@ -132,7 +132,7 @@ public final class ServerStreamFactory implements StreamFactory
         RouteManager router,
         MutableDirectBuffer writeBuffer,
         BufferPool bufferPool,
-        LongSupplier supplyInitialId,
+        LongUnaryOperator supplyInitialId,
         LongUnaryOperator supplyReplyId,
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ServerHandshake> correlations,
@@ -195,7 +195,7 @@ public final class ServerStreamFactory implements StreamFactory
         final long authorization = begin.authorization();
 
         final MessagePredicate filter = (t, b, o, l) -> true;
-        final RouteFW route = router.resolve(routeId, authorization, filter, this::wrapRoute);
+        final RouteFW route = router.resolve(routeId, authorization, filter, wrapRoute);
 
         MessageConsumer newStream = null;
 
@@ -734,16 +734,16 @@ public final class ServerStreamFactory implements StreamFactory
             if (route != null)
             {
                 final long applicationRouteId = route.correlationId();
-                final MessageConsumer applicationTarget = router.supplyReceiver(applicationRouteId);
+                final long applicationInitialId = supplyInitialId.applyAsLong(applicationRouteId);
+                final MessageConsumer applicationTarget = router.supplyReceiver(applicationInitialId);
 
                 final long newCorrelationId = supplyCorrelationId.getAsLong();
                 correlations.put(newCorrelationId, handshake);
 
-                final long newApplicationId = supplyInitialId.getAsLong();
 
-                doTlsBegin(applicationTarget, applicationRouteId, newApplicationId, networkTraceId, authorization,
+                doTlsBegin(applicationTarget, applicationRouteId, applicationInitialId, networkTraceId, authorization,
                         newCorrelationId, tlsHostname, tlsApplicationProtocol);
-                router.setThrottle(newApplicationId, this::handleThrottle);
+                router.setThrottle(applicationInitialId, this::handleThrottle);
 
                 handshake.onFinished();
 
@@ -755,7 +755,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                 this.applicationTarget = applicationTarget;
                 this.applicationRouteId = applicationRouteId;
-                this.applicationId = newApplicationId;
+                this.applicationId = applicationInitialId;
                 this.applicationCorrelationId = newCorrelationId;
 
                 this.streamState = this::afterHandshake;
