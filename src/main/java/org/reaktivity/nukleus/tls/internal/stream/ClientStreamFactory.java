@@ -1536,7 +1536,7 @@ public final class ClientStreamFactory implements StreamFactory
                 }
                 finally
                 {
-                    if (networkReplySlotOffset == 0)
+                    if (networkReplySlotOffset == 0 && networkReplySlot != NO_SLOT)
                     {
                         networkPool.release(networkReplySlot);
                         networkReplySlot = NO_SLOT;

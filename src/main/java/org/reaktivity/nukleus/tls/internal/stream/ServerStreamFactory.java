@@ -862,7 +862,7 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 finally
                 {
-                    if (networkSlotOffset == 0)
+                    if (networkSlotOffset == 0 && networkSlot != NO_SLOT)
                     {
                         networkPool.release(networkSlot);
                         networkSlot = NO_SLOT;
