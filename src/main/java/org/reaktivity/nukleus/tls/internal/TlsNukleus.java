@@ -24,6 +24,9 @@ import java.io.FileInputStream;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.SecureRandom;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
@@ -36,8 +39,6 @@ import javax.net.ssl.TrustManagerFactory;
 
 import org.agrona.DirectBuffer;
 import org.agrona.LangUtil;
-import org.agrona.collections.Long2ObjectHashMap;
-import org.agrona.collections.MutableInteger;
 import org.reaktivity.nukleus.Nukleus;
 import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.internal.CopyOnWriteHashMap;
@@ -66,17 +67,18 @@ final class TlsNukleus implements Nukleus
 
     private final TlsConfiguration config;
     private final Map<RouteKind, MessagePredicate> routeHandlers;
-    private final Map<String, MutableInteger> routesByStore;
-    private final Long2ObjectHashMap<String> storesByRouteId;
-    private final Map<String, SSLContext> contextsByStore;
+    private final Map<Long, String> storesByRouteId;
+
+    private final Map<String, StoreInfo> contextsByStore;
+
+    private int storeIndex;
 
     TlsNukleus(
         TlsConfiguration config)
     {
         this.config = config;
 
-        this.routesByStore = new HashMap<>();
-        this.storesByRouteId = new Long2ObjectHashMap<>();
+        this.storesByRouteId = new HashMap<>();
         this.contextsByStore = new CopyOnWriteHashMap<>();
 
         Map<RouteKind, MessagePredicate> routeHandlers = new EnumMap<>(RouteKind.class);
@@ -141,13 +143,9 @@ final class TlsNukleus implements Nukleus
         final String store = routeEx.store().asString();
         final long routeId = route.correlationId();
 
-        if (store != null)
-        {
-            storesByRouteId.put(routeId, store);
-        }
-        MutableInteger routesCount = routesByStore.computeIfAbsent(store, s -> new MutableInteger());
-        routesCount.value++;
-        contextsByStore.computeIfAbsent(store, s -> initContext(config, store));
+        storesByRouteId.put(routeId, store);
+        StoreInfo storeInfo = contextsByStore.computeIfAbsent(store, s -> initContext(config, store, ++storeIndex));
+        storeInfo.routeCount++;
     }
 
     private void handleUnroute(
@@ -155,27 +153,22 @@ final class TlsNukleus implements Nukleus
     {
         final long routeId = unroute.routeId();
         final String store = storesByRouteId.remove(routeId);
-
-        MutableInteger routesCount = routesByStore.computeIfPresent(store, (s, c) -> decrement(c));
-        if (routesCount != null && routesCount.value == 0)
+        StoreInfo storeInfo = contextsByStore.get(store);
+        storeInfo.routeCount--;
+        if (storeInfo.routeCount == 0)
         {
-            routesByStore.remove(store);
             contextsByStore.remove(store);
         }
     }
 
-    private MutableInteger decrement(MutableInteger routesCount)
-    {
-        routesCount.value--;
-        return routesCount;
-    }
-
-    static SSLContext initContext(
+    private static StoreInfo initContext(
         TlsConfiguration tlsConfig,
-        String store)
+        String store,
+        int storeIndex)
     {
         Path directory = tlsConfig.directory();
         SSLContext context = null;
+        Map<String, Long> caMap = new HashMap<>();
 
         try
         {
@@ -208,6 +201,24 @@ final class TlsNukleus implements Nukleus
                         TrustManagerFactory.getDefaultAlgorithm());
                 trustManagerFactory.init(trustStore);
                 trustManagers = trustManagerFactory.getTrustManagers();
+                long authorization = 1;
+
+                for(String alias : Collections.list(trustStore.aliases()))
+                {
+                    if (trustStore.isCertificateEntry(alias))
+                    {
+                        Certificate certificate = trustStore.getCertificate(alias);
+                        String dn = ((X509Certificate) certificate).getSubjectX500Principal().getName();
+
+System.out.printf("dn = %s issuer = %s serial = %x\n",
+        dn, ((X509Certificate) certificate).getIssuerDN(),
+        ((X509Certificate) certificate).getSerialNumber());
+                        long routeAuthorization = ((long)storeIndex << 56) | authorization;
+                        caMap.put(dn, routeAuthorization);
+                        System.out.println(caMap);
+                        authorization *= 2;
+                    }
+                }
             }
 
             context = SSLContext.getInstance("TLS");
@@ -218,7 +229,7 @@ final class TlsNukleus implements Nukleus
             LangUtil.rethrowUnchecked(ex);
         }
 
-        return context;
+        return new StoreInfo(store, context, caMap);
     }
 
     private static File resolve(

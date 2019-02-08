@@ -56,6 +56,7 @@ import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.function.SignalingExecutor;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
+import org.reaktivity.nukleus.tls.internal.StoreInfo;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
@@ -107,7 +108,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
-    private final Function<String, SSLContext> lookupContext;
+    private final Function<String, StoreInfo> lookupContext;
     private final SignalingExecutor executor;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -136,7 +137,7 @@ public final class ClientStreamFactory implements StreamFactory
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ClientHandshake> correlations,
         LongSupplier supplyTrace,
-        Function<String, SSLContext> lookupContext,
+        Function<String, StoreInfo> lookupContext,
         TlsCounters counters)
     {
         this.supplyTrace = requireNonNull(supplyTrace);
@@ -248,7 +249,8 @@ public final class ClientStreamFactory implements StreamFactory
             final long applicationInitialId = begin.streamId();
             final long applicationRouteId = begin.routeId();
 
-            final SSLContext context = lookupContext.apply(store);
+            final StoreInfo storeInfo = lookupContext.apply(store);
+            final SSLContext context = storeInfo == null ? null : storeInfo.context;
             if (context != null)
             {
                 final SSLEngine tlsEngine = context.createSSLEngine(tlsHostname, -1);

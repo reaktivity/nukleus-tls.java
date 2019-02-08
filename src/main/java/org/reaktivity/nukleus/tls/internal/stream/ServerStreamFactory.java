@@ -25,6 +25,8 @@ import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -46,6 +48,8 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLSession;
 
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
@@ -58,6 +62,7 @@ import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.function.SignalingExecutor;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
+import org.reaktivity.nukleus.tls.internal.StoreInfo;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
@@ -124,7 +129,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
     private final DirectBuffer outNetBuffer;
-    private final Function<String, SSLContext> lookupContext;
+    private final Function<String, StoreInfo> lookupContext;
 
     public ServerStreamFactory(
         TlsConfiguration config,
@@ -137,7 +142,7 @@ public final class ServerStreamFactory implements StreamFactory
         LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ServerHandshake> correlations,
         LongSupplier supplyTrace,
-        Function<String, SSLContext> lookupContext,
+        Function<String, StoreInfo> lookupContext,
         TlsCounters counters)
     {
         this.supplyTrace = requireNonNull(supplyTrace);
@@ -205,16 +210,18 @@ public final class ServerStreamFactory implements StreamFactory
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             String store = routeEx.store().asString();
             final long networkId = begin.streamId();
-            final SSLContext sslContext = lookupContext.apply(store);
+            final StoreInfo storeInfo = lookupContext.apply(store);
+            final SSLContext sslContext = storeInfo == null ? null : storeInfo.context;
             if (sslContext != null)
             {
                 final long networkRouteId = begin.routeId();
 
                 final SSLEngine tlsEngine = sslContext.createSSLEngine();
                 tlsEngine.setUseClientMode(false);
-                // tlsEngine.setNeedClientAuth(true);
+                tlsEngine.setWantClientAuth(true);
 
                 newStream = new ServerAcceptStream(
+                        storeInfo,
                         tlsEngine,
                         networkReply,
                         networkRouteId,
@@ -254,6 +261,7 @@ public final class ServerStreamFactory implements StreamFactory
         private final long networkRouteId;
         private final long networkId;
         private final long authorization;
+        private final StoreInfo storeInfo;
 
         private long networkReplyId;
 
@@ -293,12 +301,14 @@ public final class ServerStreamFactory implements StreamFactory
         }
 
         private ServerAcceptStream(
+            StoreInfo storeInfo,
             SSLEngine tlsEngine,
             MessageConsumer networkReply,
             long networkRouteId,
             long networkId,
             long authorization)
         {
+            this.storeInfo = storeInfo;
             this.tlsEngine = tlsEngine;
             this.networkReply = networkReply;
             this.networkRouteId = networkRouteId;
@@ -696,6 +706,26 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
+        private long certificateAuthorization(SSLSession tlsSession)
+        {
+            try
+            {
+System.out.println("************* peer certificates ****** " + tlsSession.getPeerCertificates());
+                Certificate[] certs = tlsSession.getPeerCertificates();
+                if (certs.length > 1)
+                {
+                    Certificate caCert = certs[1];      // CA cert that signed
+                    String ca = ((X509Certificate) caCert).getSubjectX500Principal().getName();
+                    return storeInfo.authorization.get(ca);
+                }
+            }
+            catch (SSLPeerUnverifiedException e)
+            {
+                // ignoring the exception
+            }
+            return 0L;
+        }
+
         private void handleFinished()
         {
             ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getSession();
@@ -740,7 +770,7 @@ public final class ServerStreamFactory implements StreamFactory
                 final long newCorrelationId = supplyCorrelationId.getAsLong();
                 correlations.put(newCorrelationId, handshake);
 
-
+                long authorization = certificateAuthorization(tlsSession);
                 doTlsBegin(applicationTarget, applicationRouteId, applicationInitialId, networkTraceId, authorization,
                         newCorrelationId, tlsHostname, tlsApplicationProtocol);
                 router.setThrottle(applicationInitialId, this::handleThrottle);

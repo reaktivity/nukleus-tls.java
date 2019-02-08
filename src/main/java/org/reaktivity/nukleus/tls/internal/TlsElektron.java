@@ -22,8 +22,6 @@ import java.util.EnumMap;
 import java.util.Map;
 import java.util.function.Function;
 
-import javax.net.ssl.SSLContext;
-
 import org.reaktivity.nukleus.Elektron;
 import org.reaktivity.nukleus.route.RouteKind;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
@@ -36,7 +34,7 @@ final class TlsElektron implements Elektron
 
     TlsElektron(
         TlsConfiguration config,
-        Function<String, SSLContext> lookupContext)
+        Function<String, StoreInfo> lookupContext)
     {
         Map<RouteKind, StreamFactoryBuilder> streamFactoryBuilders = new EnumMap<>(RouteKind.class);
         streamFactoryBuilders.put(SERVER, new ServerStreamFactoryBuilder(config, lookupContext));

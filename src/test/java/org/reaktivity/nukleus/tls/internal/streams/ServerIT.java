@@ -346,4 +346,17 @@ public class ServerIT
     {
         k3po.finish();
     }
+
+    @Test
+    @Specification({
+        "${route}/server.default.store/controller",
+        "${client}/want.client.auth/client",
+        "${server}/want.client.auth/server"})
+    @ScriptProperty({
+        "clientAccept \"nukleus://streams/target#0\"",
+        "authorization  0x0100000000000001L" })
+    public void wantClientAuth() throws Exception
+    {
+        k3po.finish();
+    }
 }
