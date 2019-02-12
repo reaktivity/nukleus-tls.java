@@ -81,8 +81,8 @@ public final class ClientStreamFactory implements StreamFactory
     private static final DirectBuffer NO_EXTENSION = new UnsafeBuffer(new byte[] {(byte)0xff, (byte)0xff});
     private static final long FLUSH_HANDSHAKE_SIGNAL = 1L;
 
-    private final RouteFW routeRO = new RouteFW();
-    private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
+    private final ThreadLocal<RouteFW> routeRO = ThreadLocal.withInitial(RouteFW::new);
+    private final ThreadLocal<TlsRouteExFW> tlsRouteExRO = ThreadLocal.withInitial(TlsRouteExFW::new);
 
     private final BeginFW beginRO = new BeginFW();
     private final DataFW dataRO = new DataFW();
@@ -198,7 +198,8 @@ public final class ClientStreamFactory implements StreamFactory
 
         final MessagePredicate defaultRouteFilter = (t, b, o, l) ->
         {
-            final RouteFW route = routeRO.wrap(b, o, o + l);
+            final RouteFW route = routeRO.get().wrap(b, o, o + l);
+            final TlsRouteExFW tlsRouteExRO = ClientStreamFactory.this.tlsRouteExRO.get();
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
             final String applicationProtocol = routeEx.applicationProtocol().asString();
@@ -210,7 +211,8 @@ public final class ClientStreamFactory implements StreamFactory
 
         final MessagePredicate filter = (t, b, o, l) ->
         {
-            final RouteFW route = routeRO.wrap(b, o, o + l);
+            final RouteFW route = routeRO.get().wrap(b, o, o + l);
+            final TlsRouteExFW tlsRouteExRO = ClientStreamFactory.this.tlsRouteExRO.get();
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
             final String applicationProtocol = routeEx.applicationProtocol().asString();
@@ -228,6 +230,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         if (route != null)
         {
+            final TlsRouteExFW tlsRouteExRO = ClientStreamFactory.this.tlsRouteExRO.get();
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             String store = routeEx.store().asString();
 
@@ -286,7 +289,7 @@ public final class ClientStreamFactory implements StreamFactory
         int index,
         int length)
     {
-        return routeRO.wrap(buffer, index, index + length);
+        return routeRO.get().wrap(buffer, index, index + length);
     }
 
     private final class ClientAcceptStream
