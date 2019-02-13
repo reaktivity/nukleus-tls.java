@@ -29,6 +29,7 @@ import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import javax.net.ssl.KeyManager;
@@ -123,9 +124,8 @@ final class TlsNukleus implements Nukleus
             case RouteFW.TYPE_ID:
             {
                 final RouteFW route = routeRO.wrap(buffer, index, index + length);
-                handleRoute(route);
+                return handleRoute(route);
             }
-            break;
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
@@ -136,7 +136,7 @@ final class TlsNukleus implements Nukleus
         return true;
     }
 
-    private void handleRoute(
+    private boolean handleRoute(
         final RouteFW route)
     {
         final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
@@ -145,7 +145,12 @@ final class TlsNukleus implements Nukleus
 
         storesByRouteId.put(routeId, store);
         StoreInfo storeInfo = contextsByStore.computeIfAbsent(store, s -> initContext(config, store, ++storeIndex));
-        storeInfo.routeCount++;
+        if (storeInfo != null)
+        {
+            storeInfo.routeCount++;
+        }
+
+        return storeInfo != null;
     }
 
     private void handleUnroute(
@@ -168,7 +173,7 @@ final class TlsNukleus implements Nukleus
     {
         Path directory = tlsConfig.directory();
         SSLContext context = null;
-        Map<String, Long> caMap = new HashMap<>();
+        Map<String, Long> caMap = new LinkedHashMap<>();
         boolean trustStoreExists = false;
 
         try
@@ -209,15 +214,20 @@ final class TlsNukleus implements Nukleus
                 {
                     if (trustStore.isCertificateEntry(alias))
                     {
+                        if (caMap.size() >= 56)
+                        {
+                            // more than 56 ca certs, cannot fit in 7 bytes
+                            return null;
+                        }
                         Certificate certificate = trustStore.getCertificate(alias);
                         String dn = ((X509Certificate) certificate).getSubjectX500Principal().getName();
 
-System.out.printf("dn = %s issuer = %s serial = %x\n",
-        dn, ((X509Certificate) certificate).getIssuerDN(),
-        ((X509Certificate) certificate).getSerialNumber());
+                        //  0           7                                63
+                        // +-------------+---------------------------------+
+                        // | store index |          ca bit                 |
+                        // +-------------+---------------------------------+
                         long routeAuthorization = ((long)storeIndex << 56) | authorization;
                         caMap.put(dn, routeAuthorization);
-                        System.out.println(caMap);
                         authorization *= 2;
                     }
                 }
