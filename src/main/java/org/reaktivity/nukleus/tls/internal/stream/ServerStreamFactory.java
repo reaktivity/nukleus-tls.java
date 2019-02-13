@@ -217,7 +217,10 @@ public final class ServerStreamFactory implements StreamFactory
 
                 final SSLEngine tlsEngine = sslContext.createSSLEngine();
                 tlsEngine.setUseClientMode(false);
-                tlsEngine.setWantClientAuth(true);
+                if (storeInfo.trustStoreExists)
+                {
+                    tlsEngine.setWantClientAuth(true);
+                }
 
                 newStream = new ServerAcceptStream(
                         storeInfo,

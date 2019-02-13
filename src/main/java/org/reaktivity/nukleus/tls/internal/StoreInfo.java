@@ -22,13 +22,21 @@ public class StoreInfo
 {
     private final String store;
     public final SSLContext context;
-    public final Map<String, Long> authorization;       // dn -> authorization (1st byte store index + 5 bytes for dn index)
+    public final Map<String, Long> authorization;       // dn -> authorization (1st byte store index + 7 bytes for dn index)
     int routeCount;
+    public final boolean trustStoreExists;
 
-    StoreInfo(String store, SSLContext context, Map<String, Long> authorization)
+    StoreInfo(String store, SSLContext context, boolean trustStoreExists, Map<String, Long> authorization)
     {
         this.store = store;
         this.context = context;
         this.authorization = authorization;
+        this.trustStoreExists = trustStoreExists;
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format("store=%s authorization=0x%016x", store, authorization);
     }
 }

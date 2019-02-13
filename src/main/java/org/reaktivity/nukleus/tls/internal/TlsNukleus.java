@@ -169,6 +169,7 @@ final class TlsNukleus implements Nukleus
         Path directory = tlsConfig.directory();
         SSLContext context = null;
         Map<String, Long> caMap = new HashMap<>();
+        boolean trustStoreExists = false;
 
         try
         {
@@ -194,6 +195,7 @@ final class TlsNukleus implements Nukleus
             TrustManager[] trustManagers = null;
             if (trustStoreFile.exists())
             {
+                trustStoreExists = true;
                 KeyStore trustStore = KeyStore.getInstance("JKS");
                 trustStore.load(new FileInputStream(trustStoreFile), trustStorePassword.toCharArray());
                 // TODO: TLS Alert Record, code 112 / scope trustStore to match routes?
@@ -229,7 +231,7 @@ System.out.printf("dn = %s issuer = %s serial = %x\n",
             LangUtil.rethrowUnchecked(ex);
         }
 
-        return new StoreInfo(store, context, caMap);
+        return new StoreInfo(store, context, trustStoreExists, caMap);
     }
 
     private static File resolve(
