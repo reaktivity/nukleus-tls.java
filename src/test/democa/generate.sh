@@ -1,21 +1,7 @@
 #!/bin/bash
 
-CA_ALIAS=DemoCA
 CA_PASS=generated
 CERT_PASS=generated
-
-clean()
-{
-  echo "Clean files from previous run"
-  rm -rf ${CA_ALIAS}.jks ${CA_ALIAS}.crt ${CA_ALIAS}.p12 ${CA_ALIAS}.key
-  rm -rf keystore.all.jks cacerts.jks
-}
-
-clean_cert()
-{
-  echo "Clean cert files from previous run"
-  rm -rf ${CERT_ALIAS}.jks ${CERT_ALIAS}.crt ${CERT_ALIAS}.p12 ${CERT_ALIAS}.key ${CERT_ALIAS}.csr
-}
 
 function print_cert()
 {
@@ -49,6 +35,7 @@ function print_key()
 
 create_ca()
 {
+  CA_ALIAS=$1
   echo ""
   echo "------------------------------------------------------------------------------"
   echo "Generate ca keypair: ${CA_ALIAS}.jks"
@@ -86,8 +73,10 @@ create_ca()
   print_key ${CA_ALIAS}.key
 }
 
-create_server_cert()
+create_cert()
 {
+  CA_ALIAS=$1
+  CERT_ALIAS=$2
   echo ""
   echo "------------------------------------------------------------------------------"
   echo "Generate cert keypair: ${CERT_ALIAS}.jks"
@@ -137,41 +126,61 @@ create_server_cert()
   keytool -keystore ${CERT_ALIAS}.jks -storepass ${CERT_PASS} -keypass ${CERT_PASS} -delete -alias ${CA_ALIAS} -noprompt
 }
 
-import_server_cert()
+import_cert()
 {
-  keytool -importkeystore -deststorepass ${CERT_PASS} -destkeypass ${CERT_PASS} -destkeystore keystore.all.jks -srckeystore ${CERT_ALIAS}.jks -srcstoretype PKCS12 -srcstorepass ${CERT_PASS} -alias ${CERT_ALIAS}
+  CERT_ALIAS=$1
+  DEST_STORE=$2
+  keytool -importkeystore -deststorepass ${CERT_PASS} -destkeypass ${CERT_PASS} -destkeystore $DEST_STORE -srckeystore ${CERT_ALIAS}.jks -srcstoretype PKCS12 -srcstorepass ${CERT_PASS} -alias ${CERT_ALIAS}
 }
 
 create_cacerts()
 {
-
+  CA_ALIAS=$1
+  CA_CERTS=$2
   echo ""
   echo "------------------------------------------------------------------------------"
   echo "Import the democa certificate: ${CA_ALIAS}.crt"
   echo "------------------------------------------------------------------------------"
-  keytool -keystore cacerts.jks -storepass ${CA_PASS} -keypass ${CA_PASS} -importcert -alias ${CA_ALIAS} -rfc -noprompt < ${CA_ALIAS}.crt
+  keytool -keystore $CA_CERTS -storepass ${CA_PASS} -keypass ${CA_PASS} -importcert -alias ${CA_ALIAS} -rfc -noprompt < ${CA_ALIAS}.crt
 }
 
 copy()
 {
-	cp cacerts.jks cacerts 
-	cp cacerts.jks trust
-	cp cacerts.jks stores/client/trust 
+	cp tmp/server.cacerts.jks cacerts 
+	cp tmp/server.cacerts.jks trust
+	cp tmp/server.cacerts.jks stores/client/trust 
 
-	cp keystore.all.jks keys
-	cp keystore.all.jks localhost
-	cp keystore.all.jks stores/server/keys 
+	cp tmp/server.keystore.all.jks keys
+	cp tmp/server.keystore.all.jks localhost
+	cp tmp/server.keystore.all.jks stores/server/keys 
+
+	cp tmp/server.keystore.all.jks stores/server.want.auth/keys 
+	cp tmp/client.cacerts.jks stores/server.want.auth/trust
+	cp tmp/client1.jks stores/server.want.auth/k3po.keys 
+	cp tmp/server.cacerts.jks stores/server.want.auth/k3po.trust
 }
 
-clean
-create_ca
+rm -rf  tmp
+mkdir tmp
+cd tmp
+
+SERVER_CA_ALIAS=DemoCA
+create_ca $SERVER_CA_ALIAS
 for cn in example.com example.net example.org localhost
 do
-  CERT_ALIAS=$cn
-  clean_cert
-  create_server_cert
-  import_server_cert
+  create_cert $SERVER_CA_ALIAS $cn
+  import_cert $cn server.keystore.all.jks
 done
-create_cacerts
+create_cacerts $SERVER_CA_ALIAS server.cacerts.jks 
+
+CLIENT_CA_ALIAS=ClientDemoCA
+create_ca $CLIENT_CA_ALIAS
+for cn in client1
+do
+  create_cert $CLIENT_CA_ALIAS $cn
+done
+create_cacerts $CLIENT_CA_ALIAS client.cacerts.jks 
+
+cd -
 copy
 
