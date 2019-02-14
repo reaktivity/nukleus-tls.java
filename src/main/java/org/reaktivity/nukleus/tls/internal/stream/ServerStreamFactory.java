@@ -712,7 +712,6 @@ public final class ServerStreamFactory implements StreamFactory
         {
             try
             {
-System.out.println("************* peer certificates ****** " + tlsSession.getPeerCertificates());
                 Certificate[] certs = tlsSession.getPeerCertificates();
                 if (certs.length > 1)
                 {
