@@ -77,9 +77,9 @@ public final class ClientStreamFactory implements StreamFactory
 {
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
-    private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
     private static final DirectBuffer NO_EXTENSION = new UnsafeBuffer(new byte[] {(byte)0xff, (byte)0xff});
     private static final long FLUSH_HANDSHAKE_SIGNAL = 1L;
+    private static final Runnable NOP = () -> {};
 
     private final ThreadLocal<RouteFW> routeRO = ThreadLocal.withInitial(RouteFW::new);
     private final ThreadLocal<TlsRouteExFW> tlsRouteExRO = ThreadLocal.withInitial(TlsRouteExFW::new);
@@ -156,7 +156,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
-        this.outNetByteBuffer = allocateDirect(Math.min(writeBuffer.capacity(), MAXIMUM_PAYLOAD_LENGTH));
+        this.outNetByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
     }
 
@@ -312,7 +312,6 @@ public final class ClientStreamFactory implements StreamFactory
         private MessageConsumer streamState;
 
         private int applicationBudget;
-        private int applicationPadding;
         private int networkBudget;
         private int networkPadding;
 
@@ -472,18 +471,23 @@ public final class ClientStreamFactory implements StreamFactory
                     payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
                     inAppByteBuffer.flip();
 
+                    int networkBytesProduced = 0;
+                    int networkPaddingProduced = 0;
+
+                    outNetByteBuffer.rewind();
+
                     while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                     {
-                        outNetByteBuffer.rewind();
-                        SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                        if (result.bytesProduced() > 0)
-                        {
-                            networkBudget -= result.bytesProduced() + networkPadding;
-                        }
+                        final SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
+                        final int bytesProduced = result.bytesProduced();
 
-                        flushNetwork(tlsEngine, result.bytesProduced(), networkTarget, networkRouteId, networkInitialId,
-                                applicationTraceId, networkPadding, authorization, this::handleNetworkReplyDone);
+                        networkBudget -= bytesProduced + networkPadding;
+                        networkBytesProduced += bytesProduced;
+                        networkPaddingProduced += networkPadding;
                     }
+
+                    flushNetwork(tlsEngine, networkBytesProduced, networkTarget, networkRouteId, networkInitialId,
+                            applicationTraceId, networkPaddingProduced, authorization, this::handleNetworkReplyDone);
                 }
             }
             catch (SSLException ex)
@@ -538,13 +542,16 @@ public final class ClientStreamFactory implements StreamFactory
             }
         }
 
-        private void sendApplicationWindow(long traceId)
+        private void sendApplicationWindow(
+            long traceId)
         {
             final int applicationCredit = networkBudget - applicationBudget;
 
             if (applicationCredit > 0)
             {
                 applicationBudget += applicationCredit;
+                final int applicationPadding = networkPadding + MAXIMUM_HEADER_SIZE +
+                        ((applicationBudget - 1) >> 14) * MAXIMUM_HEADER_SIZE;
                 doWindow(applicationReply, applicationRouteId, applicationInitialId,
                         traceId, applicationCredit, applicationPadding);
             }
@@ -555,7 +562,6 @@ public final class ClientStreamFactory implements StreamFactory
         {
             networkBudget += window.credit();
             networkPadding = window.padding();
-            applicationPadding = networkPadding + MAXIMUM_HEADER_SIZE;
             sendApplicationWindow(window.trace());
         }
 
@@ -880,7 +886,8 @@ public final class ClientStreamFactory implements StreamFactory
             pendingFutures.forEach(f -> f.cancel(true));
             correlations.remove(networkCorrelationId);
             tlsEngine.closeOutbound();
-            doAbort(networkTarget, networkRouteId, networkInitialId, end.trace(), networkAuthorization);
+            doAbort(networkTarget, networkRouteId, networkInitialId, networkAuthorization);
+            doReset(applicationReply, applicationRouteId, applicationInitialId, end.trace());
         }
 
         private void handleAbort(
@@ -889,7 +896,8 @@ public final class ClientStreamFactory implements StreamFactory
             pendingFutures.forEach(f -> f.cancel(true));
             correlations.remove(networkCorrelationId);
             tlsEngine.closeOutbound();
-            doAbort(networkTarget, networkRouteId, networkInitialId, abort.trace(), networkAuthorization);
+            doAbort(networkTarget, networkRouteId, networkInitialId, networkAuthorization);
+            doReset(applicationReply, applicationRouteId, applicationInitialId, abort.trace());
         }
 
         private void handleSignal(
@@ -1275,7 +1283,7 @@ public final class ClientStreamFactory implements StreamFactory
                                 doNetworkReplyReset(supplyTrace.getAsLong());
                                 doAbort(applicationReply, applicationRouteId, applicationReplyId, applicationReplyAuthorization);
                             }
-                            else
+                            else if (totalBytesConsumed == 0)
                             {
                                 final int networkWindowBytesUpdate =
                                     Math.max(networkPool.slotCapacity() - networkReplySlotOffset - networkReplyBudget, 0);
@@ -1320,22 +1328,27 @@ public final class ClientStreamFactory implements StreamFactory
             EndFW end)
         {
             release();
+
+            doEnd(applicationReply, applicationRouteId, applicationReplyId, end.trace(), applicationReplyAuthorization);
+
             if (!tlsEngine.isInboundDone())
             {
                 networkReplyBudget = -1;
-                try
+
+                // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
+                // but invalidates TLS session, preventing future abbreviated TLS handshakes from same client
+                if (!tlsEngine.isOutboundDone())
                 {
-                    tlsEngine.closeInbound();
-                    doEnd(applicationReply, applicationRouteId, applicationReplyId, end.trace(), applicationReplyAuthorization);
+                    try
+                    {
+                        doCloseOutbound(tlsEngine, networkTarget, networkRouteId, networkReplyId, supplyTrace.getAsLong(),
+                                0, end.authorization(), NOP);
+                    }
+                    catch (SSLException ex)
+                    {
+                        doAbort(applicationReply, applicationRouteId, applicationReplyId, applicationReplyAuthorization);
+                    }
                 }
-                catch (SSLException ex)
-                {
-                    doAbort(applicationReply, applicationRouteId, applicationReplyId, applicationReplyAuthorization);
-                }
-            }
-            else
-            {
-                doEnd(applicationReply, applicationRouteId, applicationReplyId, end.trace(), applicationReplyAuthorization);
             }
         }
 
@@ -1451,10 +1464,7 @@ public final class ClientStreamFactory implements StreamFactory
             if (applicationReplySlotOffset > 0)
             {
                 final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationReplySlot);
-
-                final int applicationWindow =
-                        Math.min(applicationReplyBudget - applicationReplyPadding, MAXIMUM_PAYLOAD_LENGTH);
-
+                final int applicationWindow = applicationReplyBudget - applicationReplyPadding;
                 final int applicationBytesConsumed = Math.min(applicationReplySlotOffset, applicationWindow);
 
                 if (applicationBytesConsumed > 0)
