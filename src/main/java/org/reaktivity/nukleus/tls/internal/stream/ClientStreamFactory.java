@@ -1335,17 +1335,12 @@ public final class ClientStreamFactory implements StreamFactory
             final long traceId = end.trace();
             try
             {
-                if (!tlsEngine.isInboundDone())
+                if (!tlsEngine.isInboundDone() && !tlsEngine.isOutboundDone())
                 {
-                    networkReplyBudget = -1;
-
-                    if (!tlsEngine.isOutboundDone())
-                    {
-                        // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
-                        // but invalidates TLS session, preventing future abbreviated TLS handshakes from same client
-                        doCloseOutbound(tlsEngine, networkInitial, networkRouteId, networkInitialId, supplyTrace.getAsLong(),
-                                0, end.authorization(), NOP);
-                    }
+                    // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
+                    // but invalidates TLS session, preventing future abbreviated TLS handshakes from same client
+                    doCloseOutbound(tlsEngine, networkInitial, networkRouteId, networkInitialId, supplyTrace.getAsLong(),
+                                    0, end.authorization(), NOP);
                 }
 
                 doEnd(applicationReply, applicationRouteId, applicationReplyId, traceId, applicationReplyAuthorization);
