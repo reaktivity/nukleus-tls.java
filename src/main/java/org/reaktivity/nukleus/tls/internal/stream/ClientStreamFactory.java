@@ -504,8 +504,11 @@ public final class ClientStreamFactory implements StreamFactory
 
             try
             {
-                doCloseOutbound(tlsEngine, networkTarget, networkRouteId, networkInitialId, end.trace(), networkPadding,
-                        authorization, this::handleNetworkReplyDone);
+                if (!tlsEngine.isOutboundDone())
+                {
+                    doCloseOutbound(tlsEngine, networkTarget, networkRouteId, networkInitialId, end.trace(), networkPadding,
+                            authorization, this::handleNetworkReplyDone);
+                }
             }
             catch (SSLException ex)
             {
@@ -1039,8 +1042,8 @@ public final class ClientStreamFactory implements StreamFactory
         private final long networkRouteId;
         private final long networkReplyId;
 
-        private MessageConsumer networkTarget;
-        private long networkId;
+        private MessageConsumer networkInitial;
+        private long networkInitialId;
         private long networkAuthorization;
 
         private int networkReplyBudget;
@@ -1149,8 +1152,8 @@ public final class ClientStreamFactory implements StreamFactory
                 this.applicationProtocol = handshake.applicationProtocol;
                 this.applicationRouteId = handshake.applicationRouteId;
                 this.defaultRoute = handshake.defaultRoute;
-                this.networkTarget = handshake.networkTarget;
-                this.networkId = handshake.networkInitialId;
+                this.networkInitial = handshake.networkTarget;
+                this.networkInitialId = handshake.networkInitialId;
                 this.networkPaddingSupplier = handshake.networkPaddingSupplier;
                 this.networkAuthorization = handshake.networkAuthorization;
                 this.networkReplySlot = handshake.networkReplySlot;
@@ -1327,35 +1330,36 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            release();
+            releaseSlots();
 
-            doEnd(applicationReply, applicationRouteId, applicationReplyId, end.trace(), applicationReplyAuthorization);
-
-            if (!tlsEngine.isInboundDone())
+            final long traceId = end.trace();
+            try
             {
-                networkReplyBudget = -1;
-
-                // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
-                // but invalidates TLS session, preventing future abbreviated TLS handshakes from same client
-                if (!tlsEngine.isOutboundDone())
+                if (!tlsEngine.isInboundDone())
                 {
-                    try
+                    networkReplyBudget = -1;
+
+                    if (!tlsEngine.isOutboundDone())
                     {
-                        doCloseOutbound(tlsEngine, networkTarget, networkRouteId, networkReplyId, supplyTrace.getAsLong(),
+                        // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
+                        // but invalidates TLS session, preventing future abbreviated TLS handshakes from same client
+                        doCloseOutbound(tlsEngine, networkInitial, networkRouteId, networkInitialId, supplyTrace.getAsLong(),
                                 0, end.authorization(), NOP);
                     }
-                    catch (SSLException ex)
-                    {
-                        doAbort(applicationReply, applicationRouteId, applicationReplyId, applicationReplyAuthorization);
-                    }
                 }
+
+                doEnd(applicationReply, applicationRouteId, applicationReplyId, traceId, applicationReplyAuthorization);
+            }
+            catch (SSLException ex)
+            {
+                doAbort(applicationReply, applicationRouteId, applicationReplyId, traceId, applicationReplyAuthorization);
             }
         }
 
         private void handleAbort(
             AbortFW abort)
         {
-            release();
+            releaseSlots();
             try
             {
                 tlsEngine.closeInbound();
@@ -1412,9 +1416,9 @@ public final class ClientStreamFactory implements StreamFactory
                         flushNetwork(
                             tlsEngine,
                             result.bytesProduced(),
-                            networkTarget,
+                            networkInitial,
                             networkRouteId,
-                            networkId,
+                            networkInitialId,
                             networkReplyTraceId,
                             networkPaddingSupplier.getAsInt(),
                             networkAuthorization,
@@ -1588,11 +1592,11 @@ public final class ClientStreamFactory implements StreamFactory
         private void doNetworkReplyReset(
             long traceId)
         {
-            release();
+            releaseSlots();
             doReset(networkReplyThrottle, networkRouteId, networkReplyId, traceId);
         }
 
-        private void release()
+        private void releaseSlots()
         {
             if (networkReplySlot != NO_SLOT)
             {
