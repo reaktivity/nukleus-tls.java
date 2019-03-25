@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2018 The Reaktivity Project
+ * Copyright 2016-2019 The Reaktivity Project
  *
  * The Reaktivity Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -77,7 +77,6 @@ public final class ServerStreamFactory implements StreamFactory
 {
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
-    private static final int MAXIMUM_PAYLOAD_LENGTH = (1 << Short.SIZE) - 1;
     private static final LongConsumer NOP = x -> {};
     private static final long FLUSH_HANDSHAKE_SIGNAL = 1L;
 
@@ -113,7 +112,6 @@ public final class ServerStreamFactory implements StreamFactory
     private final BufferPool applicationPool;
     private final LongUnaryOperator supplyInitialId;
     private final LongUnaryOperator supplyReplyId;
-    private final LongSupplier supplyCorrelationId;
     private final LongSupplier supplyTrace;
     private final int handshakeBudget;
 
@@ -133,7 +131,6 @@ public final class ServerStreamFactory implements StreamFactory
         BufferPool bufferPool,
         LongUnaryOperator supplyInitialId,
         LongUnaryOperator supplyReplyId,
-        LongSupplier supplyCorrelationId,
         Long2ObjectHashMap<ServerHandshake> correlations,
         LongSupplier supplyTrace,
         Function<String, SSLContext> lookupContext,
@@ -150,14 +147,13 @@ public final class ServerStreamFactory implements StreamFactory
                 bufferPool.duplicate(), counters.serverApplicationAcquires, counters.serverApplicationReleases);
         this.supplyInitialId = requireNonNull(supplyInitialId);
         this.supplyReplyId = requireNonNull(supplyReplyId);
-        this.supplyCorrelationId = requireNonNull(supplyCorrelationId);
         this.correlations = requireNonNull(correlations);
         this.handshakeBudget = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
 
         this.wrapRoute = this::wrapRoute;
         this.inAppByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
         this.outAppByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
-        this.outNetByteBuffer = ByteBuffer.allocate(Math.min(writeBuffer.capacity(), MAXIMUM_PAYLOAD_LENGTH));
+        this.outNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
     }
 
@@ -200,13 +196,13 @@ public final class ServerStreamFactory implements StreamFactory
 
         if (route != null)
         {
-            final TlsRouteExFW tlsRouteExRO = this.tlsRouteExRO.get();
-            final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-            String store = routeEx.store().asString();
-            final long networkId = begin.streamId();
+            final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO.get()::wrap);
+            final String store = routeEx.store().asString();
             final SSLContext sslContext = lookupContext.apply(store);
+
             if (sslContext != null)
             {
+                final long networkInitialId = begin.streamId();
                 final long networkRouteId = begin.routeId();
 
                 final SSLEngine tlsEngine = sslContext.createSSLEngine();
@@ -217,7 +213,7 @@ public final class ServerStreamFactory implements StreamFactory
                         tlsEngine,
                         networkReply,
                         networkRouteId,
-                        networkId,
+                        networkInitialId,
                         authorization)::handleStream;
             }
         }
@@ -259,9 +255,9 @@ public final class ServerStreamFactory implements StreamFactory
         private int networkSlot = NO_SLOT;
         private int networkSlotOffset;
 
-        private MessageConsumer applicationTarget;
+        private MessageConsumer applicationInitial;
         private long applicationRouteId;
-        private long applicationId;
+        private long applicationInitialId;
 
         private MessageConsumer streamState;
         private volatile ServerHandshake handshake;
@@ -274,15 +270,12 @@ public final class ServerStreamFactory implements StreamFactory
 
         private int applicationBudget;
         private int applicationPadding;
-        private long applicationCorrelationId;
+        private long applicationReplyId;
 
         private long networkCorrelationId;
 
         private LongConsumer networkReplyDoneHandler = NOP;
         private long networkTraceId;
-
-        private MessageConsumer applicationReplyThrottle;
-        private long applicationReplyId;
 
         @Override
         public String toString()
@@ -346,8 +339,7 @@ public final class ServerStreamFactory implements StreamFactory
                         this::handleStatus,
                         this::handleNetworkReplyDone, this::setNetworkReplyDoneHandler,
                         this::getNetworkBudget, this::getNetworkPadding,
-                        this::setNetworkBudget,
-                        this::setApplicationReply);
+                        this::setNetworkBudget);
 
                 networkBudget += handshakeBudget;
                 doWindow(networkReply, networkRouteId, networkId, networkBudget, networkPadding);
@@ -455,7 +447,7 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     doCloseInbound(tlsEngine);
                     doNetworkReset(supplyTrace.getAsLong());
-                    doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
+                    doAbort(applicationInitial, applicationRouteId, applicationInitialId, authorization);
                     networkSlotOffset = 0;
                 }
                 else
@@ -473,7 +465,7 @@ public final class ServerStreamFactory implements StreamFactory
             catch (SSLException ex)
             {
                 doNetworkReset(supplyTrace.getAsLong());
-                doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
+                doAbort(applicationInitial, applicationRouteId, applicationInitialId, authorization);
                 networkSlotOffset = 0;
             }
             finally
@@ -492,7 +484,7 @@ public final class ServerStreamFactory implements StreamFactory
 
             if (applicationSlot == NO_SLOT)
             {
-                applicationSlot = applicationPool.acquire(applicationId);
+                applicationSlot = applicationPool.acquire(applicationInitialId);
             }
 
             try
@@ -501,8 +493,9 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     doCloseInbound(tlsEngine);
                     doNetworkReset(supplyTrace.getAsLong());
-                    doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
+                    doAbort(applicationInitial, applicationRouteId, applicationInitialId, authorization);
                     networkSlotOffset = 0;
+                    applicationSlotOffset = 0;
                 }
                 else
                 {
@@ -532,10 +525,10 @@ public final class ServerStreamFactory implements StreamFactory
                             {
                                 networkSlotOffset = 0;
                                 doNetworkReset(supplyTrace.getAsLong());
-                                doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
+                                doAbort(applicationInitial, applicationRouteId, applicationInitialId, authorization);
                                 doCloseInbound(tlsEngine);
                             }
-                            else
+                            else if (totalBytesConsumed == 0)
                             {
                                 final int networkCredit =
                                         Math.max(networkPool.slotCapacity() - networkSlotOffset - networkBudget, 0);
@@ -577,25 +570,24 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            release();
+            releaseSlots();
+
             if (!tlsEngine.isInboundDone())
             {
                 // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
                 // but invalidates TLS session, preventing future abbreviated TLS handshakes from same client
 
-                doEnd(applicationTarget, applicationRouteId, applicationId, end.trace(), authorization);
+                doEnd(applicationInitial, applicationRouteId, applicationInitialId, end.trace(), authorization);
 
                 if (!tlsEngine.isOutboundDone())
                 {
                     doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId, supplyTrace.getAsLong(),
                             0, end.authorization(), NOP);
-                    if (applicationReplyThrottle != null)
+
+                    final ServerHandshake handshake = correlations.remove(applicationReplyId);
+                    if (handshake == null)
                     {
-                        doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId, supplyTrace.getAsLong());
-                    }
-                    else
-                    {
-                        correlations.remove(applicationCorrelationId);
+                        doReset(applicationInitial, applicationRouteId, applicationReplyId, supplyTrace.getAsLong());
                     }
                 }
             }
@@ -604,10 +596,11 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleAbort(
             AbortFW abort)
         {
-            release();
+            releaseSlots();
+
             if (!tlsEngine.isInboundDone())
             {
-                doAbort(applicationTarget, applicationRouteId, applicationId, abort.trace(), authorization);
+                doAbort(applicationInitial, applicationRouteId, applicationInitialId, abort.trace(), authorization);
 
                 try
                 {
@@ -619,13 +612,11 @@ public final class ServerStreamFactory implements StreamFactory
                     {
                         doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId, supplyTrace.getAsLong(),
                                 0, abort.authorization(), NOP);
-                        if (applicationReplyThrottle != null)
+
+                        final ServerHandshake handshake = correlations.remove(applicationReplyId);
+                        if (handshake == null)
                         {
-                            doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId, supplyTrace.getAsLong());
-                        }
-                        else
-                        {
-                            correlations.remove(applicationCorrelationId);
+                            doReset(applicationInitial, applicationRouteId, applicationReplyId, supplyTrace.getAsLong());
                         }
                     }
                 }
@@ -734,14 +725,13 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final long applicationRouteId = route.correlationId();
                 final long applicationInitialId = supplyInitialId.applyAsLong(applicationRouteId);
-                final MessageConsumer applicationTarget = router.supplyReceiver(applicationInitialId);
+                final MessageConsumer applicationInitial = router.supplyReceiver(applicationInitialId);
 
-                final long newCorrelationId = supplyCorrelationId.getAsLong();
-                correlations.put(newCorrelationId, handshake);
+                final long newApplicationReplyId = supplyReplyId.applyAsLong(applicationInitialId);
+                correlations.put(newApplicationReplyId, handshake);
 
-
-                doTlsBegin(applicationTarget, applicationRouteId, applicationInitialId, networkTraceId, authorization,
-                        newCorrelationId, tlsHostname, tlsApplicationProtocol);
+                doTlsBegin(applicationInitial, applicationRouteId, applicationInitialId, networkTraceId, authorization,
+                        newApplicationReplyId, tlsHostname, tlsApplicationProtocol);
                 router.setThrottle(applicationInitialId, this::handleThrottle);
 
                 handshake.onFinished();
@@ -752,10 +742,10 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkSlotOffset = handshake.networkSlotOffset;
                 }
 
-                this.applicationTarget = applicationTarget;
+                this.applicationInitial = applicationInitial;
                 this.applicationRouteId = applicationRouteId;
-                this.applicationId = applicationInitialId;
-                this.applicationCorrelationId = newCorrelationId;
+                this.applicationInitialId = applicationInitialId;
+                this.applicationReplyId = newApplicationReplyId;
 
                 this.streamState = this::afterHandshake;
                 this.handshake = null;
@@ -773,8 +763,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final MutableDirectBuffer outAppBuffer = applicationPool.buffer(applicationSlot);
 
-                final int applicationWindow = Math.min(
-                        applicationBudget - applicationPadding, MAXIMUM_PAYLOAD_LENGTH);
+                final int applicationWindow = applicationBudget - applicationPadding;
 
                 final int applicationBytesConsumed = Math.min(applicationSlotOffset, applicationWindow);
 
@@ -782,7 +771,7 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     final OctetsFW outAppOctets = outAppOctetsRO.wrap(outAppBuffer, 0, applicationBytesConsumed);
 
-                    doData(applicationTarget, applicationRouteId, applicationId, networkTraceId, applicationPadding,
+                    doData(applicationInitial, applicationRouteId, applicationInitialId, networkTraceId, applicationPadding,
                             authorization, outAppOctets);
 
                     applicationBudget -= applicationBytesConsumed + applicationPadding;
@@ -800,7 +789,7 @@ public final class ServerStreamFactory implements StreamFactory
 
             if (applicationSlotOffset == 0 && tlsEngine.isInboundDone())
             {
-                doEnd(applicationTarget, applicationRouteId, applicationId, networkTraceId, authorization);
+                doEnd(applicationInitial, applicationRouteId, applicationInitialId, networkTraceId, authorization);
             }
         }
 
@@ -857,7 +846,7 @@ public final class ServerStreamFactory implements StreamFactory
                 catch (SSLException ex)
                 {
                     doNetworkReset(supplyTrace.getAsLong());
-                    doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
+                    doAbort(applicationInitial, applicationRouteId, applicationInitialId, authorization);
                 }
                 finally
                 {
@@ -893,18 +882,21 @@ public final class ServerStreamFactory implements StreamFactory
             finally
             {
                 doNetworkReset(reset.trace());
+
+                final ServerHandshake handshake = correlations.remove(applicationReplyId);
+                if (handshake != null)
+                {
+                    doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId, supplyTrace.getAsLong(), 0, 0L, NOP);
+                }
             }
         }
 
-        private void handleNetworkDone()
+        private void handleNetworkReplyDone(
+            long traceId)
         {
-            doAbort(applicationTarget, applicationRouteId, applicationId, authorization);
-        }
+            releaseSlots();
 
-        private void handleNetworkReplyDone(long traceId)
-        {
-            release();
-            correlations.remove(applicationCorrelationId);
+            correlations.remove(applicationReplyId);
 
             if (networkReplyDoneHandler != null)
             {
@@ -933,25 +925,14 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkBudget = networkBudget;
         }
 
-        private void setNetworkPadding(int networkPadding)
-        {
-            this.networkPadding = networkPadding;
-        }
-
-        private void setApplicationReply(MessageConsumer applicationReplyThrottle, long applicationReplyId)
-        {
-            this.applicationReplyThrottle = applicationReplyThrottle;
-            this.applicationReplyId = applicationReplyId;
-        }
-
         private void doNetworkReset(
             long traceId)
         {
-            release();
+            releaseSlots();
             doReset(networkReply, networkRouteId, networkId, traceId);
         }
 
-        private void release()
+        private void releaseSlots()
         {
             if (networkSlot != NO_SLOT)
             {
@@ -996,7 +977,6 @@ public final class ServerStreamFactory implements StreamFactory
 
         private Consumer<ResetFW> resetHandler;
         private long networkTraceId;
-        private BiConsumer<MessageConsumer, Long> applicationReplyConsumer;
 
         private ServerHandshake(
             SSLEngine tlsEngine,
@@ -1010,8 +990,7 @@ public final class ServerStreamFactory implements StreamFactory
             Consumer<LongConsumer> networkReplyDoneHandlerConsumer,
             IntSupplier networkBudgetSupplier,
             IntSupplier networkPaddingSupplier,
-            IntConsumer networkBudgetConsumer,
-            BiConsumer<MessageConsumer, Long> applicationReplyConsumer)
+            IntConsumer networkBudgetConsumer)
         {
             this.tlsEngine = tlsEngine;
             this.statusHandler = statusHandler;
@@ -1028,7 +1007,6 @@ public final class ServerStreamFactory implements StreamFactory
             this.networkPaddingSupplier = networkPaddingSupplier;
             this.networkBudgetConsumer = networkBudgetConsumer;
             this.pendingFutures = new ArrayList<>(3);
-            this.applicationReplyConsumer = applicationReplyConsumer;
         }
 
         private void onFinished()
@@ -1124,7 +1102,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            release();
+            releaseSlot();
             pendingFutures.forEach(f -> f.cancel(true));
             tlsEngine.closeOutbound();
             doAbort(networkReply, networkRouteId, networkReplyId, end.trace(), 0L);
@@ -1133,7 +1111,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleAbort(
             AbortFW abort)
         {
-            release();
+            releaseSlot();
             pendingFutures.forEach(f -> f.cancel(true));
             tlsEngine.closeOutbound();
             doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
@@ -1172,6 +1150,7 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     doNetworkReset(supplyTrace.getAsLong());
                     doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+                    networkSlotOffset = 0;
                     break loop;
                 }
 
@@ -1271,7 +1250,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleReset(
             ResetFW reset)
         {
-            release();
+            releaseSlot();
             try
             {
                 doCloseInbound(tlsEngine);
@@ -1289,7 +1268,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleResetAfterHandshake(
             ResetFW reset)
         {
-            release();
+            releaseSlot();
             networkReplyDoneHandler.accept(0);
         }
 
@@ -1344,11 +1323,11 @@ public final class ServerStreamFactory implements StreamFactory
         private void doNetworkReset(
             long traceId)
         {
-            release();
+            releaseSlot();
             doReset(networkThrottle, networkRouteId, networkId, traceId);
         }
 
-        private void release()
+        private void releaseSlot()
         {
             if (networkSlot != NO_SLOT)
             {
@@ -1365,13 +1344,10 @@ public final class ServerStreamFactory implements StreamFactory
         private final long applicationReplyId;
 
         private final LongConsumer handleNetworkReplyDone;
-        private final Consumer<SSLEngineResult> updateNetworkWindow;
 
-        private MessageConsumer applicationReplyThrottle;
+        private MessageConsumer applicationInitial;
 
         private int applicationReplyBudget;
-        private int applicationReplyPadding;
-
         private int networkReplyBudget;
         private int networkReplyPadding;
 
@@ -1381,28 +1357,26 @@ public final class ServerStreamFactory implements StreamFactory
 
         private MessageConsumer streamState;
         private SSLEngine tlsEngine;
-        private BiConsumer<HandshakeStatus, Consumer<SSLEngineResult>> statusHandler;
 
         private long applicationReplyTraceId;
 
         @Override
         public String toString()
         {
-            return String.format("%s [applicationBudget=%d applicationPadding=%d]",
-                                 getClass().getSimpleName(), applicationReplyBudget, applicationReplyPadding);
+            return String.format("%s [applicationBudget=%d]",
+                                 getClass().getSimpleName(), applicationReplyBudget);
         }
 
         private ServerConnectReplyStream(
-            MessageConsumer applicationReplyThrottle,
+            MessageConsumer applicationInitial,
             long applicationRouteId,
             long applicationReplyId)
         {
-            this.applicationReplyThrottle = applicationReplyThrottle;
+            this.applicationInitial = applicationInitial;
             this.applicationRouteId = applicationRouteId;
             this.applicationReplyId = applicationReplyId;
             this.streamState = this::beforeBegin;
             this.handleNetworkReplyDone = this::handleNetworkReplyDone;
-            this.updateNetworkWindow = this::updateNetworkWindow;
         }
 
         private void handleStream(
@@ -1427,7 +1401,7 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId);
+                doReset(applicationInitial, applicationRouteId, applicationReplyId);
             }
         }
 
@@ -1452,7 +1426,7 @@ public final class ServerStreamFactory implements StreamFactory
                 handleAbort(abort);
                 break;
             default:
-                doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId);
+                doReset(applicationInitial, applicationRouteId, applicationReplyId);
                 break;
             }
         }
@@ -1470,19 +1444,16 @@ public final class ServerStreamFactory implements StreamFactory
                 this.networkReply = handshake.networkReply;
                 this.networkRouteId = handshake.networkRouteId;
                 this.networkReplyId = handshake.networkReplyId;
-                this.statusHandler = handshake.statusHandler;
 
                 this.networkReplyBudget = handshake.networkReplyBudget;
                 this.networkReplyPadding = handshake.networkReplyPadding;
-                handshake.applicationReplyConsumer.accept(applicationReplyThrottle, applicationReplyId);
-                this.applicationReplyPadding = networkReplyPadding + MAXIMUM_HEADER_SIZE;
                 handshake.setNetworkThrottle(this::handleThrottle);
                 sendApplicationReplyWindow(0);
                 handshake.setNetworkReplyDoneHandler(handleNetworkReplyDone);
             }
             else
             {
-                doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId);
+                doReset(applicationInitial, applicationRouteId, applicationReplyId);
             }
         }
 
@@ -1494,7 +1465,7 @@ public final class ServerStreamFactory implements StreamFactory
 
             if (applicationReplyBudget < 0)
             {
-                doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId);
+                doReset(applicationInitial, applicationRouteId, applicationReplyId);
                 doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId, applicationReplyTraceId,
                         networkReplyPadding, data.authorization(), handleNetworkReplyDone);
             }
@@ -1510,24 +1481,28 @@ public final class ServerStreamFactory implements StreamFactory
                     payload.buffer().getBytes(payload.offset(), inAppByteBuffer, payload.sizeof());
                     inAppByteBuffer.flip();
 
+                    int networkReplyBytesProduced = 0;
+                    int networkReplyPaddingProduced = 0;
+
+                    outNetByteBuffer.rewind();
+
                     while (inAppByteBuffer.hasRemaining() && !tlsEngine.isOutboundDone())
                     {
-                        outNetByteBuffer.rewind();
-                        SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
-                        if (result.bytesProduced() > 0)
-                        {
-                            networkReplyBudget -= result.bytesProduced() + networkReplyPadding;
-                        }
-                        flushNetwork(tlsEngine, result.bytesProduced(), networkReply, networkRouteId, networkReplyId,
-                                applicationReplyTraceId, networkReplyPadding, data.authorization(),
-                                handleNetworkReplyDone);
+                        final SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
+                        final int bytesProduced = result.bytesProduced();
 
-                        statusHandler.accept(result.getHandshakeStatus(), updateNetworkWindow);
+                        networkReplyBudget -= bytesProduced + networkReplyPadding;
+                        networkReplyBytesProduced += bytesProduced;
+                        networkReplyPaddingProduced += networkReplyPadding;
                     }
+
+                    flushNetwork(tlsEngine, networkReplyBytesProduced, networkReply, networkRouteId, networkReplyId,
+                            applicationReplyTraceId, networkReplyPaddingProduced, data.authorization(),
+                            handleNetworkReplyDone);
                 }
                 catch (SSLException ex)
                 {
-                    doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId);
+                    doReset(applicationInitial, applicationRouteId, applicationReplyId);
                     doAbort(networkReply, networkRouteId, networkReplyId, data.trace(), 0L);
                 }
             }
@@ -1537,7 +1512,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            applicationReplyThrottle = null;
+            applicationInitial = null;
             doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId, end.trace(), networkReplyPadding,
                     end.authorization(), handleNetworkReplyDone);
         }
@@ -1549,13 +1524,6 @@ public final class ServerStreamFactory implements StreamFactory
 
             // ABORT is from application reply, so no need to clean that stream
             doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
-        }
-
-        private void updateNetworkWindow(
-            SSLEngineResult result)
-        {
-            // TODO network-network protocol interaction (renegotiate key)
-            //applicationWindowBudgetAdjustment += result.bytesProduced() - result.bytesConsumed();
         }
 
         private void handleThrottle(
@@ -1587,7 +1555,9 @@ public final class ServerStreamFactory implements StreamFactory
             if (applicationReplyCredit > 0)
             {
                 applicationReplyBudget += applicationReplyCredit;
-                doWindow(applicationReplyThrottle, applicationRouteId, applicationReplyId, traceId, applicationReplyCredit,
+                final int applicationReplyPadding = networkReplyPadding + MAXIMUM_HEADER_SIZE +
+                        ((applicationReplyBudget - 1) >> 14) * MAXIMUM_HEADER_SIZE;
+                doWindow(applicationInitial, applicationRouteId, applicationReplyId, traceId, applicationReplyCredit,
                         applicationReplyPadding);
             }
         }
@@ -1597,7 +1567,6 @@ public final class ServerStreamFactory implements StreamFactory
         {
             networkReplyBudget += window.credit();
             networkReplyPadding = window.padding();
-            applicationReplyPadding = networkReplyPadding + MAXIMUM_HEADER_SIZE;
             sendApplicationReplyWindow(window.trace());
         }
 
@@ -1613,9 +1582,9 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleNetworkReplyDone(
             long traceId)
         {
-            if (applicationReplyThrottle != null)
+            if (applicationInitial != null)
             {
-                doReset(applicationReplyThrottle, applicationRouteId, applicationReplyId, traceId);
+                doReset(applicationInitial, applicationRouteId, applicationReplyId, traceId);
             }
         }
 

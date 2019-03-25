@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2018 The Reaktivity Project
+ * Copyright 2016-2019 The Reaktivity Project
  *
  * The Reaktivity Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -51,13 +51,17 @@ final class TlsNukleus implements Nukleus
     static final String NAME = "tls";
 
     private static final String PROPERTY_TLS_KEYSTORE = "tls.keystore";
+    private static final String PROPERTY_TLS_KEYSTORE_TYPE = "tls.keystore.type";
     private static final String PROPERTY_TLS_KEYSTORE_PASSWORD = "tls.keystore.password";
     private static final String PROPERTY_TLS_TRUSTSTORE = "tls.truststore";
+    private static final String PROPERTY_TLS_TRUSTSTORE_TYPE = "tls.truststore.type";
     private static final String PROPERTY_TLS_TRUSTSTORE_PASSWORD = "tls.truststore.password";
 
     private static final String DEFAULT_TLS_KEYSTORE = "keys";
+    private static final String DEFAULT_TLS_KEYSTORE_TYPE = "JKS";
     private static final String DEFAULT_TLS_KEYSTORE_PASSWORD = "generated";
     private static final String DEFAULT_TLS_TRUSTSTORE = "trust";
+    private static final String DEFAULT_TLS_TRUSTSTORE_TYPE = "JKS";
     private static final String DEFAULT_TLS_TRUSTSTORE_PASSWORD = "generated";
 
     private final UnrouteFW unrouteRO = new UnrouteFW();
@@ -181,12 +185,13 @@ final class TlsNukleus implements Nukleus
         {
             String keyStorePassword = getProperty(PROPERTY_TLS_KEYSTORE_PASSWORD, DEFAULT_TLS_KEYSTORE_PASSWORD);
             String keyStoreFilename = getProperty(PROPERTY_TLS_KEYSTORE, DEFAULT_TLS_KEYSTORE);
+            String keyStoreType = getProperty(PROPERTY_TLS_KEYSTORE_TYPE, DEFAULT_TLS_KEYSTORE_TYPE);
             File keyStoreFile = resolve(directory, store, keyStoreFilename);
 
             KeyManager[] keyManagers = null;
             if (keyStoreFile.exists())
             {
-                KeyStore keyStore = KeyStore.getInstance("JKS");
+                KeyStore keyStore = KeyStore.getInstance(keyStoreType);
                 keyStore.load(new FileInputStream(keyStoreFile), keyStorePassword.toCharArray());
                 KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(
                         tlsConfig.keyManagerAlgorithm());
@@ -196,12 +201,13 @@ final class TlsNukleus implements Nukleus
 
             String trustStorePassword = getProperty(PROPERTY_TLS_TRUSTSTORE_PASSWORD, DEFAULT_TLS_TRUSTSTORE_PASSWORD);
             String trustStoreFilename = System.getProperty(PROPERTY_TLS_TRUSTSTORE, DEFAULT_TLS_TRUSTSTORE);
+            String trustStoreType = System.getProperty(PROPERTY_TLS_TRUSTSTORE_TYPE, DEFAULT_TLS_TRUSTSTORE_TYPE);
             File trustStoreFile = resolve(directory, store, trustStoreFilename);
 
             TrustManager[] trustManagers = null;
             if (trustStoreFile.exists())
             {
-                KeyStore trustStore = KeyStore.getInstance("JKS");
+                KeyStore trustStore = KeyStore.getInstance(trustStoreType);
                 trustStore.load(new FileInputStream(trustStoreFile), trustStorePassword.toCharArray());
                 // TODO: TLS Alert Record, code 112 / scope trustStore to match routes?
                 TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
