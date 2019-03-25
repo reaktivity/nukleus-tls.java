@@ -495,6 +495,7 @@ public final class ServerStreamFactory implements StreamFactory
                     doNetworkReset(supplyTrace.getAsLong());
                     doAbort(applicationInitial, applicationRouteId, applicationInitialId, authorization);
                     networkSlotOffset = 0;
+                    applicationSlotOffset = 0;
                 }
                 else
                 {
@@ -569,7 +570,8 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            release();
+            releaseSlots();
+
             if (!tlsEngine.isInboundDone())
             {
                 // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
@@ -594,7 +596,8 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleAbort(
             AbortFW abort)
         {
-            release();
+            releaseSlots();
+
             if (!tlsEngine.isInboundDone())
             {
                 doAbort(applicationInitial, applicationRouteId, applicationInitialId, abort.trace(), authorization);
@@ -891,7 +894,8 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleNetworkReplyDone(
             long traceId)
         {
-            release();
+            releaseSlots();
+
             correlations.remove(applicationReplyId);
 
             if (networkReplyDoneHandler != null)
@@ -924,11 +928,11 @@ public final class ServerStreamFactory implements StreamFactory
         private void doNetworkReset(
             long traceId)
         {
-            release();
+            releaseSlots();
             doReset(networkReply, networkRouteId, networkId, traceId);
         }
 
-        private void release()
+        private void releaseSlots()
         {
             if (networkSlot != NO_SLOT)
             {
@@ -1098,7 +1102,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            release();
+            releaseSlot();
             pendingFutures.forEach(f -> f.cancel(true));
             tlsEngine.closeOutbound();
             doAbort(networkReply, networkRouteId, networkReplyId, end.trace(), 0L);
@@ -1107,7 +1111,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleAbort(
             AbortFW abort)
         {
-            release();
+            releaseSlot();
             pendingFutures.forEach(f -> f.cancel(true));
             tlsEngine.closeOutbound();
             doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
@@ -1146,6 +1150,7 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     doNetworkReset(supplyTrace.getAsLong());
                     doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+                    networkSlotOffset = 0;
                     break loop;
                 }
 
@@ -1245,7 +1250,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleReset(
             ResetFW reset)
         {
-            release();
+            releaseSlot();
             try
             {
                 doCloseInbound(tlsEngine);
@@ -1263,7 +1268,7 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleResetAfterHandshake(
             ResetFW reset)
         {
-            release();
+            releaseSlot();
             networkReplyDoneHandler.accept(0);
         }
 
@@ -1318,11 +1323,11 @@ public final class ServerStreamFactory implements StreamFactory
         private void doNetworkReset(
             long traceId)
         {
-            release();
+            releaseSlot();
             doReset(networkThrottle, networkRouteId, networkId, traceId);
         }
 
-        private void release()
+        private void releaseSlot()
         {
             if (networkSlot != NO_SLOT)
             {

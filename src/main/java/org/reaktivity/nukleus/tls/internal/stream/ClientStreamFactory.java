@@ -847,6 +847,8 @@ public final class ClientStreamFactory implements StreamFactory
                     doNetworkReplyReset(supplyTrace.getAsLong());
                     doCloseOutbound(tlsEngine, networkTarget, networkRouteId, networkInitialId, networkReplyTraceId,
                             networkPaddingSupplier.getAsInt(), networkAuthorization, networkReplyDoneHandler);
+                    doReset(applicationReply, applicationRouteId, applicationInitialId);
+                    networkReplySlotOffset = 0;
                 }
                 else
                 {
@@ -1438,23 +1440,26 @@ public final class ClientStreamFactory implements StreamFactory
 
         private void handleFinished()
         {
-            String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
-            if ((tlsApplicationProtocol.equals("") && defaultRoute)
-                    || Objects.equals(tlsApplicationProtocol, applicationProtocol))
+            if (doBeginApplicationReply != null)
             {
-                // no ALPN negotiation && default route OR
-                // negotiated protocol from ALPN matches with our route
-                final long newApplicationReplyId = supplyReplyId.applyAsLong(handshake.applicationInitialId);
-                this.applicationReply = this.doBeginApplicationReply.apply(this::handleThrottle, newApplicationReplyId);
-                this.applicationReplyId = newApplicationReplyId;
+                String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
+                if ((tlsApplicationProtocol.equals("") && defaultRoute)
+                        || Objects.equals(tlsApplicationProtocol, applicationProtocol))
+                {
+                    // no ALPN negotiation && default route OR
+                    // negotiated protocol from ALPN matches with our route
+                    final long newApplicationReplyId = supplyReplyId.applyAsLong(handshake.applicationInitialId);
+                    this.applicationReply = this.doBeginApplicationReply.apply(this::handleThrottle, newApplicationReplyId);
+                    this.applicationReplyId = newApplicationReplyId;
 
-                this.streamState = this::afterHandshake;
-                this.handshake = null;
-                this.doBeginApplicationReply = null;
-            }
-            else
-            {
-                doNetworkReplyReset(supplyTrace.getAsLong());
+                    this.streamState = this::afterHandshake;
+                    this.handshake = null;
+                    this.doBeginApplicationReply = null;
+                }
+                else
+                {
+                    doNetworkReplyReset(supplyTrace.getAsLong());
+                }
             }
         }
 
