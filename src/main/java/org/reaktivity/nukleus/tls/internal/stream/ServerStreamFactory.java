@@ -466,7 +466,6 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 doNetworkReset(supplyTrace.getAsLong());
                 doAbort(applicationInitial, applicationRouteId, applicationInitialId, authorization);
-                networkSlotOffset = 0;
             }
             finally
             {
@@ -752,8 +751,16 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
-                doNetworkReset(supplyTrace.getAsLong());
-                doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+                // TODO: simplify slot storage references
+                final int networkSlot = this.networkSlot;
+                this.networkSlot = handshake.networkSlot;
+
+                // close without triggering transport RESET or ABORT
+                doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId,
+                        supplyTrace.getAsLong(), 0, authorization, networkReplyDoneHandler);
+
+                handshake.networkSlot = this.networkSlot;
+                this.networkSlot = networkSlot;
             }
         }
 
@@ -1084,7 +1091,6 @@ public final class ServerStreamFactory implements StreamFactory
                 }
                 catch (SSLException | UnsupportedOperationException ex)
                 {
-                    networkSlotOffset = 0;
                     doNetworkReset(supplyTrace.getAsLong());
                     doAbort(networkReply, networkRouteId, networkReplyId, networkTraceId, 0L);
                 }
@@ -1104,8 +1110,12 @@ public final class ServerStreamFactory implements StreamFactory
         {
             releaseSlot();
             pendingFutures.forEach(f -> f.cancel(true));
-            tlsEngine.closeOutbound();
-            doAbort(networkReply, networkRouteId, networkReplyId, end.trace(), 0L);
+
+            if (!tlsEngine.isOutboundDone())
+            {
+                tlsEngine.closeOutbound();
+                doAbort(networkReply, networkRouteId, networkReplyId, end.trace(), 0L);
+            }
         }
 
         private void handleAbort(
@@ -1113,8 +1123,12 @@ public final class ServerStreamFactory implements StreamFactory
         {
             releaseSlot();
             pendingFutures.forEach(f -> f.cancel(true));
-            tlsEngine.closeOutbound();
-            doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
+
+            if (!tlsEngine.isOutboundDone())
+            {
+                tlsEngine.closeOutbound();
+                doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
+            }
         }
 
         private void handleSignal(
@@ -1150,7 +1164,6 @@ public final class ServerStreamFactory implements StreamFactory
                 {
                     doNetworkReset(supplyTrace.getAsLong());
                     doAbort(networkReply, networkRouteId, networkReplyId, 0L);
-                    networkSlotOffset = 0;
                     break loop;
                 }
 
@@ -1291,7 +1304,6 @@ public final class ServerStreamFactory implements StreamFactory
                     }
                     catch (SSLException | UnsupportedOperationException ex)
                     {
-                        networkSlotOffset = 0;
                         doNetworkReset(supplyTrace.getAsLong());
                         doAbort(networkReply, networkRouteId, networkReplyId, 0L);
                     }
