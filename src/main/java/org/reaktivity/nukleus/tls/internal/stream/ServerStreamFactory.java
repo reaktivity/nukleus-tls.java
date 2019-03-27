@@ -751,13 +751,15 @@ public final class ServerStreamFactory implements StreamFactory
             }
             else
             {
+                // close without triggering transport RESET or ABORT
+                doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId,
+                        supplyTrace.getAsLong(), 0, authorization, networkReplyDoneHandler);
+
                 // TODO: simplify slot storage references
                 final int networkSlot = this.networkSlot;
                 this.networkSlot = handshake.networkSlot;
 
-                // close without triggering transport RESET or ABORT
-                doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId,
-                        supplyTrace.getAsLong(), 0, authorization, networkReplyDoneHandler);
+                releaseSlots();
 
                 handshake.networkSlot = this.networkSlot;
                 this.networkSlot = networkSlot;
