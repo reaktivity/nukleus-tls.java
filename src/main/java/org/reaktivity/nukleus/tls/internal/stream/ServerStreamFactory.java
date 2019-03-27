@@ -756,13 +756,13 @@ public final class ServerStreamFactory implements StreamFactory
                         supplyTrace.getAsLong(), 0, authorization, networkReplyDoneHandler);
 
                 // TODO: simplify slot storage references
-                final int networkSlot = this.networkSlot;
                 this.networkSlot = handshake.networkSlot;
+                this.networkSlotOffset = handshake.networkSlotOffset;
 
                 releaseSlots();
 
                 handshake.networkSlot = this.networkSlot;
-                this.networkSlot = networkSlot;
+                handshake.networkSlotOffset = this.networkSlotOffset;
             }
         }
 
