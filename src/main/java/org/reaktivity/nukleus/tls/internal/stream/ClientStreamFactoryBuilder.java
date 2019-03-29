@@ -46,7 +46,6 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     private MutableDirectBuffer writeBuffer;
     private LongUnaryOperator supplyInitialId;
     private LongUnaryOperator supplyReplyId;
-    private LongSupplier supplyCorrelationId;
     private LongSupplier supplyTrace;
     private Supplier<BufferPool> supplyBufferPool;
     private Function<String, LongSupplier> supplyCounter;
@@ -124,14 +123,6 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public ClientStreamFactoryBuilder setTargetCorrelationIdSupplier(
-        LongSupplier supplyCorrelationId)
-    {
-        this.supplyCorrelationId = supplyCorrelationId;
-        return this;
-    }
-
-    @Override
     public StreamFactoryBuilder setBufferPoolSupplier(
         Supplier<BufferPool> supplyBufferPool)
     {
@@ -169,7 +160,6 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
             bufferPool,
             supplyInitialId,
             supplyReplyId,
-            supplyCorrelationId,
             correlations,
             supplyTrace,
             lookupContext,

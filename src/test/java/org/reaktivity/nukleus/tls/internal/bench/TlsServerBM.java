@@ -112,9 +112,8 @@ public class TlsServerBM
         this.routeId = controller.routeServer("tls#0", "target#0", null, null, null).get();
 
         final long sourceId = random.nextLong();
-        final long correlationId = random.nextLong();
 
-        source.reinit(routeId, sourceId, correlationId);
+        source.reinit(routeId, sourceId);
         target.reinit();
 
         source.doBegin();
@@ -175,8 +174,7 @@ public class TlsServerBM
 
         private void reinit(
             long sourceRef,
-            long sourceId,
-            long correlationId)
+            long sourceId)
         {
             final MutableDirectBuffer writeBuffer = new UnsafeBuffer(new byte[256]);
 
@@ -184,7 +182,6 @@ public class TlsServerBM
             this.begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                     .routeId(routeId)
                     .streamId(sourceId)
-                    .correlationId(correlationId)
                     .extension(e -> e.set(visitTlsBeginEx("example.com")))
                     .build();
 

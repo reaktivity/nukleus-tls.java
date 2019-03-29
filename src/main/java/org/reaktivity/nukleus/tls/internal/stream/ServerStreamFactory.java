@@ -247,7 +247,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         private final MessageConsumer networkReply;
         private final long networkRouteId;
-        private final long networkId;
+        private final long networkInitialId;
         private final long authorization;
 
         private long networkReplyId;
@@ -272,8 +272,6 @@ public final class ServerStreamFactory implements StreamFactory
         private int applicationPadding;
         private long applicationReplyId;
 
-        private long networkCorrelationId;
-
         private LongConsumer networkReplyDoneHandler = NOP;
         private long networkTraceId;
 
@@ -288,13 +286,13 @@ public final class ServerStreamFactory implements StreamFactory
             SSLEngine tlsEngine,
             MessageConsumer networkReply,
             long networkRouteId,
-            long networkId,
+            long networkInitialId,
             long authorization)
         {
             this.tlsEngine = tlsEngine;
             this.networkReply = networkReply;
             this.networkRouteId = networkRouteId;
-            this.networkId = networkId;
+            this.networkInitialId = networkInitialId;
             this.authorization = authorization;
             this.streamState = this::beforeBegin;
         }
@@ -330,21 +328,19 @@ public final class ServerStreamFactory implements StreamFactory
         {
             try
             {
-                this.networkCorrelationId = begin.correlationId();
+                final long newNetworkReplyId = supplyReplyId.applyAsLong(networkInitialId);
 
-                final long newNetworkReplyId = supplyReplyId.applyAsLong(networkId);
-
-                final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkReply, networkRouteId, networkId,
-                        networkReply, newNetworkReplyId,
+                final ServerHandshake newHandshake = new ServerHandshake(tlsEngine, networkReply, networkRouteId,
+                        networkInitialId, networkReply, newNetworkReplyId,
                         this::handleStatus,
                         this::handleNetworkReplyDone, this::setNetworkReplyDoneHandler,
                         this::getNetworkBudget, this::getNetworkPadding,
                         this::setNetworkBudget);
 
                 networkBudget += handshakeBudget;
-                doWindow(networkReply, networkRouteId, networkId, networkBudget, networkPadding);
+                doWindow(networkReply, networkRouteId, networkInitialId, networkBudget, networkPadding);
 
-                doBegin(networkReply, networkRouteId, newNetworkReplyId, 0L, networkCorrelationId);
+                doBegin(networkReply, networkRouteId, newNetworkReplyId, 0L);
                 router.setThrottle(newNetworkReplyId, newHandshake::handleThrottle);
 
                 this.streamState = newHandshake::afterBegin;
@@ -438,7 +434,7 @@ public final class ServerStreamFactory implements StreamFactory
 
             if (networkSlot == NO_SLOT)
             {
-                networkSlot = networkPool.acquire(networkId);
+                networkSlot = networkPool.acquire(networkInitialId);
             }
 
             try
@@ -535,7 +531,7 @@ public final class ServerStreamFactory implements StreamFactory
                                 if (networkCredit > 0)
                                 {
                                     networkBudget += networkCredit;
-                                    doWindow(networkReply, networkRouteId, networkId, networkCredit, networkPadding);
+                                    doWindow(networkReply, networkRouteId, networkInitialId, networkCredit, networkPadding);
                                 }
                             }
                             break loop;
@@ -639,7 +635,8 @@ public final class ServerStreamFactory implements StreamFactory
                         if (handshake != null)
                         {
                             handshake.pendingTasks++;
-                            Future<?> future = executor.execute(runnable, networkRouteId, networkId, FLUSH_HANDSHAKE_SIGNAL);
+                            final Future<?> future =
+                                    executor.execute(runnable, networkRouteId, networkInitialId, FLUSH_HANDSHAKE_SIGNAL);
                             handshake.pendingFutures.add(future);
                         }
                         else
@@ -730,7 +727,7 @@ public final class ServerStreamFactory implements StreamFactory
                 correlations.put(newApplicationReplyId, handshake);
 
                 doTlsBegin(applicationInitial, applicationRouteId, applicationInitialId, networkTraceId, authorization,
-                        newApplicationReplyId, tlsHostname, tlsApplicationProtocol);
+                        tlsHostname, tlsApplicationProtocol);
                 router.setThrottle(applicationInitialId, this::handleThrottle);
 
                 handshake.onFinished();
@@ -873,7 +870,7 @@ public final class ServerStreamFactory implements StreamFactory
             if (networkCredit > 0)
             {
                 networkBudget += networkCredit;
-                doWindow(networkReply, networkRouteId, networkId, window.trace(), networkCredit, networkPadding);
+                doWindow(networkReply, networkRouteId, networkInitialId, window.trace(), networkCredit, networkPadding);
             }
         }
 
@@ -938,7 +935,7 @@ public final class ServerStreamFactory implements StreamFactory
             long traceId)
         {
             releaseSlots();
-            doReset(networkReply, networkRouteId, networkId, traceId);
+            doReset(networkReply, networkRouteId, networkInitialId, traceId);
         }
 
         private void releaseSlots()
@@ -1448,9 +1445,9 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleBegin(
             BeginFW begin)
         {
-            final long correlationId = begin.correlationId();
+            final long replyId = begin.streamId();
 
-            final ServerHandshake handshake = correlations.remove(correlationId);
+            final ServerHandshake handshake = correlations.remove(replyId);
             if (handshake != null)
             {
                 this.streamState = this::afterBegin;
@@ -1646,7 +1643,6 @@ public final class ServerStreamFactory implements StreamFactory
         long streamId,
         long traceId,
         long authorization,
-        long correlationId,
         String hostname,
         String applicationProtocol)
     {
@@ -1655,7 +1651,6 @@ public final class ServerStreamFactory implements StreamFactory
                 .streamId(streamId)
                 .trace(traceId)
                 .authorization(authorization)
-                .correlationId(correlationId)
                 .extension(e -> e.set(visitTlsBeginEx(hostname, applicationProtocol)))
                 .build();
 
@@ -1678,14 +1673,12 @@ public final class ServerStreamFactory implements StreamFactory
         final MessageConsumer receiver,
         final long routeId,
         final long streamId,
-        final long authorization,
-        final long correlationId)
+        final long authorization)
     {
         final BeginFW begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .routeId(routeId)
                 .streamId(streamId)
                 .authorization(authorization)
-                .correlationId(correlationId)
                 .build();
 
         receiver.accept(begin.typeId(), begin.buffer(), begin.offset(), begin.sizeof());
