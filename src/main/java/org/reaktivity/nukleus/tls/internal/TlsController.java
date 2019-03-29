@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2018 The Reaktivity Project
+ * Copyright 2016-2019 The Reaktivity Project
  *
  * The Reaktivity Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -17,6 +17,8 @@ package org.reaktivity.nukleus.tls.internal;
 
 import static java.nio.ByteBuffer.allocateDirect;
 import static java.nio.ByteOrder.nativeOrder;
+import static org.reaktivity.nukleus.route.RouteKind.CLIENT;
+import static org.reaktivity.nukleus.route.RouteKind.SERVER;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -24,12 +26,19 @@ import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.reaktivity.nukleus.Controller;
 import org.reaktivity.nukleus.ControllerSpi;
+import org.reaktivity.nukleus.route.RouteKind;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
+import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.control.FreezeFW;
 import org.reaktivity.nukleus.tls.internal.types.control.Role;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 public final class TlsController implements Controller
 {
@@ -42,14 +51,20 @@ public final class TlsController implements Controller
 
     private final TlsRouteExFW.Builder routeExRW = new TlsRouteExFW.Builder();
 
+    private final OctetsFW extensionRO = new OctetsFW().wrap(new UnsafeBuffer(new byte[0]), 0, 0);
+
     private final ControllerSpi controllerSpi;
-    private final MutableDirectBuffer writeBuffer;
+    private final MutableDirectBuffer commandBuffer;
+    private final MutableDirectBuffer extensionBuffer;
+    private final Gson gson;
 
     public TlsController(
         ControllerSpi controllerSpi)
     {
         this.controllerSpi = controllerSpi;
-        this.writeBuffer = new UnsafeBuffer(allocateDirect(MAX_SEND_LENGTH).order(nativeOrder()));
+        this.commandBuffer = new UnsafeBuffer(allocateDirect(MAX_SEND_LENGTH).order(nativeOrder()));
+        this.extensionBuffer = new UnsafeBuffer(allocateDirect(MAX_SEND_LENGTH).order(nativeOrder()));
+        this.gson = new Gson();
     }
 
     @Override
@@ -73,49 +88,93 @@ public final class TlsController implements Controller
     @Override
     public String name()
     {
-        return "tls";
+        return TlsNukleus.NAME;
     }
 
+    @Deprecated
+    public CompletableFuture<Long> routeServer(
+        String localAddress,
+        String remoteAddress)
+    {
+        return route(SERVER, localAddress, remoteAddress);
+    }
+
+    @Deprecated
     public CompletableFuture<Long> routeServer(
         String localAddress,
         String remoteAddress,
         String store,
         String hostname,
-        String applicationProtocol)
+        String protocol)
     {
-        long correlationId = controllerSpi.nextCorrelationId();
+        final JsonObject extension = new JsonObject();
+        extension.addProperty("store", store);
+        extension.addProperty("hostname", hostname);
+        extension.addProperty("protocol", protocol);
 
-        RouteFW route = routeRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-                .correlationId(correlationId)
-                .nukleus(name())
-                .role(b -> b.set(Role.SERVER))
-                .localAddress(localAddress)
-                .remoteAddress(remoteAddress)
-                .extension(b -> b.set(visitRouteEx(store, hostname, applicationProtocol)))
-                .build();
-
-        return controllerSpi.doRoute(route.typeId(), route.buffer(), route.offset(), route.sizeof());
+        return route(SERVER, localAddress, remoteAddress, gson.toJson(extension));
     }
 
+    @Deprecated
+    public CompletableFuture<Long> routeClient(
+        String localAddress,
+        String remoteAddress)
+    {
+        return route(CLIENT, localAddress, remoteAddress);
+    }
+
+    @Deprecated
     public CompletableFuture<Long> routeClient(
         String localAddress,
         String remoteAddress,
         String store,
         String hostname,
-        String applicationProtocol)
+        String protocol)
     {
-        long correlationId = controllerSpi.nextCorrelationId();
+        final JsonObject extension = new JsonObject();
+        extension.addProperty("store", store);
+        extension.addProperty("hostname", hostname);
+        extension.addProperty("protocol", protocol);
 
-        RouteFW route = routeRW.wrap(writeBuffer, 0, writeBuffer.capacity())
-                .correlationId(correlationId)
-                .nukleus(name())
-                .role(b -> b.set(Role.CLIENT))
-                .localAddress(localAddress)
-                .remoteAddress(remoteAddress)
-                .extension(b -> b.set(visitRouteEx(store, hostname, applicationProtocol)))
-                .build();
+        return route(CLIENT, localAddress, remoteAddress, gson.toJson(extension));
+    }
 
-        return controllerSpi.doRoute(route.typeId(), route.buffer(), route.offset(), route.sizeof());
+    public CompletableFuture<Long> route(
+        RouteKind kind,
+        String localAddress,
+        String remoteAddress)
+    {
+        return route(kind, localAddress, remoteAddress, null);
+    }
+
+    public CompletableFuture<Long> route(
+        RouteKind kind,
+        String localAddress,
+        String remoteAddress,
+        String extension)
+    {
+        Flyweight routeEx = extensionRO;
+
+        if (extension != null)
+        {
+            final JsonParser parser = new JsonParser();
+            final JsonElement element = parser.parse(extension);
+            if (element.isJsonObject())
+            {
+                final JsonObject object = (JsonObject) element;
+                final String store = gson.fromJson(object.get("store"), String.class);
+                final String hostname = gson.fromJson(object.get("hostname"), String.class);
+                final String protocol = gson.fromJson(object.get("protocol"), String.class);
+
+                routeEx = routeExRW.wrap(extensionBuffer, 0, extensionBuffer.capacity())
+                        .store(store)
+                        .hostname(hostname)
+                        .applicationProtocol(protocol)
+                        .build();
+            }
+        }
+
+        return doRoute(kind, localAddress, remoteAddress, routeEx);
     }
 
     public CompletableFuture<Void> unroute(
@@ -123,7 +182,7 @@ public final class TlsController implements Controller
     {
         long correlationId = controllerSpi.nextCorrelationId();
 
-        UnrouteFW unroute = unrouteRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+        UnrouteFW unroute = unrouteRW.wrap(commandBuffer, 0, commandBuffer.capacity())
                                      .correlationId(correlationId)
                                      .nukleus(name())
                                      .routeId(routeId)
@@ -136,7 +195,7 @@ public final class TlsController implements Controller
     {
         long correlationId = controllerSpi.nextCorrelationId();
 
-        FreezeFW freeze = freezeRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+        FreezeFW freeze = freezeRW.wrap(commandBuffer, 0, commandBuffer.capacity())
                                   .correlationId(correlationId)
                                   .nukleus(name())
                                   .build();
@@ -144,17 +203,24 @@ public final class TlsController implements Controller
         return controllerSpi.doFreeze(freeze.typeId(), freeze.buffer(), freeze.offset(), freeze.sizeof());
     }
 
-    private Flyweight.Builder.Visitor visitRouteEx(
-        String store,
-        String hostname,
-        String applicationProtocol)
+    private CompletableFuture<Long> doRoute(
+        RouteKind kind,
+        String localAddress,
+        String remoteAddress,
+        Flyweight extension)
     {
-        return (buffer, offset, limit) ->
-            routeExRW.wrap(buffer, offset, limit)
-                     .store(store)
-                     .hostname(hostname)
-                     .applicationProtocol(applicationProtocol)
-                     .build()
-                     .sizeof();
+        final long correlationId = controllerSpi.nextCorrelationId();
+        final Role role = Role.valueOf(kind.ordinal());
+
+        final RouteFW route = routeRW.wrap(commandBuffer, 0, commandBuffer.capacity())
+                .correlationId(correlationId)
+                .nukleus(name())
+                .role(b -> b.set(role))
+                .localAddress(localAddress)
+                .remoteAddress(remoteAddress)
+                .extension(extension.buffer(), extension.offset(), extension.sizeof())
+                .build();
+
+        return controllerSpi.doRoute(route.typeId(), route.buffer(), route.offset(), route.sizeof());
     }
 }

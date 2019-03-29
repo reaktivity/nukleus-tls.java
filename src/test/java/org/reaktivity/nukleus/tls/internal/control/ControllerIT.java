@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2018 The Reaktivity Project
+ * Copyright 2016-2019 The Reaktivity Project
  *
  * The Reaktivity Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -17,6 +17,8 @@ package org.reaktivity.nukleus.tls.internal.control;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
+import static org.reaktivity.nukleus.route.RouteKind.CLIENT;
+import static org.reaktivity.nukleus.route.RouteKind.SERVER;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -28,6 +30,9 @@ import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.nukleus.tls.internal.TlsController;
 import org.reaktivity.reaktor.test.ReaktorRule;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 
 public class ControllerIT
 {
@@ -48,6 +53,8 @@ public class ControllerIT
     @Rule
     public final TestRule chain = outerRule(k3po).around(timeout).around(reaktor);
 
+    private final Gson gson = new Gson();
+
     @Test
     @Specification({
         "${route}/server/nukleus"
@@ -56,9 +63,13 @@ public class ControllerIT
     {
         k3po.start();
 
+        final JsonObject extension = new JsonObject();
+        extension.addProperty("store", "server");
+        extension.addProperty("hostname", "localhost");
+
         reaktor.controller(TlsController.class)
-                  .routeServer("tls#0", "target#0", "server", "localhost", null)
-                  .get();
+               .route(SERVER, "tls#0", "target#0", gson.toJson(extension))
+               .get();
 
         k3po.finish();
     }
@@ -71,8 +82,12 @@ public class ControllerIT
     {
         k3po.start();
 
+        final JsonObject extension = new JsonObject();
+        extension.addProperty("store", "client");
+        extension.addProperty("hostname", "localhost");
+
         reaktor.controller(TlsController.class)
-                  .routeClient("tls#0", "target#0", "client", "localhost", null)
+                  .route(CLIENT, "tls#0", "target#0", gson.toJson(extension))
                   .get();
 
         k3po.finish();
@@ -87,8 +102,12 @@ public class ControllerIT
     {
         k3po.start();
 
+        final JsonObject extension = new JsonObject();
+        extension.addProperty("store", "server");
+        extension.addProperty("hostname", "localhost");
+
         long routeId = reaktor.controller(TlsController.class)
-                  .routeServer("tls#0", "target#0", "server", "localhost", null)
+                  .route(SERVER, "tls#0", "target#0", gson.toJson(extension))
                   .get();
 
         k3po.notifyBarrier("ROUTED_SERVER");
@@ -109,8 +128,12 @@ public class ControllerIT
     {
         k3po.start();
 
+        final JsonObject extension = new JsonObject();
+        extension.addProperty("store", "client");
+        extension.addProperty("hostname", "localhost");
+
         long routeId = reaktor.controller(TlsController.class)
-                  .routeClient("tls#0", "target#0", "client", "localhost", null)
+                  .route(CLIENT, "tls#0", "target#0", gson.toJson(extension))
                   .get();
 
         k3po.notifyBarrier("ROUTED_CLIENT");
