@@ -703,8 +703,8 @@ public final class ServerStreamFactory implements StreamFactory
                 if (certs.length > 1)
                 {
                     Certificate caCert = certs[1];      // CA cert that signed
-                    String ca = ((X509Certificate) caCert).getSubjectX500Principal().getName();
-                    return storeInfo.authorization.get(ca);
+                    String dname = ((X509Certificate) caCert).getSubjectX500Principal().getName();
+                    return storeInfo.authorization(dname);
                 }
             }
             catch (SSLPeerUnverifiedException e)

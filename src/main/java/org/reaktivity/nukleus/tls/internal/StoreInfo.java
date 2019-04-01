@@ -16,26 +16,65 @@
 package org.reaktivity.nukleus.tls.internal;
 
 import javax.net.ssl.SSLContext;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 public class StoreInfo
 {
+    private static final long MAX_AUTHORIZATION = 1L << 56;
     private final String store;
     public final SSLContext context;
-    public final Map<String, Long> authorization;       // dn -> authorization (1st byte store index + 7 bytes for dn index)
-    int routeCount;
+    private final Map<String, Long> authorizationMap;   // dn -> authorization (1st byte store index + 7 bytes for dn index)
+    private final Set<String> caDnames;
     public final boolean supportsClientAuth;
+    private final int storeIndex;
+
+    int routeCount;
+    private long authorization = 1L;
 
     StoreInfo(
         String store,
+        int storeIndex,
         SSLContext context,
         boolean supportsClientAuth,
-        Map<String, Long> authorization)
+        Set<String> caDnames)
     {
         this.store = store;
+        this.storeIndex = storeIndex;
         this.context = context;
-        this.authorization = authorization;
+        this.caDnames = caDnames;
+        this.authorizationMap = new LinkedHashMap<>();
         this.supportsClientAuth = supportsClientAuth;
+    }
+
+    public long authorization(String dname)
+    {
+        Long auth = null;
+
+        if (caDnames.contains(dname))
+        {
+            auth = authorizationMap.computeIfAbsent(dname, dn ->
+            {
+                //  0           7                                63
+                // +-------------+---------------------------------+
+                // | store index |          ca bit                 |
+                // +-------------+---------------------------------+
+
+                if (authorization < MAX_AUTHORIZATION)
+                {
+                    long routeAuthorization = ((long) storeIndex << 56) | authorization;
+                    authorization *= 2;
+                    return routeAuthorization;
+                }
+                else
+                {
+                    // more than 56 ca certs, cannot fit in 7 bytes
+                    return null;
+                }
+            });
+        }
+        return auth == null ? 0L : auth;
     }
 
     @Override

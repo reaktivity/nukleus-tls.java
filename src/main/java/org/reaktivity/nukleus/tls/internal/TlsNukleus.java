@@ -29,8 +29,9 @@ import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
@@ -178,7 +179,7 @@ final class TlsNukleus implements Nukleus
     {
         Path directory = config.directory();
         SSLContext context = null;
-        Map<String, Long> caMap = new LinkedHashMap<>();
+        Set<String> caDnames = new LinkedHashSet<>();
         boolean trustStoreExists = false;
 
         try
@@ -215,7 +216,6 @@ final class TlsNukleus implements Nukleus
                         TrustManagerFactory.getDefaultAlgorithm());
                 trustManagerFactory.init(trustStore);
                 trustManagers = trustManagerFactory.getTrustManagers();
-                long authorization = 1;
 
                 if (++storeIndex > 255)
                 {
@@ -227,21 +227,9 @@ final class TlsNukleus implements Nukleus
                 {
                     if (trustStore.isCertificateEntry(alias))
                     {
-                        if (caMap.size() >= 56)
-                        {
-                            // more than 56 ca certs, cannot fit in 7 bytes
-                            return null;
-                        }
                         Certificate certificate = trustStore.getCertificate(alias);
                         String dn = ((X509Certificate) certificate).getSubjectX500Principal().getName();
-
-                        //  0           7                                63
-                        // +-------------+---------------------------------+
-                        // | store index |          ca bit                 |
-                        // +-------------+---------------------------------+
-                        long routeAuthorization = ((long)storeIndex << 56) | authorization;
-                        caMap.put(dn, routeAuthorization);
-                        authorization *= 2;
+                        caDnames.add(dn);
                     }
                 }
             }
@@ -254,7 +242,7 @@ final class TlsNukleus implements Nukleus
             LangUtil.rethrowUnchecked(ex);
         }
 
-        return new StoreInfo(store, context, trustStoreExists, caMap);
+        return new StoreInfo(store, storeIndex, context, trustStoreExists, caDnames);
     }
 
     private static File resolve(
