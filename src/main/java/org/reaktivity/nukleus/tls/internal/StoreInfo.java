@@ -41,6 +41,6 @@ public class StoreInfo
     @Override
     public String toString()
     {
-        return String.format("store=%s authorization=0x%016x", store, authorization);
+        return String.format("store=%s authorization=%s", store, authorization);
     }
 }
