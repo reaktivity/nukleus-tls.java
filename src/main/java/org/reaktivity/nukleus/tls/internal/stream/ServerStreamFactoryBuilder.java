@@ -38,7 +38,7 @@ import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactory.ServerHand
 public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final Function<String, StoreInfo> lookupContext;
+    private final Function<String, StoreInfo> lookupStoreInfo;
     private final Long2ObjectHashMap<ServerHandshake> correlations;
 
     private RouteManager router;
@@ -53,10 +53,10 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
     public ServerStreamFactoryBuilder(
         TlsConfiguration config,
-        Function<String, StoreInfo> lookupContext)
+        Function<String, StoreInfo> lookupStoreInfo)
     {
         this.config = config;
-        this.lookupContext = lookupContext;
+        this.lookupStoreInfo = lookupStoreInfo;
         this.correlations = new Long2ObjectHashMap<>();
     }
 
@@ -160,7 +160,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             supplyReplyId,
             correlations,
             supplyTrace,
-            lookupContext,
+            lookupStoreInfo,
             counters);
     }
 }

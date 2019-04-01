@@ -30,14 +30,15 @@ import org.reaktivity.nukleus.function.SignalingExecutor;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
-import org.reaktivity.nukleus.tls.internal.StoreInfo;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
+
+import javax.net.ssl.SSLContext;
 
 public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final Function<String, StoreInfo> lookupContext;
+    private final Function<String, SSLContext> lookupContext;
     private final Long2ObjectHashMap<ClientStreamFactory.ClientHandshake> correlations;
 
     private RouteManager router;
@@ -52,7 +53,7 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 
     public ClientStreamFactoryBuilder(
             TlsConfiguration config,
-            Function<String, StoreInfo> lookupContext)
+            Function<String, SSLContext> lookupContext)
     {
         this.config = config;
         this.lookupContext = lookupContext;

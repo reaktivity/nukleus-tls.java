@@ -123,21 +123,23 @@ final class TlsNukleus implements Nukleus
         int index,
         int length)
     {
+        boolean handled = false;
         switch(msgTypeId)
         {
             case RouteFW.TYPE_ID:
             {
                 final RouteFW route = routeRO.wrap(buffer, index, index + length);
-                return handleRoute(route);
+                handled = handleRoute(route);
             }
+            break;
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
-                handleUnroute(unroute);
+                handled = handleUnroute(unroute);
             }
             break;
         }
-        return true;
+        return handled;
     }
 
     private boolean handleRoute(
@@ -148,7 +150,7 @@ final class TlsNukleus implements Nukleus
         final long routeId = route.correlationId();
 
         storesByRouteId.put(routeId, store);
-        StoreInfo storeInfo = contextsByStore.computeIfAbsent(store, s -> initContext(config, store, ++storeIndex));
+        StoreInfo storeInfo = contextsByStore.computeIfAbsent(store, this::newStoreInfo);
         if (storeInfo != null)
         {
             storeInfo.routeCount++;
@@ -157,7 +159,7 @@ final class TlsNukleus implements Nukleus
         return storeInfo != null;
     }
 
-    private void handleUnroute(
+    private boolean handleUnroute(
         final UnrouteFW unroute)
     {
         final long routeId = unroute.routeId();
@@ -168,14 +170,13 @@ final class TlsNukleus implements Nukleus
         {
             contextsByStore.remove(store);
         }
+        return true;
     }
 
-    private static StoreInfo initContext(
-        TlsConfiguration tlsConfig,
-        String store,
-        int storeIndex)
+    private StoreInfo newStoreInfo(
+        String store)
     {
-        Path directory = tlsConfig.directory();
+        Path directory = config.directory();
         SSLContext context = null;
         Map<String, Long> caMap = new LinkedHashMap<>();
         boolean trustStoreExists = false;
@@ -193,7 +194,7 @@ final class TlsNukleus implements Nukleus
                 KeyStore keyStore = KeyStore.getInstance(keyStoreType);
                 keyStore.load(new FileInputStream(keyStoreFile), keyStorePassword.toCharArray());
                 KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(
-                        tlsConfig.keyManagerAlgorithm());
+                        config.keyManagerAlgorithm());
                 keyManagerFactory.init(keyStore, keyStorePassword.toCharArray());
                 keyManagers = keyManagerFactory.getKeyManagers();
             }
@@ -215,6 +216,12 @@ final class TlsNukleus implements Nukleus
                 trustManagerFactory.init(trustStore);
                 trustManagers = trustManagerFactory.getTrustManagers();
                 long authorization = 1;
+
+                if (++storeIndex > 255)
+                {
+                    // cannot fit in 1 byte
+                    return null;
+                }
 
                 for(String alias : Collections.list(trustStore.aliases()))
                 {

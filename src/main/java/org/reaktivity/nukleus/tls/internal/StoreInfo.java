@@ -24,14 +24,18 @@ public class StoreInfo
     public final SSLContext context;
     public final Map<String, Long> authorization;       // dn -> authorization (1st byte store index + 7 bytes for dn index)
     int routeCount;
-    public final boolean trustStoreExists;
+    public final boolean supportsClientAuth;
 
-    StoreInfo(String store, SSLContext context, boolean trustStoreExists, Map<String, Long> authorization)
+    StoreInfo(
+        String store,
+        SSLContext context,
+        boolean supportsClientAuth,
+        Map<String, Long> authorization)
     {
         this.store = store;
         this.context = context;
         this.authorization = authorization;
-        this.trustStoreExists = trustStoreExists;
+        this.supportsClientAuth = supportsClientAuth;
     }
 
     @Override
