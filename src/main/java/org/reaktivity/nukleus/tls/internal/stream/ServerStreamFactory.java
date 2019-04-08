@@ -1088,7 +1088,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                     doWindow(networkThrottle, networkRouteId, networkId, data.length(), networkPaddingSupplier.getAsInt());
                 }
-                catch (SSLException | UnsupportedOperationException ex)
+                catch (SSLException | UnsupportedOperationException | IllegalStateException ex)
                 {
                     doNetworkReset(supplyTrace.getAsLong());
                     doAbort(networkReply, networkRouteId, networkReplyId, networkTraceId, 0L);
