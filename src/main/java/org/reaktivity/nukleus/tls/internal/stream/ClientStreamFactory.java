@@ -117,6 +117,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final LongUnaryOperator supplyReplyId;
     private final LongSupplier supplyTrace;
     private final int handshakeWindowBytes;
+    private final int networkPaddingAdjust;
 
     private final Long2ObjectHashMap<ClientHandshake> correlations;
     private final ByteBuffer inAppByteBuffer;
@@ -150,6 +151,7 @@ public final class ClientStreamFactory implements StreamFactory
         this.supplyReplyId = requireNonNull(supplyReplyId);
         this.correlations = requireNonNull(correlations);
         this.handshakeWindowBytes = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
+        this.networkPaddingAdjust = (networkPool.slotCapacity() >> 14) * MAXIMUM_HEADER_SIZE;
 
         this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
@@ -548,8 +550,7 @@ public final class ClientStreamFactory implements StreamFactory
             if (applicationCredit > 0)
             {
                 applicationBudget += applicationCredit;
-                final int applicationPadding = networkPadding + MAXIMUM_HEADER_SIZE +
-                        ((applicationBudget - 1) >> 14) * MAXIMUM_HEADER_SIZE;
+                final int applicationPadding = networkPadding + networkPaddingAdjust;
                 doWindow(applicationReply, applicationRouteId, applicationInitialId,
                         traceId, applicationCredit, applicationPadding);
             }
