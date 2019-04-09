@@ -151,7 +151,7 @@ public final class ClientStreamFactory implements StreamFactory
         this.supplyReplyId = requireNonNull(supplyReplyId);
         this.correlations = requireNonNull(correlations);
         this.handshakeWindowBytes = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
-        this.networkPaddingAdjust = (networkPool.slotCapacity() >> 14) * MAXIMUM_HEADER_SIZE;
+        this.networkPaddingAdjust = Math.min(networkPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
 
         this.inAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
