@@ -114,6 +114,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final LongUnaryOperator supplyReplyId;
     private final LongSupplier supplyTrace;
     private final int handshakeBudget;
+    private final int networkReplyPaddingAdjust;
 
     private final Long2ObjectHashMap<ServerHandshake> correlations;
     private final MessageFunction<RouteFW> wrapRoute;
@@ -149,6 +150,7 @@ public final class ServerStreamFactory implements StreamFactory
         this.supplyReplyId = requireNonNull(supplyReplyId);
         this.correlations = requireNonNull(correlations);
         this.handshakeBudget = Math.min(config.handshakeWindowBytes(), networkPool.slotCapacity());
+        this.networkReplyPaddingAdjust = (networkPool.slotCapacity() >> 14) * MAXIMUM_HEADER_SIZE;
 
         this.wrapRoute = this::wrapRoute;
         this.inAppByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
@@ -1566,8 +1568,7 @@ public final class ServerStreamFactory implements StreamFactory
             if (applicationReplyCredit > 0)
             {
                 applicationReplyBudget += applicationReplyCredit;
-                final int applicationReplyPadding = networkReplyPadding + MAXIMUM_HEADER_SIZE +
-                        ((applicationReplyBudget - 1) >> 14) * MAXIMUM_HEADER_SIZE;
+                final int applicationReplyPadding = networkReplyPadding + networkReplyPaddingAdjust;
                 doWindow(applicationInitial, applicationRouteId, applicationReplyId, traceId, applicationReplyCredit,
                         applicationReplyPadding);
             }
