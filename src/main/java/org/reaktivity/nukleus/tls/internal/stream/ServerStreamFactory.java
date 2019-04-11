@@ -258,9 +258,9 @@ public final class ServerStreamFactory implements StreamFactory
         private final MessageConsumer networkReply;
         private final long networkRouteId;
         private final long networkInitialId;
-        private final long authorization;
         private final StoreInfo storeInfo;
 
+        private long authorization;
         private long networkReplyId;
 
         private int networkSlot = NO_SLOT;
@@ -758,7 +758,7 @@ public final class ServerStreamFactory implements StreamFactory
                 final long newApplicationReplyId = supplyReplyId.applyAsLong(applicationInitialId);
                 correlations.put(newApplicationReplyId, handshake);
 
-                long authorization = certificateAuthorization(tlsSession);
+                authorization = certificateAuthorization(tlsSession);
                 doTlsBegin(applicationInitial, applicationRouteId, applicationInitialId, networkTraceId, authorization,
                         tlsHostname, tlsApplicationProtocol);
                 router.setThrottle(applicationInitialId, this::handleThrottle);
@@ -783,7 +783,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 // close without triggering transport RESET or ABORT
                 doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId,
-                        supplyTrace.getAsLong(), 0, authorization, networkReplyDoneHandler);
+                        supplyTrace.getAsLong(), 0, 0L, networkReplyDoneHandler);
 
                 // TODO: simplify slot storage references
                 this.networkSlot = handshake.networkSlot;
