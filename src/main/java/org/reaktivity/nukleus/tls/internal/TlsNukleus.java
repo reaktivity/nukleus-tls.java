@@ -41,13 +41,22 @@ import javax.net.ssl.TrustManagerFactory;
 
 import org.agrona.DirectBuffer;
 import org.agrona.LangUtil;
+import org.agrona.MutableDirectBuffer;
+import org.agrona.collections.Int2ObjectHashMap;
 import org.reaktivity.nukleus.Nukleus;
+import org.reaktivity.nukleus.function.CommandHandler;
+import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.internal.CopyOnWriteHashMap;
 import org.reaktivity.nukleus.route.RouteKind;
+import org.reaktivity.nukleus.tls.internal.types.control.ErrorFW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
+import org.reaktivity.nukleus.tls.internal.types.control.auth.ResolveFW;
+import org.reaktivity.nukleus.tls.internal.types.control.auth.ResolvedFW;
+import org.reaktivity.nukleus.tls.internal.types.control.auth.UnresolveFW;
+import org.reaktivity.nukleus.tls.internal.types.control.auth.UnresolvedFW;
 
 final class TlsNukleus implements Nukleus
 {
@@ -71,11 +80,21 @@ final class TlsNukleus implements Nukleus
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
 
+    private final ResolveFW resolveRO = new ResolveFW();
+    private final ResolvedFW.Builder resolvedRW = new ResolvedFW.Builder();
+    private final UnresolveFW unresolveRO = new UnresolveFW();
+    private final UnresolvedFW.Builder unresolvedRW = new UnresolvedFW.Builder();
+    private final ErrorFW.Builder errorRW = new ErrorFW.Builder();
+
     private final TlsConfiguration config;
     private final Map<RouteKind, MessagePredicate> routeHandlers;
+    private final Int2ObjectHashMap<CommandHandler> commandHandlers;
+
     private final Map<Long, String> storesByRouteId;
 
     private final Map<String, StoreInfo> contextsByStore;
+
+    private final StoreInfo[] storeInfos;
 
     private int storeIndex;
 
@@ -86,11 +105,16 @@ final class TlsNukleus implements Nukleus
 
         this.storesByRouteId = new HashMap<>();
         this.contextsByStore = new CopyOnWriteHashMap<>();
+        this.storeInfos = new StoreInfo[256];
 
         Map<RouteKind, MessagePredicate> routeHandlers = new EnumMap<>(RouteKind.class);
         routeHandlers.put(SERVER, this::handleRoute);
         routeHandlers.put(CLIENT, this::handleRoute);
         this.routeHandlers = routeHandlers;
+        final Int2ObjectHashMap<CommandHandler> commandHandlers = new Int2ObjectHashMap<>();
+        commandHandlers.put(ResolveFW.TYPE_ID, this::resolve);
+        commandHandlers.put(UnresolveFW.TYPE_ID, this::unresolve);
+        this.commandHandlers = commandHandlers;
     }
 
     @Override
@@ -110,6 +134,13 @@ final class TlsNukleus implements Nukleus
         RouteKind kind)
     {
         return routeHandlers.get(kind);
+    }
+
+    @Override
+    public CommandHandler commandHandler(
+        int msgTypeId)
+    {
+        return commandHandlers.get(msgTypeId);
     }
 
     @Override
@@ -172,6 +203,78 @@ final class TlsNukleus implements Nukleus
             contextsByStore.remove(store);
         }
         return true;
+    }
+
+    private void resolve(
+        DirectBuffer buffer,
+        int index,
+        int length,
+        MessageConsumer reply,
+        MutableDirectBuffer replyBuffer)
+    {
+        ResolveFW resolve = resolveRO.wrap(buffer, index, index + length);
+        String realm = resolve.realm().asString();
+        long authorization = 0L;
+        if (realm != null)
+        {
+            int position = realm.indexOf(':');
+            String store = position == -1 ? null : realm.substring(0, position);
+            StoreInfo storeInfo = contextsByStore.get(store);
+            if (storeInfo != null)
+            {
+                String dname = realm.substring(position + 1);
+                authorization = storeInfo.authorization(dname);
+            }
+        }
+
+        if (authorization != 0L)
+        {
+            ResolvedFW resolved = resolvedRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
+                    .correlationId(resolve.correlationId())
+                    .authorization(authorization)
+                    .build();
+            reply.accept(ResolvedFW.TYPE_ID, resolved.buffer(), resolved.offset(), resolved.limit() - resolved.offset());
+        }
+        else
+        {
+            ErrorFW error = errorRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
+                    .correlationId(resolve.correlationId())
+                    .build();
+            reply.accept(ErrorFW.TYPE_ID, error.buffer(), error.offset(), error.limit() - error.offset());
+        }
+    }
+
+    private void unresolve(
+        DirectBuffer buffer,
+        int index,
+        int length,
+        MessageConsumer reply,
+        MutableDirectBuffer replyBuffer)
+    {
+        UnresolveFW unresolve = unresolveRO.wrap(buffer, index, index + length);
+        long authorization = unresolve.authorization();
+        boolean unresolved = false;
+        if (authorization != 0L)
+        {
+            int storeIndex = (int) (authorization >>> 56);
+            StoreInfo storeInfo = storeInfos[storeIndex];
+            unresolved = storeInfo.unresolve(authorization);
+
+        }
+        if (unresolved)
+        {
+            UnresolvedFW result = unresolvedRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
+                    .correlationId(unresolve.correlationId())
+                    .build();
+            reply.accept(UnresolvedFW.TYPE_ID, result.buffer(), result.offset(), result.limit() - result.offset());
+        }
+        else
+        {
+            ErrorFW error = errorRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
+                    .correlationId(unresolve.correlationId())
+                    .build();
+            reply.accept(ErrorFW.TYPE_ID, error.buffer(), error.offset(), error.limit() - error.offset());
+        }
     }
 
     private StoreInfo newStoreInfo(

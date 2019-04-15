@@ -77,6 +77,11 @@ public class StoreInfo
         return auth == null ? 0L : auth;
     }
 
+    public boolean unresolve(long authorization)
+    {
+        return authorizationMap.entrySet().removeIf(e -> (e.getValue() == authorization));
+    }
+
     @Override
     public String toString()
     {
