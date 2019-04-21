@@ -233,14 +233,14 @@ final class TlsNukleus implements Nukleus
                     .correlationId(resolve.correlationId())
                     .authorization(authorization)
                     .build();
-            reply.accept(ResolvedFW.TYPE_ID, resolved.buffer(), resolved.offset(), resolved.limit() - resolved.offset());
+            reply.accept(ResolvedFW.TYPE_ID, resolved.buffer(), resolved.offset(), resolved.sizeof());
         }
         else
         {
             ErrorFW error = errorRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
                     .correlationId(resolve.correlationId())
                     .build();
-            reply.accept(ErrorFW.TYPE_ID, error.buffer(), error.offset(), error.limit() - error.offset());
+            reply.accept(ErrorFW.TYPE_ID, error.buffer(), error.offset(), error.sizeof());
         }
     }
 
@@ -266,14 +266,14 @@ final class TlsNukleus implements Nukleus
             UnresolvedFW result = unresolvedRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
                     .correlationId(unresolve.correlationId())
                     .build();
-            reply.accept(UnresolvedFW.TYPE_ID, result.buffer(), result.offset(), result.limit() - result.offset());
+            reply.accept(UnresolvedFW.TYPE_ID, result.buffer(), result.offset(), result.sizeof());
         }
         else
         {
             ErrorFW error = errorRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
                     .correlationId(unresolve.correlationId())
                     .build();
-            reply.accept(ErrorFW.TYPE_ID, error.buffer(), error.offset(), error.limit() - error.offset());
+            reply.accept(ErrorFW.TYPE_ID, error.buffer(), error.offset(), error.sizeof());
         }
     }
 
