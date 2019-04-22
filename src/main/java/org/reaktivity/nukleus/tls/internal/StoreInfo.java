@@ -23,12 +23,12 @@ import java.util.Set;
 public class StoreInfo
 {
     private static final long MAX_AUTHORIZATION = 1L << 56;
-    private final String store;
+    public final String store;
     public final SSLContext context;
     private final Map<String, Long> authorizationMap;   // dn -> authorization (1st byte store index + 7 bytes for dn index)
     private final Set<String> caDnames;
     public final boolean supportsClientAuth;
-    private final int storeIndex;
+    public final int storeIndex;
 
     int routeCount;
     private long authorization = 1L;

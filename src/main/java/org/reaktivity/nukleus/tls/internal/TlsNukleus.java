@@ -26,12 +26,7 @@ import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
@@ -47,7 +42,6 @@ import org.reaktivity.nukleus.Nukleus;
 import org.reaktivity.nukleus.function.CommandHandler;
 import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessagePredicate;
-import org.reaktivity.nukleus.internal.CopyOnWriteHashMap;
 import org.reaktivity.nukleus.route.RouteKind;
 import org.reaktivity.nukleus.tls.internal.types.control.ErrorFW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
@@ -92,11 +86,7 @@ final class TlsNukleus implements Nukleus
 
     private final Map<Long, String> storesByRouteId;
 
-    private final Map<String, StoreInfo> contextsByStore;
-
     private final StoreInfo[] storeInfos;
-
-    private int storeIndex;
 
     TlsNukleus(
         TlsConfiguration config)
@@ -104,7 +94,6 @@ final class TlsNukleus implements Nukleus
         this.config = config;
 
         this.storesByRouteId = new HashMap<>();
-        this.contextsByStore = new CopyOnWriteHashMap<>();
         this.storeInfos = new StoreInfo[256];
 
         Map<RouteKind, MessagePredicate> routeHandlers = new EnumMap<>(RouteKind.class);
@@ -146,7 +135,7 @@ final class TlsNukleus implements Nukleus
     @Override
     public TlsElektron supplyElektron()
     {
-        return new TlsElektron(config, contextsByStore::get);
+        return new TlsElektron(config, this::findStore);
     }
 
     private boolean handleRoute(
@@ -182,7 +171,7 @@ final class TlsNukleus implements Nukleus
         final long routeId = route.correlationId();
 
         storesByRouteId.put(routeId, store);
-        StoreInfo storeInfo = contextsByStore.computeIfAbsent(store, this::newStoreInfo);
+        StoreInfo storeInfo = newStoreInfoIfNecessary(store);
         if (storeInfo != null)
         {
             storeInfo.routeCount++;
@@ -195,12 +184,16 @@ final class TlsNukleus implements Nukleus
         final UnrouteFW unroute)
     {
         final long routeId = unroute.routeId();
+
         final String store = storesByRouteId.remove(routeId);
-        StoreInfo storeInfo = contextsByStore.get(store);
-        storeInfo.routeCount--;
-        if (storeInfo.routeCount == 0)
+        StoreInfo storeInfo = findStore(store);
+        if (storeInfo != null)
         {
-            contextsByStore.remove(store);
+            storeInfo.routeCount--;
+            if (storeInfo.routeCount == 0)
+            {
+                storeInfos[storeInfo.storeIndex] = null;
+            }
         }
         return true;
     }
@@ -219,9 +212,10 @@ final class TlsNukleus implements Nukleus
         {
             int position = realm.indexOf(':');
             String store = position == -1 ? null : realm.substring(0, position);
-            StoreInfo storeInfo = contextsByStore.get(store);
+            StoreInfo storeInfo = newStoreInfoIfNecessary(store);
             if (storeInfo != null)
             {
+                storeInfo.routeCount++;
                 String dname = realm.substring(position + 1);
                 authorization = storeInfo.authorization(dname);
             }
@@ -258,8 +252,12 @@ final class TlsNukleus implements Nukleus
         {
             int storeIndex = (int) (authorization >>> 56);
             StoreInfo storeInfo = storeInfos[storeIndex];
+            storeInfo.routeCount--;
+            if (storeInfo.routeCount == 0)
+            {
+                storeInfos[storeInfo.storeIndex] = null;
+            }
             unresolved = storeInfo.unresolve(authorization);
-
         }
         if (unresolved)
         {
@@ -277,13 +275,20 @@ final class TlsNukleus implements Nukleus
         }
     }
 
-    private StoreInfo newStoreInfo(
+    private StoreInfo newStoreInfoIfNecessary(
         String store)
     {
+        StoreInfo storeInfo = findStore(store);
+        if (storeInfo != null)
+        {
+            return storeInfo;
+        }
+
         Path directory = config.directory();
         SSLContext context = null;
         Set<String> caDnames = new LinkedHashSet<>();
         boolean trustStoreExists = false;
+        int storeIndex = nextIndex(store);
 
         try
         {
@@ -320,7 +325,7 @@ final class TlsNukleus implements Nukleus
                 trustManagerFactory.init(trustStore);
                 trustManagers = trustManagerFactory.getTrustManagers();
 
-                if (++storeIndex > 255)
+                if (storeIndex == -1)
                 {
                     // cannot fit in 1 byte
                     return null;
@@ -345,7 +350,9 @@ final class TlsNukleus implements Nukleus
             LangUtil.rethrowUnchecked(ex);
         }
 
-        return new StoreInfo(store, storeIndex, context, trustStoreExists, caDnames);
+        storeInfo = new StoreInfo(store, storeIndex, context, trustStoreExists, caDnames);
+        storeInfos[storeIndex] = storeInfo;
+        return storeInfo;
     }
 
     private static File resolve(
@@ -357,4 +364,37 @@ final class TlsNukleus implements Nukleus
                 ? directory.resolve("tls").resolve(storeFilename).toFile()
                 : directory.resolve("tls").resolve("stores").resolve(store).resolve(storeFilename).toFile();
     }
+
+    private StoreInfo findStore(String store)
+    {
+        int storeIndex = Math.abs(store == null ? 1 : store.hashCode());
+        for(int i = 0; i < storeInfos.length; i++)
+        {
+            storeIndex = (storeIndex + i) % storeInfos.length;
+            StoreInfo storeInfo = storeInfos[storeIndex];
+            if (storeInfo != null && Objects.equals(storeInfo.store, store))
+            {
+                return storeInfo;
+            }
+        }
+
+        return null;
+    }
+
+    // @return -1 if there is no slot for the given store
+    private int nextIndex(String store)
+    {
+        int storeIndex = Math.abs(store == null ? 1 : store.hashCode());
+        for(int i = 0; i < storeInfos.length; i++)
+        {
+            storeIndex = (storeIndex + i) % storeInfos.length;
+            if (storeIndex != 0 && storeInfos[storeIndex] == null)
+            {
+                return storeIndex;
+            }
+        }
+
+        return -1;
+    }
+
 }

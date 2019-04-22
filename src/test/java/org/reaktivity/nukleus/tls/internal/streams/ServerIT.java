@@ -354,7 +354,7 @@ public class ServerIT
         "${server}/server.want.auth/server"})
     @ScriptProperty({
         "clientAccept \"nukleus://streams/target#0\"",
-        "authorization  0x0100000000000001L" })
+        "authorization  -2666130979403333631L" })           // "0xdb00000000000001"
     public void serverWantClientAuth() throws Exception
     {
         k3po.finish();
