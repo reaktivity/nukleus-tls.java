@@ -22,13 +22,13 @@ import java.util.EnumMap;
 import java.util.Map;
 import java.util.function.Function;
 
-import javax.net.ssl.SSLContext;
-
 import org.reaktivity.nukleus.Elektron;
 import org.reaktivity.nukleus.route.RouteKind;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.stream.ClientStreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuilder;
+
+import javax.net.ssl.SSLContext;
 
 final class TlsElektron implements Elektron
 {
@@ -36,11 +36,11 @@ final class TlsElektron implements Elektron
 
     TlsElektron(
         TlsConfiguration config,
-        Function<String, SSLContext> lookupContext)
+        Function<String, StoreInfo> lookupStoreInfo)
     {
         Map<RouteKind, StreamFactoryBuilder> streamFactoryBuilders = new EnumMap<>(RouteKind.class);
-        streamFactoryBuilders.put(SERVER, new ServerStreamFactoryBuilder(config, lookupContext));
-        streamFactoryBuilders.put(CLIENT, new ClientStreamFactoryBuilder(config, lookupContext));
+        streamFactoryBuilders.put(SERVER, new ServerStreamFactoryBuilder(config, lookupStoreInfo));
+        streamFactoryBuilders.put(CLIENT, new ClientStreamFactoryBuilder(config, lookupContext(lookupStoreInfo)));
         this.streamFactoryBuilders = streamFactoryBuilders;
     }
 
@@ -55,5 +55,14 @@ final class TlsElektron implements Elektron
     public String toString()
     {
         return String.format("%s %s", getClass().getSimpleName(), streamFactoryBuilders);
+    }
+
+    private static Function<String, SSLContext> lookupContext(Function<String, StoreInfo> lookupStoreInfo)
+    {
+        return (s) ->
+        {
+            StoreInfo storeInfo = lookupStoreInfo.apply(s);
+            return storeInfo == null ? null : storeInfo.context;
+        };
     }
 }

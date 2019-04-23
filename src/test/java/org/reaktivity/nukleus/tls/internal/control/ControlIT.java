@@ -32,6 +32,7 @@ public class ControlIT
 {
     private final K3poRule k3po = new K3poRule()
         .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
+        .addScriptRoot("resolve", "org/reaktivity/specification/nukleus/tls/control/resolve")
         .addScriptRoot("unroute", "org/reaktivity/specification/nukleus/tls/control/unroute")
         .addScriptRoot("freeze", "org/reaktivity/specification/nukleus/control/freeze");
 
@@ -61,6 +62,15 @@ public class ControlIT
         "${route}/client/controller"
     })
     public void shouldRouteClient() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+        "${resolve}/one.realm/controller"
+    })
+    public void shouldResolve() throws Exception
     {
         k3po.finish();
     }

@@ -24,9 +24,9 @@ import java.io.FileInputStream;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.SecureRandom;
-import java.util.EnumMap;
-import java.util.HashMap;
-import java.util.Map;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.util.*;
 
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
@@ -36,15 +36,21 @@ import javax.net.ssl.TrustManagerFactory;
 
 import org.agrona.DirectBuffer;
 import org.agrona.LangUtil;
-import org.agrona.collections.Long2ObjectHashMap;
-import org.agrona.collections.MutableInteger;
+import org.agrona.MutableDirectBuffer;
+import org.agrona.collections.Int2ObjectHashMap;
 import org.reaktivity.nukleus.Nukleus;
+import org.reaktivity.nukleus.function.CommandHandler;
+import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessagePredicate;
-import org.reaktivity.nukleus.internal.CopyOnWriteHashMap;
 import org.reaktivity.nukleus.route.RouteKind;
+import org.reaktivity.nukleus.tls.internal.types.control.ErrorFW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
+import org.reaktivity.nukleus.tls.internal.types.control.auth.ResolveFW;
+import org.reaktivity.nukleus.tls.internal.types.control.auth.ResolvedFW;
+import org.reaktivity.nukleus.tls.internal.types.control.auth.UnresolveFW;
+import org.reaktivity.nukleus.tls.internal.types.control.auth.UnresolvedFW;
 
 final class TlsNukleus implements Nukleus
 {
@@ -68,25 +74,36 @@ final class TlsNukleus implements Nukleus
     private final RouteFW routeRO = new RouteFW();
     private final TlsRouteExFW tlsRouteExRO = new TlsRouteExFW();
 
+    private final ResolveFW resolveRO = new ResolveFW();
+    private final ResolvedFW.Builder resolvedRW = new ResolvedFW.Builder();
+    private final UnresolveFW unresolveRO = new UnresolveFW();
+    private final UnresolvedFW.Builder unresolvedRW = new UnresolvedFW.Builder();
+    private final ErrorFW.Builder errorRW = new ErrorFW.Builder();
+
     private final TlsConfiguration config;
     private final Map<RouteKind, MessagePredicate> routeHandlers;
-    private final Map<String, MutableInteger> routesByStore;
-    private final Long2ObjectHashMap<String> storesByRouteId;
-    private final Map<String, SSLContext> contextsByStore;
+    private final Int2ObjectHashMap<CommandHandler> commandHandlers;
+
+    private final Map<Long, String> storesByRouteId;
+
+    private final StoreInfo[] storeInfos;
 
     TlsNukleus(
         TlsConfiguration config)
     {
         this.config = config;
 
-        this.routesByStore = new HashMap<>();
-        this.storesByRouteId = new Long2ObjectHashMap<>();
-        this.contextsByStore = new CopyOnWriteHashMap<>();
+        this.storesByRouteId = new HashMap<>();
+        this.storeInfos = new StoreInfo[256];
 
         Map<RouteKind, MessagePredicate> routeHandlers = new EnumMap<>(RouteKind.class);
         routeHandlers.put(SERVER, this::handleRoute);
         routeHandlers.put(CLIENT, this::handleRoute);
         this.routeHandlers = routeHandlers;
+        final Int2ObjectHashMap<CommandHandler> commandHandlers = new Int2ObjectHashMap<>();
+        commandHandlers.put(ResolveFW.TYPE_ID, this::resolve);
+        commandHandlers.put(UnresolveFW.TYPE_ID, this::unresolve);
+        this.commandHandlers = commandHandlers;
     }
 
     @Override
@@ -109,9 +126,16 @@ final class TlsNukleus implements Nukleus
     }
 
     @Override
+    public CommandHandler commandHandler(
+        int msgTypeId)
+    {
+        return commandHandlers.get(msgTypeId);
+    }
+
+    @Override
     public TlsElektron supplyElektron()
     {
-        return new TlsElektron(config, contextsByStore::get);
+        return new TlsElektron(config, this::findStore);
     }
 
     private boolean handleRoute(
@@ -120,66 +144,151 @@ final class TlsNukleus implements Nukleus
         int index,
         int length)
     {
+        boolean handled = false;
         switch(msgTypeId)
         {
             case RouteFW.TYPE_ID:
             {
                 final RouteFW route = routeRO.wrap(buffer, index, index + length);
-                handleRoute(route);
+                handled = handleRoute(route);
             }
             break;
             case UnrouteFW.TYPE_ID:
             {
                 final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
-                handleUnroute(unroute);
+                handled = handleUnroute(unroute);
             }
             break;
         }
-        return true;
+        return handled;
     }
 
-    private void handleRoute(
+    private boolean handleRoute(
         final RouteFW route)
     {
         final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
         final String store = routeEx.store().asString();
         final long routeId = route.correlationId();
 
-        if (store != null)
+        storesByRouteId.put(routeId, store);
+        StoreInfo storeInfo = newStoreInfoIfNecessary(store);
+        if (storeInfo != null)
         {
-            storesByRouteId.put(routeId, store);
+            storeInfo.routeCount++;
         }
-        MutableInteger routesCount = routesByStore.computeIfAbsent(store, s -> new MutableInteger());
-        routesCount.value++;
-        contextsByStore.computeIfAbsent(store, s -> initContext(config, store));
+
+        return storeInfo != null;
     }
 
-    private void handleUnroute(
+    private boolean handleUnroute(
         final UnrouteFW unroute)
     {
         final long routeId = unroute.routeId();
-        final String store = storesByRouteId.remove(routeId);
 
-        MutableInteger routesCount = routesByStore.computeIfPresent(store, (s, c) -> decrement(c));
-        if (routesCount != null && routesCount.value == 0)
+        final String store = storesByRouteId.remove(routeId);
+        StoreInfo storeInfo = findStore(store);
+        if (storeInfo != null)
         {
-            routesByStore.remove(store);
-            contextsByStore.remove(store);
+            storeInfo.routeCount--;
+            if (storeInfo.routeCount == 0)
+            {
+                storeInfos[storeInfo.storeIndex] = null;
+            }
+        }
+        return true;
+    }
+
+    private void resolve(
+        DirectBuffer buffer,
+        int index,
+        int length,
+        MessageConsumer reply,
+        MutableDirectBuffer replyBuffer)
+    {
+        ResolveFW resolve = resolveRO.wrap(buffer, index, index + length);
+        String realm = resolve.realm().asString();
+        long authorization = 0L;
+        if (realm != null)
+        {
+            int position = realm.indexOf(':');
+            String store = position == -1 ? null : realm.substring(0, position);
+            StoreInfo storeInfo = newStoreInfoIfNecessary(store);
+            if (storeInfo != null)
+            {
+                storeInfo.routeCount++;
+                String dname = realm.substring(position + 1);
+                authorization = storeInfo.authorization(dname);
+            }
+        }
+
+        if (authorization != 0L)
+        {
+            ResolvedFW resolved = resolvedRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
+                    .correlationId(resolve.correlationId())
+                    .authorization(authorization)
+                    .build();
+            reply.accept(ResolvedFW.TYPE_ID, resolved.buffer(), resolved.offset(), resolved.sizeof());
+        }
+        else
+        {
+            ErrorFW error = errorRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
+                    .correlationId(resolve.correlationId())
+                    .build();
+            reply.accept(ErrorFW.TYPE_ID, error.buffer(), error.offset(), error.sizeof());
         }
     }
 
-    private MutableInteger decrement(MutableInteger routesCount)
+    private void unresolve(
+        DirectBuffer buffer,
+        int index,
+        int length,
+        MessageConsumer reply,
+        MutableDirectBuffer replyBuffer)
     {
-        routesCount.value--;
-        return routesCount;
+        UnresolveFW unresolve = unresolveRO.wrap(buffer, index, index + length);
+        long authorization = unresolve.authorization();
+        boolean unresolved = false;
+        if (authorization != 0L)
+        {
+            int storeIndex = (int) (authorization >>> 56);
+            StoreInfo storeInfo = storeInfos[storeIndex];
+            storeInfo.routeCount--;
+            if (storeInfo.routeCount == 0)
+            {
+                storeInfos[storeInfo.storeIndex] = null;
+            }
+            unresolved = storeInfo.unresolve(authorization);
+        }
+        if (unresolved)
+        {
+            UnresolvedFW result = unresolvedRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
+                    .correlationId(unresolve.correlationId())
+                    .build();
+            reply.accept(UnresolvedFW.TYPE_ID, result.buffer(), result.offset(), result.sizeof());
+        }
+        else
+        {
+            ErrorFW error = errorRW.wrap(replyBuffer, 0,  replyBuffer.capacity())
+                    .correlationId(unresolve.correlationId())
+                    .build();
+            reply.accept(ErrorFW.TYPE_ID, error.buffer(), error.offset(), error.sizeof());
+        }
     }
 
-    static SSLContext initContext(
-        TlsConfiguration tlsConfig,
+    private StoreInfo newStoreInfoIfNecessary(
         String store)
     {
-        Path directory = tlsConfig.directory();
+        StoreInfo storeInfo = findStore(store);
+        if (storeInfo != null)
+        {
+            return storeInfo;
+        }
+
+        Path directory = config.directory();
         SSLContext context = null;
+        Set<String> caDnames = new LinkedHashSet<>();
+        boolean trustStoreExists = false;
+        int storeIndex = nextIndex(store);
 
         try
         {
@@ -194,7 +303,7 @@ final class TlsNukleus implements Nukleus
                 KeyStore keyStore = KeyStore.getInstance(keyStoreType);
                 keyStore.load(new FileInputStream(keyStoreFile), keyStorePassword.toCharArray());
                 KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(
-                        tlsConfig.keyManagerAlgorithm());
+                        config.keyManagerAlgorithm());
                 keyManagerFactory.init(keyStore, keyStorePassword.toCharArray());
                 keyManagers = keyManagerFactory.getKeyManagers();
             }
@@ -207,6 +316,7 @@ final class TlsNukleus implements Nukleus
             TrustManager[] trustManagers = null;
             if (trustStoreFile.exists())
             {
+                trustStoreExists = true;
                 KeyStore trustStore = KeyStore.getInstance(trustStoreType);
                 trustStore.load(new FileInputStream(trustStoreFile), trustStorePassword.toCharArray());
                 // TODO: TLS Alert Record, code 112 / scope trustStore to match routes?
@@ -214,6 +324,22 @@ final class TlsNukleus implements Nukleus
                         TrustManagerFactory.getDefaultAlgorithm());
                 trustManagerFactory.init(trustStore);
                 trustManagers = trustManagerFactory.getTrustManagers();
+
+                if (storeIndex == -1)
+                {
+                    // cannot fit in 1 byte
+                    return null;
+                }
+
+                for(String alias : Collections.list(trustStore.aliases()))
+                {
+                    if (trustStore.isCertificateEntry(alias))
+                    {
+                        Certificate certificate = trustStore.getCertificate(alias);
+                        String dn = ((X509Certificate) certificate).getSubjectX500Principal().getName();
+                        caDnames.add(dn);
+                    }
+                }
             }
 
             context = SSLContext.getInstance("TLS");
@@ -224,7 +350,9 @@ final class TlsNukleus implements Nukleus
             LangUtil.rethrowUnchecked(ex);
         }
 
-        return context;
+        storeInfo = new StoreInfo(store, storeIndex, context, trustStoreExists, caDnames);
+        storeInfos[storeIndex] = storeInfo;
+        return storeInfo;
     }
 
     private static File resolve(
@@ -236,4 +364,37 @@ final class TlsNukleus implements Nukleus
                 ? directory.resolve("tls").resolve(storeFilename).toFile()
                 : directory.resolve("tls").resolve("stores").resolve(store).resolve(storeFilename).toFile();
     }
+
+    private StoreInfo findStore(String store)
+    {
+        int storeIndex = Math.abs(store == null ? 1 : store.hashCode());
+        for(int i = 0; i < storeInfos.length; i++)
+        {
+            storeIndex = (storeIndex + i) % storeInfos.length;
+            StoreInfo storeInfo = storeInfos[storeIndex];
+            if (storeInfo != null && Objects.equals(storeInfo.store, store))
+            {
+                return storeInfo;
+            }
+        }
+
+        return null;
+    }
+
+    // @return -1 if there is no slot for the given store
+    private int nextIndex(String store)
+    {
+        int storeIndex = Math.abs(store == null ? 1 : store.hashCode());
+        for(int i = 0; i < storeInfos.length; i++)
+        {
+            storeIndex = (storeIndex + i) % storeInfos.length;
+            if (storeIndex != 0 && storeInfos[storeIndex] == null)
+            {
+                return storeIndex;
+            }
+        }
+
+        return -1;
+    }
+
 }
