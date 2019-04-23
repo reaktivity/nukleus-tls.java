@@ -24,6 +24,8 @@ import static org.agrona.LangUtil.rethrowUnchecked;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 
 import java.nio.ByteBuffer;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -45,6 +47,8 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLSession;
 
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
@@ -57,6 +61,7 @@ import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.function.SignalingExecutor;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
+import org.reaktivity.nukleus.tls.internal.StoreInfo;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
@@ -122,7 +127,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final ByteBuffer outAppByteBuffer;
     private final ByteBuffer outNetByteBuffer;
     private final DirectBuffer outNetBuffer;
-    private final Function<String, SSLContext> lookupContext;
+    private final Function<String, StoreInfo> lookupContext;
 
     public ServerStreamFactory(
         TlsConfiguration config,
@@ -134,7 +139,7 @@ public final class ServerStreamFactory implements StreamFactory
         LongUnaryOperator supplyReplyId,
         Long2ObjectHashMap<ServerHandshake> correlations,
         LongSupplier supplyTrace,
-        Function<String, SSLContext> lookupContext,
+        Function<String, StoreInfo> lookupContext,
         TlsCounters counters)
     {
         this.supplyTrace = requireNonNull(supplyTrace);
@@ -200,7 +205,8 @@ public final class ServerStreamFactory implements StreamFactory
         {
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO.get()::wrap);
             final String store = routeEx.store().asString();
-            final SSLContext sslContext = lookupContext.apply(store);
+            final StoreInfo storeInfo = lookupContext.apply(store);
+            final SSLContext sslContext = storeInfo == null ? null : storeInfo.context;
 
             if (sslContext != null)
             {
@@ -209,9 +215,13 @@ public final class ServerStreamFactory implements StreamFactory
 
                 final SSLEngine tlsEngine = sslContext.createSSLEngine();
                 tlsEngine.setUseClientMode(false);
-                // tlsEngine.setNeedClientAuth(true);
+                if (storeInfo.supportsClientAuth)
+                {
+                    tlsEngine.setWantClientAuth(true);
+                }
 
                 newStream = new ServerAcceptStream(
+                        storeInfo,
                         tlsEngine,
                         networkReply,
                         networkRouteId,
@@ -250,8 +260,9 @@ public final class ServerStreamFactory implements StreamFactory
         private final MessageConsumer networkReply;
         private final long networkRouteId;
         private final long networkInitialId;
-        private final long authorization;
+        private final StoreInfo storeInfo;
 
+        private long authorization;
         private long networkReplyId;
 
         private int networkSlot = NO_SLOT;
@@ -285,12 +296,14 @@ public final class ServerStreamFactory implements StreamFactory
         }
 
         private ServerAcceptStream(
+            StoreInfo storeInfo,
             SSLEngine tlsEngine,
             MessageConsumer networkReply,
             long networkRouteId,
             long networkInitialId,
             long authorization)
         {
+            this.storeInfo = storeInfo;
             this.tlsEngine = tlsEngine;
             this.networkReply = networkReply;
             this.networkRouteId = networkRouteId;
@@ -684,6 +697,25 @@ public final class ServerStreamFactory implements StreamFactory
             }
         }
 
+        private long certificateAuthorization(SSLSession tlsSession)
+        {
+            try
+            {
+                Certificate[] certs = tlsSession.getPeerCertificates();
+                if (certs.length > 1)
+                {
+                    Certificate caCert = certs[1];      // CA cert that signed
+                    String dname = ((X509Certificate) caCert).getSubjectX500Principal().getName();
+                    return storeInfo.authorization(dname);
+                }
+            }
+            catch (SSLPeerUnverifiedException e)
+            {
+                // ignoring the exception
+            }
+            return 0L;
+        }
+
         private void handleFinished()
         {
             ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getSession();
@@ -728,6 +760,7 @@ public final class ServerStreamFactory implements StreamFactory
                 final long newApplicationReplyId = supplyReplyId.applyAsLong(applicationInitialId);
                 correlations.put(newApplicationReplyId, handshake);
 
+                authorization = certificateAuthorization(tlsSession);
                 doTlsBegin(applicationInitial, applicationRouteId, applicationInitialId, networkTraceId, authorization,
                         tlsHostname, tlsApplicationProtocol);
                 router.setThrottle(applicationInitialId, this::handleThrottle);
@@ -752,7 +785,7 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 // close without triggering transport RESET or ABORT
                 doCloseOutbound(tlsEngine, networkReply, networkRouteId, networkReplyId,
-                        supplyTrace.getAsLong(), 0, authorization, networkReplyDoneHandler);
+                        supplyTrace.getAsLong(), 0, 0L, networkReplyDoneHandler);
 
                 // TODO: simplify slot storage references
                 this.networkSlot = handshake.networkSlot;

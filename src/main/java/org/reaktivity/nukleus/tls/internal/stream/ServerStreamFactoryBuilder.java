@@ -23,8 +23,6 @@ import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 
-import javax.net.ssl.SSLContext;
-
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.reaktivity.nukleus.buffer.BufferPool;
@@ -32,6 +30,7 @@ import org.reaktivity.nukleus.function.SignalingExecutor;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
+import org.reaktivity.nukleus.tls.internal.StoreInfo;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
 import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactory.ServerHandshake;
@@ -39,7 +38,7 @@ import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactory.ServerHand
 public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final Function<String, SSLContext> lookupContext;
+    private final Function<String, StoreInfo> lookupStoreInfo;
     private final Long2ObjectHashMap<ServerHandshake> correlations;
 
     private RouteManager router;
@@ -54,10 +53,10 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
 
     public ServerStreamFactoryBuilder(
         TlsConfiguration config,
-        Function<String, SSLContext> lookupContext)
+        Function<String, StoreInfo> lookupStoreInfo)
     {
         this.config = config;
-        this.lookupContext = lookupContext;
+        this.lookupStoreInfo = lookupStoreInfo;
         this.correlations = new Long2ObjectHashMap<>();
     }
 
@@ -161,7 +160,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             supplyReplyId,
             correlations,
             supplyTrace,
-            lookupContext,
+            lookupStoreInfo,
             counters);
     }
 }
