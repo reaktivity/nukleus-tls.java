@@ -1123,7 +1123,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                     doWindow(networkThrottle, networkRouteId, networkId, data.length(), networkPaddingSupplier.getAsInt());
                 }
-                catch (SSLException | UnsupportedOperationException | IllegalStateException ex)
+                catch (SSLException | RuntimeException ex)
                 {
                     doNetworkReset(supplyTrace.getAsLong());
                     doAbort(networkReply, networkRouteId, networkReplyId, networkTraceId, 0L);
@@ -1336,7 +1336,7 @@ public final class ServerStreamFactory implements StreamFactory
                         inNetByteBuffer.limit(inNetByteBuffer.position() + networkSlotOffset);
                         processNetwork(inNetBuffer, inNetByteBuffer);
                     }
-                    catch (SSLException | UnsupportedOperationException ex)
+                    catch (SSLException | RuntimeException ex)
                     {
                         doNetworkReset(supplyTrace.getAsLong());
                         doAbort(networkReply, networkRouteId, networkReplyId, 0L);
