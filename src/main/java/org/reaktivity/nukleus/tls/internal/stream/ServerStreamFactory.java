@@ -55,6 +55,7 @@ import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.reaktivity.nukleus.buffer.BufferPool;
+import org.reaktivity.nukleus.buffer.CountingBufferPool;
 import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessageFunction;
 import org.reaktivity.nukleus.function.MessagePredicate;
@@ -76,7 +77,6 @@ import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
-import org.reaktivity.reaktor.internal.buffer.CountingBufferPool;
 
 public final class ServerStreamFactory implements StreamFactory
 {
