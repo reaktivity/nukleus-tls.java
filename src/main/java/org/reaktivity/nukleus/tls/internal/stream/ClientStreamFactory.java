@@ -1296,6 +1296,18 @@ public final class ClientStreamFactory implements StreamFactory
                     }
 
                     handleFlushAppData();
+
+                    if (networkReplySlotOffset != 0 && applicationReplyBudget > applicationReplyPadding)
+                    {
+                        final int networkReplyCredit =
+                                Math.max(networkPool.slotCapacity() - networkReplySlotOffset - networkReplyBudget, 0);
+
+                        if (networkReplyCredit > 0)
+                        {
+                            networkReplyBudget += networkReplyCredit;
+                            doWindow(networkInitial, networkRouteId, networkReplyId, networkReplyCredit, networkReplyPadding);
+                        }
+                    }
                 }
             }
             catch (SSLException ex)
