@@ -568,7 +568,7 @@ public final class ServerStreamFactory implements StreamFactory
                         if (networkCredit > 0)
                         {
                             networkBudget += networkCredit;
-                            doWindow(networkReply, networkRouteId, networkReplyId, networkCredit, networkPadding);
+                            doWindow(networkReply, networkRouteId, networkInitialId, networkCredit, networkPadding);
                         }
                     }
                 }
