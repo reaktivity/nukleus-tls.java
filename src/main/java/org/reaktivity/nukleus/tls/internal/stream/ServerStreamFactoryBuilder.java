@@ -22,6 +22,7 @@ import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
@@ -48,6 +49,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private LongUnaryOperator supplyReplyId;
     private Supplier<BufferPool> supplyBufferPool;
     private LongSupplier supplyTrace;
+    private ToIntFunction<String> supplyTypeId;
     private Function<String, LongSupplier> supplyCounter;
     private Function<String, LongConsumer> supplyAccumulator;
 
@@ -89,6 +91,14 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         LongSupplier supplyTrace)
     {
         this.supplyTrace = supplyTrace;
+        return this;
+    }
+
+    @Override
+    public StreamFactoryBuilder setTypeIdSupplier(
+        ToIntFunction<String> supplyTypeId)
+    {
+        this.supplyTypeId = supplyTypeId;
         return this;
     }
 
@@ -158,8 +168,9 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             bufferPool,
             supplyInitialId,
             supplyReplyId,
-            correlations,
             supplyTrace,
+            supplyTypeId,
+            correlations,
             lookupStoreInfo,
             counters);
     }

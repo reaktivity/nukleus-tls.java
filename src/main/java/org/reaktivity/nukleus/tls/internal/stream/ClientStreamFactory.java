@@ -36,6 +36,7 @@ import java.util.function.IntSupplier;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
+import java.util.function.ToIntFunction;
 
 import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SSLContext;
@@ -59,6 +60,7 @@ import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
+import org.reaktivity.nukleus.tls.internal.TlsNukleus;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
@@ -67,6 +69,7 @@ import org.reaktivity.nukleus.tls.internal.types.stream.AbortFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.EndFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.ExtensionFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
@@ -77,7 +80,6 @@ public final class ClientStreamFactory implements StreamFactory
 {
     private static final ByteBuffer EMPTY_BYTE_BUFFER = ByteBuffer.allocate(0);
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
-    private static final DirectBuffer NO_EXTENSION = new UnsafeBuffer(new byte[] {(byte)0xff, (byte)0xff});
     private static final long FLUSH_HANDSHAKE_SIGNAL = 1L;
     private static final Runnable NOP = () -> {};
 
@@ -89,6 +91,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final EndFW endRO = new EndFW();
     private final AbortFW abortRO = new AbortFW();
     private final SignalFW signalRO = new SignalFW();
+    private final ExtensionFW extensionRO = new ExtensionFW();
 
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
     private final DataFW.Builder dataRW = new DataFW.Builder();
@@ -107,6 +110,7 @@ public final class ClientStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
+    private final int tlsTypeId;
     private final Function<String, SSLContext> lookupContext;
     private final SignalingExecutor executor;
     private final RouteManager router;
@@ -133,11 +137,13 @@ public final class ClientStreamFactory implements StreamFactory
         BufferPool bufferPool,
         LongUnaryOperator supplyInitialId,
         LongUnaryOperator supplyReplyId,
-        Long2ObjectHashMap<ClientHandshake> correlations,
         LongSupplier supplyTrace,
+        ToIntFunction<String> supplyTypeId,
+        Long2ObjectHashMap<ClientHandshake> correlations,
         Function<String, SSLContext> lookupContext,
         TlsCounters counters)
     {
+        this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
         this.supplyTrace = requireNonNull(supplyTrace);
         this.executor = requireNonNull(executor);
         this.lookupContext = requireNonNull(lookupContext);
@@ -190,8 +196,10 @@ public final class ClientStreamFactory implements StreamFactory
     {
         final long routeId = begin.routeId();
         final long authorization = begin.authorization();
-        // Ignoring extension data, see reaktivity/nukleus-tls.java#47
-        final TlsBeginExFW tlsBeginEx = tlsBeginExRO.wrap(NO_EXTENSION, 0, NO_EXTENSION.capacity());
+        final OctetsFW extension = begin.extension();
+        final ExtensionFW beginEx = extensionRO.tryWrap(extension.buffer(), extension.offset(), extension.sizeof());
+        final TlsBeginExFW tlsBeginEx = beginEx != null && beginEx.typeId() == tlsTypeId ?
+                tlsBeginExRO.tryWrap(extension.buffer(), extension.offset(), extension.sizeof()) : null;
 
         final boolean defaultRoute;
 
@@ -201,11 +209,11 @@ public final class ClientStreamFactory implements StreamFactory
             final TlsRouteExFW tlsRouteExRO = ClientStreamFactory.this.tlsRouteExRO.get();
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
-            final String applicationProtocol = routeEx.applicationProtocol().asString();
-            final String tlsHostname = tlsBeginEx.hostname().asString();
+            final String protocol = routeEx.protocol().asString();
+            final String tlsHostname = tlsBeginEx != null ? tlsBeginEx.hostname().asString() : null;
 
             return (tlsHostname == null || Objects.equals(tlsHostname, hostname)) &&
-                    applicationProtocol == null;
+                    protocol == null;
         };
 
         final MessagePredicate filter = (t, b, o, l) ->
@@ -214,12 +222,12 @@ public final class ClientStreamFactory implements StreamFactory
             final TlsRouteExFW tlsRouteExRO = ClientStreamFactory.this.tlsRouteExRO.get();
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             final String hostname = routeEx.hostname().asString();
-            final String applicationProtocol = routeEx.applicationProtocol().asString();
-            final String tlsHostname = tlsBeginEx.hostname().asString();
-            final String tlsApplicationProtocol = tlsBeginEx.applicationProtocol().asString();
+            final String protocol = routeEx.protocol().asString();
+            final String tlsHostname = tlsBeginEx != null ? tlsBeginEx.hostname().asString() : null;
+            final String tlsProtocol = tlsBeginEx != null ? tlsBeginEx.protocol().asString() : null;
 
             return (tlsHostname == null || Objects.equals(tlsHostname, hostname)) &&
-                    (applicationProtocol == null || Objects.equals(tlsApplicationProtocol, applicationProtocol));
+                    (protocol == null || Objects.equals(tlsProtocol, protocol));
         };
 
         defaultRoute = router.resolve(routeId, authorization, defaultRouteFilter, this::wrapRoute) != null;
@@ -233,16 +241,16 @@ public final class ClientStreamFactory implements StreamFactory
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
             String store = routeEx.store().asString();
 
-            String tlsHostname = tlsBeginEx.hostname().asString();
+            String tlsHostname = tlsBeginEx != null ? tlsBeginEx.hostname().asString() : null;
             if (tlsHostname == null)
             {
                 tlsHostname = routeEx.hostname().asString();
             }
 
-            String tlsApplicationProtocol = tlsBeginEx.applicationProtocol().asString();
-            if (tlsApplicationProtocol == null)
+            String tlsProtocol = tlsBeginEx != null ? tlsBeginEx.protocol().asString() : null;
+            if (tlsProtocol == null)
             {
-                tlsApplicationProtocol = routeEx.applicationProtocol().asString();
+                tlsProtocol = routeEx.protocol().asString();
             }
 
             final long networkRouteId = route.correlationId();
@@ -258,7 +266,7 @@ public final class ClientStreamFactory implements StreamFactory
                 newStream = new ClientAcceptStream(
                     tlsEngine,
                     tlsHostname,
-                    tlsApplicationProtocol,
+                    tlsProtocol,
                     defaultRoute,
                     applicationRouteId,
                     applicationReply,
@@ -430,6 +438,7 @@ public final class ClientStreamFactory implements StreamFactory
 
                 correlations.put(networkReplyId, newHandshake);
 
+                // TODO: support multiple BEGIN extensions, strip off TLS and propagate remaining extensions
                 doBegin(networkInitial, networkRouteId, networkInitialId, begin.trace(), authorization, begin.extension());
                 router.setThrottle(networkInitialId, newHandshake::handleThrottle);
 
@@ -1666,12 +1675,13 @@ public final class ClientStreamFactory implements StreamFactory
 
     private Flyweight.Builder.Visitor visitTlsBeginEx(
         String hostname,
-        String applicationProtocol)
+        String protocol)
     {
         return (buffer, offset, limit) ->
             tlsBeginExRW.wrap(buffer, offset, limit)
+                        .typeId(tlsTypeId)
                         .hostname(hostname)
-                        .applicationProtocol(applicationProtocol)
+                        .protocol(protocol)
                         .build()
                         .sizeof();
     }
