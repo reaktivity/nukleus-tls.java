@@ -169,7 +169,7 @@ public final class TlsController implements Controller
                 routeEx = routeExRW.wrap(extensionBuffer, 0, extensionBuffer.capacity())
                         .store(store)
                         .hostname(hostname)
-                        .applicationProtocol(protocol)
+                        .protocol(protocol)
                         .build();
             }
         }

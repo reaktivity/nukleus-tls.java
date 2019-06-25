@@ -26,7 +26,13 @@ import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.*;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
@@ -44,17 +50,17 @@ import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.route.RouteKind;
 import org.reaktivity.nukleus.tls.internal.types.control.ErrorFW;
+import org.reaktivity.nukleus.tls.internal.types.control.ResolveFW;
+import org.reaktivity.nukleus.tls.internal.types.control.ResolvedFW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
+import org.reaktivity.nukleus.tls.internal.types.control.UnresolveFW;
+import org.reaktivity.nukleus.tls.internal.types.control.UnresolvedFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
-import org.reaktivity.nukleus.tls.internal.types.control.auth.ResolveFW;
-import org.reaktivity.nukleus.tls.internal.types.control.auth.ResolvedFW;
-import org.reaktivity.nukleus.tls.internal.types.control.auth.UnresolveFW;
-import org.reaktivity.nukleus.tls.internal.types.control.auth.UnresolvedFW;
 
-final class TlsNukleus implements Nukleus
+public final class TlsNukleus implements Nukleus
 {
-    static final String NAME = "tls";
+    public static final String NAME = "tls";
 
     private static final String PROPERTY_TLS_KEYSTORE = "tls.keystore";
     private static final String PROPERTY_TLS_KEYSTORE_TYPE = "tls.keystore.type";

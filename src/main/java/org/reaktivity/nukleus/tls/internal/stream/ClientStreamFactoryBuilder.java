@@ -22,6 +22,7 @@ import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
@@ -47,13 +48,14 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     private LongUnaryOperator supplyInitialId;
     private LongUnaryOperator supplyReplyId;
     private LongSupplier supplyTrace;
+    private ToIntFunction<String> supplyTypeId;
     private Supplier<BufferPool> supplyBufferPool;
     private Function<String, LongSupplier> supplyCounter;
     private Function<String, LongConsumer> supplyAccumulator;
 
     public ClientStreamFactoryBuilder(
-            TlsConfiguration config,
-            Function<String, SSLContext> lookupContext)
+        TlsConfiguration config,
+        Function<String, SSLContext> lookupContext)
     {
         this.config = config;
         this.lookupContext = lookupContext;
@@ -109,6 +111,14 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
+    public StreamFactoryBuilder setTypeIdSupplier(
+        ToIntFunction<String> supplyTypeId)
+    {
+        this.supplyTypeId = supplyTypeId;
+        return this;
+    }
+
+    @Override
     public ClientStreamFactoryBuilder setGroupBudgetClaimer(
         LongFunction<IntUnaryOperator> groupBudgetClaimer)
     {
@@ -160,8 +170,9 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
             bufferPool,
             supplyInitialId,
             supplyReplyId,
-            correlations,
             supplyTrace,
+            supplyTypeId,
+            correlations,
             lookupContext,
             counters);
     }

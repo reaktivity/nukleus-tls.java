@@ -38,6 +38,7 @@ import java.util.function.IntSupplier;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
+import java.util.function.ToIntFunction;
 
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SNIHostName;
@@ -65,6 +66,7 @@ import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.StoreInfo;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
+import org.reaktivity.nukleus.tls.internal.TlsNukleus;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
@@ -110,6 +112,7 @@ public final class ServerStreamFactory implements StreamFactory
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
+    private final int tlsTypeId;
     private final SignalingExecutor executor;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -137,11 +140,13 @@ public final class ServerStreamFactory implements StreamFactory
         BufferPool bufferPool,
         LongUnaryOperator supplyInitialId,
         LongUnaryOperator supplyReplyId,
-        Long2ObjectHashMap<ServerHandshake> correlations,
         LongSupplier supplyTrace,
+        ToIntFunction<String> supplyTypeId,
+        Long2ObjectHashMap<ServerHandshake> correlations,
         Function<String, StoreInfo> lookupContext,
         TlsCounters counters)
     {
+        this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
         this.supplyTrace = requireNonNull(supplyTrace);
         this.executor = requireNonNull(executor);
         this.lookupContext = requireNonNull(lookupContext);
@@ -394,7 +399,7 @@ public final class ServerStreamFactory implements StreamFactory
                 final TlsRouteExFW tlsRouteExRO = ServerStreamFactory.this.tlsRouteExRO.get();
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 final String routeHostname = routeEx.hostname().asString();
-                final String routeProtocol = routeEx.applicationProtocol().asString();
+                final String routeProtocol = routeEx.protocol().asString();
 
                 return (routeHostname == null || Objects.equals(hostname, routeHostname)) &&
                        (routeProtocol == null || clientProtocols.contains(routeProtocol));
@@ -405,10 +410,10 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 final TlsRouteExFW tlsRouteExRO = ServerStreamFactory.this.tlsRouteExRO.get();
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-                String applicationProtocol = routeEx.applicationProtocol().asString();
+                String protocol = routeEx.protocol().asString();
                 // If the route is default (i.e. no application protocol), need to behave as if there is no ALPN
                 // So return an empty String to opt out ALPN negotiation
-                return applicationProtocol == null ? "" : applicationProtocol;
+                return protocol == null ? "" : protocol;
             }
             return null;
         }
@@ -741,12 +746,12 @@ public final class ServerStreamFactory implements StreamFactory
             }
             String tlsHostname = tlsHostname0;
 
-            String tlsApplicationProtocol0 = tlsEngine.getApplicationProtocol();
-            if (tlsApplicationProtocol0 != null && tlsApplicationProtocol0.isEmpty())
+            String tlsProtocol0 = tlsEngine.getApplicationProtocol();
+            if (tlsProtocol0 != null && tlsProtocol0.isEmpty())
             {
-                tlsApplicationProtocol0 = null;
+                tlsProtocol0 = null;
             }
-            final String tlsApplicationProtocol = tlsApplicationProtocol0;
+            final String tlsProtocol = tlsProtocol0;
 
             final MessagePredicate filter = (t, b, o, l) ->
             {
@@ -755,10 +760,10 @@ public final class ServerStreamFactory implements StreamFactory
                 final RouteFW route = routeRO.wrap(b, o, o + l);
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
                 final String hostname = routeEx.hostname().asString();
-                final String applicationProtocol = routeEx.applicationProtocol().asString();
+                final String protocol = routeEx.protocol().asString();
 
                 return (hostname == null || Objects.equals(tlsHostname, hostname)) &&
-                        (applicationProtocol == null || Objects.equals(tlsApplicationProtocol, applicationProtocol));
+                        (protocol == null || Objects.equals(tlsProtocol, protocol));
             };
 
             final RouteFW route = router.resolve(networkRouteId, authorization, filter, wrapRoute);
@@ -774,7 +779,7 @@ public final class ServerStreamFactory implements StreamFactory
 
                 authorization = certificateAuthorization(tlsSession);
                 doTlsBegin(applicationInitial, applicationRouteId, applicationInitialId, networkTraceId, authorization,
-                        tlsHostname, tlsApplicationProtocol);
+                        tlsHostname, tlsProtocol);
                 router.setThrottle(applicationInitialId, this::handleThrottle);
 
                 handshake.onFinished();
@@ -1705,12 +1710,13 @@ public final class ServerStreamFactory implements StreamFactory
 
     private Flyweight.Builder.Visitor visitTlsBeginEx(
         String hostname,
-        String applicationProtocol)
+        String protocol)
     {
         return (buffer, offset, limit) ->
             tlsBeginExRW.wrap(buffer, offset, limit)
+                        .typeId(tlsTypeId)
                         .hostname(hostname)
-                        .applicationProtocol(applicationProtocol)
+                        .protocol(protocol)
                         .build()
                         .sizeof();
     }
