@@ -597,9 +597,9 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            releaseSlots();
+            releaseNetworkSlotIfNecessary();
 
-            if (!tlsEngine.isInboundDone())
+            if (!tlsEngine.isInboundDone() && applicationSlot == NO_SLOT)
             {
                 // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
                 // but invalidates TLS session, preventing future abbreviated TLS handshakes from same client
@@ -623,7 +623,8 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleAbort(
             AbortFW abort)
         {
-            releaseSlots();
+            releaseNetworkSlotIfNecessary();
+            releaseApplicationSlotIfNecessary();
 
             if (!tlsEngine.isInboundDone())
             {
@@ -808,7 +809,7 @@ public final class ServerStreamFactory implements StreamFactory
                 this.networkSlot = handshake.networkSlot;
                 this.networkSlotOffset = handshake.networkSlotOffset;
 
-                releaseSlots();
+                releaseNetworkSlotIfNecessary();
 
                 handshake.networkSlot = this.networkSlot;
                 handshake.networkSlotOffset = this.networkSlotOffset;
@@ -952,7 +953,8 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleNetworkReplyDone(
             long traceId)
         {
-            releaseSlots();
+            releaseNetworkSlotIfNecessary();
+            releaseApplicationSlotIfNecessary();
 
             correlations.remove(applicationReplyId);
 
@@ -986,23 +988,28 @@ public final class ServerStreamFactory implements StreamFactory
         private void doNetworkReset(
             long traceId)
         {
-            releaseSlots();
+            releaseNetworkSlotIfNecessary();
+            releaseApplicationSlotIfNecessary();
             doReset(networkReply, networkRouteId, networkInitialId, traceId);
         }
 
-        private void releaseSlots()
+        private void releaseApplicationSlotIfNecessary()
+        {
+            if (applicationSlot != NO_SLOT)
+            {
+                applicationPool.release(applicationSlot);
+                applicationSlot = NO_SLOT;
+                applicationSlotOffset = 0;
+            }
+        }
+
+        private void releaseNetworkSlotIfNecessary()
         {
             if (networkSlot != NO_SLOT)
             {
                 networkPool.release(networkSlot);
                 networkSlot = NO_SLOT;
                 networkSlotOffset = 0;
-            }
-            if (applicationSlot != NO_SLOT)
-            {
-                applicationPool.release(applicationSlot);
-                applicationSlot = NO_SLOT;
-                applicationSlotOffset = 0;
             }
         }
     }
