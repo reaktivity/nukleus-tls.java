@@ -1339,7 +1339,7 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleEnd(
             EndFW end)
         {
-            releaseSlots();
+            releaseNetworkSlotIfNecessary();
 
             final long traceId = end.trace();
             try
@@ -1352,7 +1352,10 @@ public final class ClientStreamFactory implements StreamFactory
                                     0, end.authorization(), NOP);
                 }
 
-                doEnd(applicationReply, applicationRouteId, applicationReplyId, traceId, applicationReplyAuthorization);
+                if (applicationReplySlot == NO_SLOT)
+                {
+                    doEnd(applicationReply, applicationRouteId, applicationReplyId, traceId, applicationReplyAuthorization);
+                }
             }
             catch (SSLException ex)
             {
@@ -1363,7 +1366,8 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleAbort(
             AbortFW abort)
         {
-            releaseSlots();
+            releaseNetworkSlotIfNecessary();
+            releaseApplicationSlotIfNecessary();
             try
             {
                 tlsEngine.closeInbound();
@@ -1501,6 +1505,7 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 doEnd(applicationReply, applicationRouteId, applicationReplyId,
                         networkReplyTraceId, applicationReplyAuthorization);
+
                 if (networkReplyBudget == -1)
                 {
                     doNetworkReplyReset(supplyTrace.getAsLong());
@@ -1544,7 +1549,7 @@ public final class ClientStreamFactory implements StreamFactory
                 }
                 finally
                 {
-                    if (applicationReplySlotOffset == 0)
+                    if (applicationReplySlotOffset == 0 && applicationReplySlot != NO_SLOT)
                     {
                         applicationPool.release(applicationReplySlot);
                         applicationReplySlot = NO_SLOT;
@@ -1575,7 +1580,7 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 networkReplyBudget += networkCredit;
                 doWindow(networkReplyThrottle, networkRouteId, networkReplyId,
-                        window.trace(), networkCredit, networkReplyPadding);
+                         window.trace(), networkCredit, networkReplyPadding);
             }
         }
 
@@ -1599,23 +1604,29 @@ public final class ClientStreamFactory implements StreamFactory
         private void doNetworkReplyReset(
             long traceId)
         {
-            releaseSlots();
+            releaseNetworkSlotIfNecessary();
+            releaseApplicationSlotIfNecessary();
+
             doReset(networkReplyThrottle, networkRouteId, networkReplyId, traceId);
         }
 
-        private void releaseSlots()
+        public void releaseApplicationSlotIfNecessary()
+        {
+            if (applicationReplySlot != NO_SLOT)
+            {
+                applicationPool.release(applicationReplySlot);
+                applicationReplySlot = NO_SLOT;
+                applicationReplySlotOffset = 0;
+            }
+        }
+
+        private void releaseNetworkSlotIfNecessary()
         {
             if (networkReplySlot != NO_SLOT)
             {
                 networkPool.release(networkReplySlot);
                 networkReplySlot = NO_SLOT;
                 networkReplySlotOffset = 0;
-            }
-            if (applicationReplySlot != NO_SLOT)
-            {
-                applicationPool.release(applicationReplySlot);
-                applicationReplySlot = NO_SLOT;
-                applicationReplySlotOffset = 0;
             }
         }
 
