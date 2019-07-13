@@ -1346,10 +1346,18 @@ public final class ClientStreamFactory implements StreamFactory
             {
                 if (!tlsEngine.isInboundDone() && !tlsEngine.isOutboundDone())
                 {
-                    // tlsEngine.closeInbound() without CLOSE_NOTIFY is permitted by specification
-                    // but invalidates TLS session, preventing future abbreviated TLS handshakes from same client
                     doCloseOutbound(tlsEngine, networkInitial, networkRouteId, networkInitialId, supplyTrace.getAsLong(),
                                     0, end.authorization(), NOP);
+
+                    // force tlsEngine.isInboundDone() to send END in handleFlushAppData()
+                    try
+                    {
+                        tlsEngine.closeInbound();
+                    }
+                    catch (SSLException ex)
+                    {
+                        // ignore
+                    }
                 }
 
                 if (applicationReplySlot == NO_SLOT)
