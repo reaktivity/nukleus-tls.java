@@ -750,6 +750,10 @@ public final class ClientStreamFactory implements StreamFactory
                 final ResetFW reset = resetRO.wrap(buffer, index, index + length);
                 handleReset(reset);
                 break;
+            case SignalFW.TYPE_ID:
+                final SignalFW signal = signalRO.wrap(buffer, index, index + length);
+                handleSignal(signal);
+                break;
             default:
                 // ignore
                 break;
@@ -792,6 +796,13 @@ public final class ClientStreamFactory implements StreamFactory
             }
         }
 
+        private void handleSignal(
+            SignalFW signal)
+        {
+            assert signal.signalId() == FLUSH_HANDSHAKE_SIGNAL;
+            flushHandshake();
+        }
+
         private void afterBegin(
             int msgTypeId,
             DirectBuffer buffer,
@@ -811,10 +822,6 @@ public final class ClientStreamFactory implements StreamFactory
             case AbortFW.TYPE_ID:
                 final AbortFW abort = abortRO.wrap(buffer, index, index + length);
                 handleAbort(abort);
-                break;
-            case SignalFW.TYPE_ID:
-                final SignalFW signal = signalRO.wrap(buffer, index, index + length);
-                handleSignal(signal);
                 break;
             default:
                 doNetworkReplyReset(supplyTrace.getAsLong());
@@ -899,13 +906,6 @@ public final class ClientStreamFactory implements StreamFactory
             tlsEngine.closeOutbound();
             doAbort(networkInitial, networkRouteId, networkInitialId, networkAuthorization);
             doReset(applicationReply, applicationRouteId, applicationInitialId, abort.trace());
-        }
-
-        private void handleSignal(
-            SignalFW signal)
-        {
-            assert signal.signalId() == FLUSH_HANDSHAKE_SIGNAL;
-            flushHandshake();
         }
 
         private void processNetwork(
@@ -1407,7 +1407,8 @@ public final class ClientStreamFactory implements StreamFactory
                         if (handshake != null)
                         {
                             handshake.pendingTasks++;
-                            Future<?> future = executor.execute(runnable, networkRouteId, networkReplyId, FLUSH_HANDSHAKE_SIGNAL);
+                            Future<?> future =
+                                    executor.execute(runnable, networkRouteId, networkInitialId, FLUSH_HANDSHAKE_SIGNAL);
                             handshake.pendingFutures.add(future);
                         }
                         else
