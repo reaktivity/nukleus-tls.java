@@ -669,7 +669,7 @@ public final class ServerStreamFactory implements StreamFactory
                         {
                             handshake.pendingTasks++;
                             final Future<?> future =
-                                    executor.execute(runnable, networkRouteId, networkInitialId, FLUSH_HANDSHAKE_SIGNAL);
+                                    executor.execute(runnable, networkRouteId, networkReplyId, FLUSH_HANDSHAKE_SIGNAL);
                             handshake.pendingFutures.add(future);
                         }
                         else
@@ -1099,10 +1099,6 @@ public final class ServerStreamFactory implements StreamFactory
                 final AbortFW abort = abortRO.wrap(buffer, index, index + length);
                 handleAbort(abort);
                 break;
-            case SignalFW.TYPE_ID:
-                final SignalFW signal = signalRO.wrap(buffer, index, index + length);
-                handleSignal(signal);
-                break;
             default:
                 doNetworkReset(supplyTrace.getAsLong());
                 break;
@@ -1187,13 +1183,6 @@ public final class ServerStreamFactory implements StreamFactory
                 tlsEngine.closeOutbound();
                 doAbort(networkReply, networkRouteId, networkReplyId, abort.trace(), 0L);
             }
-        }
-
-        private void handleSignal(
-            SignalFW signal)
-        {
-            assert signal.signalId() == FLUSH_HANDSHAKE_SIGNAL;
-            flushHandshake();
         }
 
         private void processNetwork(
@@ -1299,6 +1288,10 @@ public final class ServerStreamFactory implements StreamFactory
                 final ResetFW reset = resetRO.wrap(buffer, index, index + length);
                 resetHandler.accept(reset);
                 break;
+            case SignalFW.TYPE_ID:
+                final SignalFW signal = signalRO.wrap(buffer, index, index + length);
+                handleSignal(signal);
+                break;
             default:
                 // ignore
                 break;
@@ -1334,6 +1327,13 @@ public final class ServerStreamFactory implements StreamFactory
             {
                 networkReplyDoneHandler.accept(0);
             }
+        }
+
+        private void handleSignal(
+            SignalFW signal)
+        {
+            assert signal.signalId() == FLUSH_HANDSHAKE_SIGNAL;
+            flushHandshake();
         }
 
         private void handleResetAfterHandshake(
