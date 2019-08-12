@@ -1207,7 +1207,7 @@ public final class ServerStreamFactory implements StreamFactory
                     handshakeStatus = result.getHandshakeStatus();
                 }
 
-                if (outAppByteBuffer.position() != 0)
+                if (handshakeStatus != FINISHED && outAppByteBuffer.position() != 0)
                 {
                     doNetworkReset(supplyTrace.getAsLong());
                     doAbort(networkReply, networkRouteId, networkReplyId, 0L);
