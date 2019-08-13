@@ -791,6 +791,20 @@ public final class ServerStreamFactory implements StreamFactory
                     this.networkSlotOffset = handshake.networkSlotOffset;
                 }
 
+                if (outAppByteBuffer.position() != 0)
+                {
+                    assert applicationSlot == NO_SLOT;
+
+                    this.applicationSlot = applicationPool.acquire(applicationInitialId);
+                    final MutableDirectBuffer applicationBuffer = applicationPool.buffer(applicationSlot);
+                    this.applicationSlotOffset = outAppByteBuffer.position();
+                    outAppByteBuffer.flip();
+                    applicationBuffer.putBytes(0, outAppByteBuffer, applicationSlotOffset);
+                    outAppByteBuffer.clear();
+
+                    assert outAppByteBuffer.position() == 0;
+                }
+
                 this.applicationInitial = applicationInitial;
                 this.applicationRouteId = applicationRouteId;
                 this.applicationInitialId = applicationInitialId;
@@ -1207,13 +1221,6 @@ public final class ServerStreamFactory implements StreamFactory
                     handshakeStatus = result.getHandshakeStatus();
                 }
 
-                if (outAppByteBuffer.position() != 0)
-                {
-                    doNetworkReset(supplyTrace.getAsLong());
-                    doAbort(networkReply, networkRouteId, networkReplyId, 0L);
-                    break loop;
-                }
-
                 switch (status)
                 {
                 case BUFFER_UNDERFLOW:
@@ -1226,6 +1233,13 @@ public final class ServerStreamFactory implements StreamFactory
                     networkSlotOffset = inNetByteBuffer.remaining();
                     statusHandler.accept(handshakeStatus, this::updateNetworkReplyWindow);
                     break;
+                }
+
+                if (outAppByteBuffer.position() != 0)
+                {
+                    doNetworkReset(supplyTrace.getAsLong());
+                    doAbort(networkReply, networkRouteId, networkReplyId, 0L);
+                    break loop;
                 }
             }
         }
