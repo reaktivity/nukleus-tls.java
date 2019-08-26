@@ -1206,7 +1206,7 @@ public final class ServerStreamFactory implements StreamFactory
             final int inNetByteBufferPosition = inNetByteBuffer.position();
 
             loop:
-            while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+            while (inNetByteBuffer.hasRemaining())
             {
                 outAppByteBuffer.rewind();
                 HandshakeStatus handshakeStatus = NOT_HANDSHAKING;

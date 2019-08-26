@@ -915,7 +915,7 @@ public final class ClientStreamFactory implements StreamFactory
             final int inNetByteBufferPosition = inNetByteBuffer.position();
 
             loop:
-            while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+            while (inNetByteBuffer.hasRemaining())
             {
                 if (tlsEngine.isOutboundDone())
                 {
