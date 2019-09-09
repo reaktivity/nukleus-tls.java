@@ -652,11 +652,11 @@ public final class ServerStreamFactory implements StreamFactory
         }
 
         private void handleStatus(
-            HandshakeStatus initialStatus,
+            HandshakeStatus status,
             Consumer<SSLEngineResult> resultHandler)
         {
             loop:
-            for (HandshakeStatus status = initialStatus;;)
+            for (;;)
             {
                 switch (status)
                 {
