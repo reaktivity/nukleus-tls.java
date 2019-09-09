@@ -24,6 +24,8 @@ import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 
+import javax.net.ssl.SSLContext;
+
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.reaktivity.nukleus.buffer.BufferPool;
@@ -33,8 +35,6 @@ import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
-
-import javax.net.ssl.SSLContext;
 
 public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
 {

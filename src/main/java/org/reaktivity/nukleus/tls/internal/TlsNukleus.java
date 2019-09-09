@@ -153,17 +153,13 @@ public final class TlsNukleus implements Nukleus
         boolean handled = false;
         switch(msgTypeId)
         {
-            case RouteFW.TYPE_ID:
-            {
-                final RouteFW route = routeRO.wrap(buffer, index, index + length);
-                handled = handleRoute(route);
-            }
+        case RouteFW.TYPE_ID:
+            final RouteFW route = routeRO.wrap(buffer, index, index + length);
+            handled = handleRoute(route);
             break;
-            case UnrouteFW.TYPE_ID:
-            {
-                final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
-                handled = handleUnroute(unroute);
-            }
+        case UnrouteFW.TYPE_ID:
+            final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
+            handled = handleUnroute(unroute);
             break;
         }
         return handled;

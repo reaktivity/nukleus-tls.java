@@ -22,13 +22,13 @@ import java.util.EnumMap;
 import java.util.Map;
 import java.util.function.Function;
 
+import javax.net.ssl.SSLContext;
+
 import org.reaktivity.nukleus.Elektron;
 import org.reaktivity.nukleus.route.RouteKind;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.stream.ClientStreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuilder;
-
-import javax.net.ssl.SSLContext;
 
 final class TlsElektron implements Elektron
 {
@@ -59,7 +59,7 @@ final class TlsElektron implements Elektron
 
     private static Function<String, SSLContext> lookupContext(Function<String, StoreInfo> lookupStoreInfo)
     {
-        return (s) ->
+        return s ->
         {
             StoreInfo storeInfo = lookupStoreInfo.apply(s);
             return storeInfo == null ? null : storeInfo.context;

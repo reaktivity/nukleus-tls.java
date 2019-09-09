@@ -495,7 +495,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         private void unwrapNetworkBufferData() throws SSLException
         {
-            assert (networkSlotOffset != 0);
+            assert networkSlotOffset != 0;
 
             if (applicationSlot == NO_SLOT)
             {
@@ -652,11 +652,11 @@ public final class ServerStreamFactory implements StreamFactory
         }
 
         private void handleStatus(
-            HandshakeStatus status,
+            HandshakeStatus initialStatus,
             Consumer<SSLEngineResult> resultHandler)
         {
             loop:
-            for (;;)
+            for (HandshakeStatus status = initialStatus;;)
             {
                 switch (status)
                 {

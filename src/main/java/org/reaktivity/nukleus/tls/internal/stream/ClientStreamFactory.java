@@ -1237,7 +1237,7 @@ public final class ClientStreamFactory implements StreamFactory
 
         private void unwrapNetworkBufferData()
         {
-            assert (networkReplySlotOffset != 0);
+            assert networkReplySlotOffset != 0;
 
             if (applicationReplySlot == NO_SLOT)
             {
@@ -1391,11 +1391,11 @@ public final class ClientStreamFactory implements StreamFactory
         }
 
         private void handleStatus(
-            HandshakeStatus status,
+            HandshakeStatus initialStatus,
             Consumer<SSLEngineResult> resultHandler)
         {
             loop:
-            for (;;)
+            for (HandshakeStatus status = initialStatus;;)
             {
                 switch (status)
                 {
@@ -1463,8 +1463,8 @@ public final class ClientStreamFactory implements StreamFactory
             if (doBeginApplicationReply != null)
             {
                 String tlsApplicationProtocol = tlsEngine.getApplicationProtocol();
-                if ((tlsApplicationProtocol.equals("") && defaultRoute)
-                        || Objects.equals(tlsApplicationProtocol, applicationProtocol))
+                if (("".equals(tlsApplicationProtocol) && defaultRoute) ||
+                        Objects.equals(tlsApplicationProtocol, applicationProtocol))
                 {
                     // no ALPN negotiation && default route OR
                     // negotiated protocol from ALPN matches with our route
