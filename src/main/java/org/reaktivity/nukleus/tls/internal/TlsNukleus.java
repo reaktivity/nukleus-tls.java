@@ -333,7 +333,7 @@ public final class TlsNukleus implements Nukleus
                     return null;
                 }
 
-                for(String alias : Collections.list(trustStore.aliases()))
+                for (String alias : Collections.list(trustStore.aliases()))
                 {
                     if (trustStore.isCertificateEntry(alias))
                     {
@@ -370,7 +370,7 @@ public final class TlsNukleus implements Nukleus
     private StoreInfo findStore(String store)
     {
         int storeIndex = Math.abs(store == null ? 1 : store.hashCode());
-        for(int i = 0; i < storeInfos.length; i++)
+        for (int i = 0; i < storeInfos.length; i++)
         {
             storeIndex = (storeIndex + i) % storeInfos.length;
             StoreInfo storeInfo = storeInfos[storeIndex];
@@ -387,7 +387,7 @@ public final class TlsNukleus implements Nukleus
     private int nextIndex(String store)
     {
         int storeIndex = Math.abs(store == null ? 1 : store.hashCode());
-        for(int i = 0; i < storeInfos.length; i++)
+        for (int i = 0; i < storeInfos.length; i++)
         {
             storeIndex = (storeIndex + i) % storeInfos.length;
             if (storeIndex != 0 && storeInfos[storeIndex] == null)
