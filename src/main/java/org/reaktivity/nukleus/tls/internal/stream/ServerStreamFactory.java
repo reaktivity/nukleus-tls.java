@@ -495,7 +495,7 @@ public final class ServerStreamFactory implements StreamFactory
 
         private void unwrapNetworkBufferData() throws SSLException
         {
-            assert (networkSlotOffset != 0);
+            assert networkSlotOffset != 0;
 
             if (applicationSlot == NO_SLOT)
             {

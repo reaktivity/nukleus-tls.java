@@ -104,8 +104,6 @@ public class TlsServerBM
     public void reinit() throws Exception
     {
         final TlsController controller = reaktor.controller(TlsController.class);
-//        this.source = controller.supplySource("source", Source::new);
-//        this.target = controller.supplyTarget("target", Target::new);
 
         final Random random = new Random();
         this.targetRef = random.nextLong();

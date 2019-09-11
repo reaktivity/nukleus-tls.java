@@ -153,17 +153,13 @@ public final class TlsNukleus implements Nukleus
         boolean handled = false;
         switch(msgTypeId)
         {
-            case RouteFW.TYPE_ID:
-            {
-                final RouteFW route = routeRO.wrap(buffer, index, index + length);
-                handled = handleRoute(route);
-            }
+        case RouteFW.TYPE_ID:
+            final RouteFW route = routeRO.wrap(buffer, index, index + length);
+            handled = handleRoute(route);
             break;
-            case UnrouteFW.TYPE_ID:
-            {
-                final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
-                handled = handleUnroute(unroute);
-            }
+        case UnrouteFW.TYPE_ID:
+            final UnrouteFW unroute = unrouteRO.wrap(buffer, index, index + length);
+            handled = handleUnroute(unroute);
             break;
         }
         return handled;
@@ -337,7 +333,7 @@ public final class TlsNukleus implements Nukleus
                     return null;
                 }
 
-                for(String alias : Collections.list(trustStore.aliases()))
+                for (String alias : Collections.list(trustStore.aliases()))
                 {
                     if (trustStore.isCertificateEntry(alias))
                     {
@@ -374,7 +370,7 @@ public final class TlsNukleus implements Nukleus
     private StoreInfo findStore(String store)
     {
         int storeIndex = Math.abs(store == null ? 1 : store.hashCode());
-        for(int i = 0; i < storeInfos.length; i++)
+        for (int i = 0; i < storeInfos.length; i++)
         {
             storeIndex = (storeIndex + i) % storeInfos.length;
             StoreInfo storeInfo = storeInfos[storeIndex];
@@ -391,7 +387,7 @@ public final class TlsNukleus implements Nukleus
     private int nextIndex(String store)
     {
         int storeIndex = Math.abs(store == null ? 1 : store.hashCode());
-        for(int i = 0; i < storeInfos.length; i++)
+        for (int i = 0; i < storeInfos.length; i++)
         {
             storeIndex = (storeIndex + i) % storeInfos.length;
             if (storeIndex != 0 && storeInfos[storeIndex] == null)

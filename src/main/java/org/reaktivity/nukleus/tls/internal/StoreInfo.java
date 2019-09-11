@@ -15,10 +15,11 @@
  */
 package org.reaktivity.nukleus.tls.internal;
 
-import javax.net.ssl.SSLContext;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+
+import javax.net.ssl.SSLContext;
 
 public class StoreInfo
 {
@@ -79,7 +80,7 @@ public class StoreInfo
 
     public boolean unresolve(long authorization)
     {
-        return authorizationMap.entrySet().removeIf(e -> (e.getValue() == authorization));
+        return authorizationMap.entrySet().removeIf(e -> e.getValue() == authorization);
     }
 
     @Override
