@@ -151,7 +151,7 @@ public final class TlsNukleus implements Nukleus
         int length)
     {
         boolean handled = false;
-        switch(msgTypeId)
+        switch (msgTypeId)
         {
         case RouteFW.TYPE_ID:
             final RouteFW route = routeRO.wrap(buffer, index, index + length);
