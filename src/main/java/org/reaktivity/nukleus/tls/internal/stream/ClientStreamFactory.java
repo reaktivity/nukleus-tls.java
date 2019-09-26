@@ -763,14 +763,14 @@ public final class ClientStreamFactory implements StreamFactory
         private void beforeNetworkReply(
             WindowFW window)
         {
-            networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt()+window.credit());
+            networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt() + window.credit());
             networkPaddingConsumer.accept(window.padding());
         }
 
         private void afterNetworkReply(
             WindowFW window)
         {
-            networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt()+window.credit());
+            networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt() + window.credit());
             networkPaddingConsumer.accept(window.padding());
 
             // tlsEngine.getHandshakeStatus() will block if delegated task is executing
