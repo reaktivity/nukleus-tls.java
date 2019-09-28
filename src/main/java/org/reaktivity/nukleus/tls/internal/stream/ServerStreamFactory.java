@@ -447,10 +447,9 @@ public final class ServerStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
-            final int dataLength = data.length();
             networkTraceId = data.trace();
 
-            networkBudget -= dataLength + data.padding();
+            networkBudget -= data.reserved();
 
             if (networkSlot == NO_SLOT)
             {
@@ -1124,8 +1123,7 @@ public final class ServerStreamFactory implements StreamFactory
         {
             networkTraceId = data.trace();
 
-            networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt()
-                    - data.length() - data.padding());
+            networkBudgetConsumer.accept(networkBudgetSupplier.getAsInt() - data.reserved());
 
             if (networkSlot == NO_SLOT)
             {
@@ -1545,7 +1543,7 @@ public final class ServerStreamFactory implements StreamFactory
             DataFW data)
         {
             applicationReplyTraceId = data.trace();
-            applicationReplyBudget -= data.length() + data.padding();
+            applicationReplyBudget -= data.reserved();
 
             if (applicationReplyBudget < 0)
             {
@@ -1772,7 +1770,7 @@ public final class ServerStreamFactory implements StreamFactory
                 .trace(traceId)
                 .authorization(authorization)
                 .groupId(0)
-                .padding(padding)
+                .reserved(payload.sizeof() + padding)
                 .payload(payload)
                 .build();
 
