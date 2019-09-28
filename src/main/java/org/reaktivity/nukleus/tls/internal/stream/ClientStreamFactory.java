@@ -457,7 +457,7 @@ public final class ClientStreamFactory implements StreamFactory
             DataFW data)
         {
             applicationTraceId = data.trace();
-            applicationBudget -= data.length() + data.padding();
+            applicationBudget -= data.reserved();
 
             try
             {
@@ -832,11 +832,9 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
-            int dataLength = data.length();
             networkReplyTraceId = data.trace();
 
-            networkReplyBudgetConsumer.accept(
-                    networkReplyBudgetSupplier.getAsInt() - dataLength - data.padding());
+            networkReplyBudgetConsumer.accept(networkReplyBudgetSupplier.getAsInt() - data.reserved());
 
             if (networkReplySlot == NO_SLOT)
             {
@@ -865,7 +863,7 @@ public final class ClientStreamFactory implements StreamFactory
 
                     processNetwork(inNetBuffer, inNetByteBuffer);
 
-                    int networkReplyBudgetCredit = dataLength + networkReplyPaddingSupplier.getAsInt();
+                    int networkReplyBudgetCredit = data.reserved();
                     networkReplyBudgetConsumer.accept(
                             networkReplyBudgetSupplier.getAsInt() + networkReplyBudgetCredit);
                     doWindow(networkInitial, networkRouteId, networkReplyId, networkReplyBudgetCredit,
@@ -1190,10 +1188,9 @@ public final class ClientStreamFactory implements StreamFactory
         private void handleData(
             DataFW data)
         {
-            final int dataLength = data.length();
             networkReplyTraceId = data.trace();
 
-            networkReplyBudget -= dataLength + data.padding();
+            networkReplyBudget -= data.reserved();
 
             if (networkReplySlot == NO_SLOT)
             {
@@ -1740,7 +1737,7 @@ public final class ClientStreamFactory implements StreamFactory
                 .trace(traceId)
                 .authorization(authorization)
                 .groupId(0)
-                .padding(padding)
+                .reserved(payload.sizeof() + padding)
                 .payload(p -> p.set(payload.buffer(), payload.offset(), payload.sizeof()))
                 .build();
 

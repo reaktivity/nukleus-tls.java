@@ -16,9 +16,7 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import java.util.function.Function;
-import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
-import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
@@ -115,20 +113,6 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
         ToIntFunction<String> supplyTypeId)
     {
         this.supplyTypeId = supplyTypeId;
-        return this;
-    }
-
-    @Override
-    public ClientStreamFactoryBuilder setGroupBudgetClaimer(
-        LongFunction<IntUnaryOperator> groupBudgetClaimer)
-    {
-        return this;
-    }
-
-    @Override
-    public ClientStreamFactoryBuilder setGroupBudgetReleaser(
-        LongFunction<IntUnaryOperator> groupBudgetReleaser)
-    {
         return this;
     }
 
