@@ -21,7 +21,7 @@ import java.util.Set;
 
 import javax.net.ssl.SSLContext;
 
-public class StoreInfo
+public class TlsStoreInfo
 {
     private static final long MAX_AUTHORIZATION = 1L << 56;
     public final String store;
@@ -34,7 +34,7 @@ public class StoreInfo
     int routeCount;
     private long authorization = 1L;
 
-    StoreInfo(
+    TlsStoreInfo(
         String store,
         int storeIndex,
         SSLContext context,
