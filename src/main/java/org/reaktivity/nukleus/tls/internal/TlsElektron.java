@@ -28,7 +28,7 @@ import org.reaktivity.nukleus.Elektron;
 import org.reaktivity.nukleus.route.RouteKind;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.stream.ClientStreamFactoryBuilder;
-import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactoryBuilder;
+import org.reaktivity.nukleus.tls.internal.stream.TlsServerFactoryBuilder;
 
 final class TlsElektron implements Elektron
 {
@@ -36,10 +36,10 @@ final class TlsElektron implements Elektron
 
     TlsElektron(
         TlsConfiguration config,
-        Function<String, StoreInfo> lookupStoreInfo)
+        Function<String, TlsStoreInfo> lookupStoreInfo)
     {
         Map<RouteKind, StreamFactoryBuilder> streamFactoryBuilders = new EnumMap<>(RouteKind.class);
-        streamFactoryBuilders.put(SERVER, new ServerStreamFactoryBuilder(config, lookupStoreInfo));
+        streamFactoryBuilders.put(SERVER, new TlsServerFactoryBuilder(config, lookupStoreInfo));
         streamFactoryBuilders.put(CLIENT, new ClientStreamFactoryBuilder(config, lookupContext(lookupStoreInfo)));
         this.streamFactoryBuilders = streamFactoryBuilders;
     }
@@ -57,11 +57,11 @@ final class TlsElektron implements Elektron
         return String.format("%s %s", getClass().getSimpleName(), streamFactoryBuilders);
     }
 
-    private static Function<String, SSLContext> lookupContext(Function<String, StoreInfo> lookupStoreInfo)
+    private static Function<String, SSLContext> lookupContext(Function<String, TlsStoreInfo> lookupStoreInfo)
     {
         return s ->
         {
-            StoreInfo storeInfo = lookupStoreInfo.apply(s);
+            TlsStoreInfo storeInfo = lookupStoreInfo.apply(s);
             return storeInfo == null ? null : storeInfo.context;
         };
     }

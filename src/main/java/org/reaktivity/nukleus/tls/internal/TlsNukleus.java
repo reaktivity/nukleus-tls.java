@@ -92,7 +92,7 @@ public final class TlsNukleus implements Nukleus
 
     private final Map<Long, String> storesByRouteId;
 
-    private final StoreInfo[] storeInfos;
+    private final TlsStoreInfo[] storeInfos;
 
     TlsNukleus(
         TlsConfiguration config)
@@ -100,7 +100,7 @@ public final class TlsNukleus implements Nukleus
         this.config = config;
 
         this.storesByRouteId = new HashMap<>();
-        this.storeInfos = new StoreInfo[256];
+        this.storeInfos = new TlsStoreInfo[256];
 
         Map<RouteKind, MessagePredicate> routeHandlers = new EnumMap<>(RouteKind.class);
         routeHandlers.put(SERVER, this::handleRoute);
@@ -173,7 +173,7 @@ public final class TlsNukleus implements Nukleus
         final long routeId = route.correlationId();
 
         storesByRouteId.put(routeId, store);
-        StoreInfo storeInfo = newStoreInfoIfNecessary(store);
+        TlsStoreInfo storeInfo = newStoreInfoIfNecessary(store);
         if (storeInfo != null)
         {
             storeInfo.routeCount++;
@@ -188,7 +188,7 @@ public final class TlsNukleus implements Nukleus
         final long routeId = unroute.routeId();
 
         final String store = storesByRouteId.remove(routeId);
-        StoreInfo storeInfo = findStore(store);
+        TlsStoreInfo storeInfo = findStore(store);
         if (storeInfo != null)
         {
             storeInfo.routeCount--;
@@ -214,7 +214,7 @@ public final class TlsNukleus implements Nukleus
         {
             int position = realm.indexOf(':');
             String store = position == -1 ? null : realm.substring(0, position);
-            StoreInfo storeInfo = newStoreInfoIfNecessary(store);
+            TlsStoreInfo storeInfo = newStoreInfoIfNecessary(store);
             if (storeInfo != null)
             {
                 storeInfo.routeCount++;
@@ -253,7 +253,7 @@ public final class TlsNukleus implements Nukleus
         if (authorization != 0L)
         {
             int storeIndex = (int) (authorization >>> 56);
-            StoreInfo storeInfo = storeInfos[storeIndex];
+            TlsStoreInfo storeInfo = storeInfos[storeIndex];
             storeInfo.routeCount--;
             if (storeInfo.routeCount == 0)
             {
@@ -277,10 +277,10 @@ public final class TlsNukleus implements Nukleus
         }
     }
 
-    private StoreInfo newStoreInfoIfNecessary(
+    private TlsStoreInfo newStoreInfoIfNecessary(
         String store)
     {
-        StoreInfo storeInfo = findStore(store);
+        TlsStoreInfo storeInfo = findStore(store);
         if (storeInfo != null)
         {
             return storeInfo;
@@ -352,7 +352,7 @@ public final class TlsNukleus implements Nukleus
             LangUtil.rethrowUnchecked(ex);
         }
 
-        storeInfo = new StoreInfo(store, storeIndex, context, trustStoreExists, caDnames);
+        storeInfo = new TlsStoreInfo(store, storeIndex, context, trustStoreExists, caDnames);
         storeInfos[storeIndex] = storeInfo;
         return storeInfo;
     }
@@ -367,13 +367,13 @@ public final class TlsNukleus implements Nukleus
                 : directory.resolve("tls").resolve("stores").resolve(store).resolve(storeFilename).toFile();
     }
 
-    private StoreInfo findStore(String store)
+    private TlsStoreInfo findStore(String store)
     {
         int storeIndex = Math.abs(store == null ? 1 : store.hashCode());
         for (int i = 0; i < storeInfos.length; i++)
         {
             storeIndex = (storeIndex + i) % storeInfos.length;
-            StoreInfo storeInfo = storeInfos[storeIndex];
+            TlsStoreInfo storeInfo = storeInfos[storeIndex];
             if (storeInfo != null && Objects.equals(storeInfo.store, store))
             {
                 return storeInfo;

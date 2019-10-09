@@ -23,22 +23,19 @@ import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 
 import org.agrona.MutableDirectBuffer;
-import org.agrona.collections.Long2ObjectHashMap;
 import org.reaktivity.nukleus.buffer.BufferPool;
 import org.reaktivity.nukleus.concurrent.SignalingExecutor;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
-import org.reaktivity.nukleus.tls.internal.StoreInfo;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
-import org.reaktivity.nukleus.tls.internal.stream.ServerStreamFactory.ServerHandshake;
+import org.reaktivity.nukleus.tls.internal.TlsStoreInfo;
 
-public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
+public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final Function<String, StoreInfo> lookupStoreInfo;
-    private final Long2ObjectHashMap<ServerHandshake> correlations;
+    private final Function<String, TlsStoreInfo> lookupStoreInfo;
 
     private RouteManager router;
     private SignalingExecutor executor;
@@ -51,17 +48,16 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     private Function<String, LongSupplier> supplyCounter;
     private Function<String, LongConsumer> supplyAccumulator;
 
-    public ServerStreamFactoryBuilder(
+    public TlsServerFactoryBuilder(
         TlsConfiguration config,
-        Function<String, StoreInfo> lookupStoreInfo)
+        Function<String, TlsStoreInfo> lookupStoreInfo)
     {
         this.config = config;
         this.lookupStoreInfo = lookupStoreInfo;
-        this.correlations = new Long2ObjectHashMap<>();
     }
 
     @Override
-    public ServerStreamFactoryBuilder setRouteManager(
+    public TlsServerFactoryBuilder setRouteManager(
         RouteManager router)
     {
         this.router = router;
@@ -69,7 +65,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public ServerStreamFactoryBuilder setExecutor(
+    public TlsServerFactoryBuilder setExecutor(
         SignalingExecutor executor)
     {
         this.executor = executor;
@@ -77,7 +73,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public ServerStreamFactoryBuilder setWriteBuffer(
+    public TlsServerFactoryBuilder setWriteBuffer(
         MutableDirectBuffer writeBuffer)
     {
         this.writeBuffer = writeBuffer;
@@ -101,7 +97,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public ServerStreamFactoryBuilder setInitialIdSupplier(
+    public TlsServerFactoryBuilder setInitialIdSupplier(
         LongUnaryOperator supplyInitialId)
     {
         this.supplyInitialId = supplyInitialId;
@@ -146,7 +142,7 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
         final BufferPool bufferPool = supplyBufferPool.get();
         final TlsCounters counters = new TlsCounters(supplyCounter, supplyAccumulator);
 
-        return new ServerStreamFactory(
+        return new TlsServerFactory(
             config,
             executor,
             router,
@@ -156,7 +152,6 @@ public final class ServerStreamFactoryBuilder implements StreamFactoryBuilder
             supplyReplyId,
             supplyTrace,
             supplyTypeId,
-            correlations,
             lookupStoreInfo,
             counters);
     }
