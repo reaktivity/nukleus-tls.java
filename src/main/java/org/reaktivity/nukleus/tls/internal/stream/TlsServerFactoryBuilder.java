@@ -43,7 +43,6 @@ public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
     private LongUnaryOperator supplyInitialId;
     private LongUnaryOperator supplyReplyId;
     private Supplier<BufferPool> supplyBufferPool;
-    private LongSupplier supplyTrace;
     private ToIntFunction<String> supplyTypeId;
     private Function<String, LongSupplier> supplyCounter;
     private Function<String, LongConsumer> supplyAccumulator;
@@ -77,14 +76,6 @@ public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
         MutableDirectBuffer writeBuffer)
     {
         this.writeBuffer = writeBuffer;
-        return this;
-    }
-
-    @Override
-    public StreamFactoryBuilder setTraceSupplier(
-        LongSupplier supplyTrace)
-    {
-        this.supplyTrace = supplyTrace;
         return this;
     }
 
@@ -150,7 +141,6 @@ public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
             bufferPool,
             supplyInitialId,
             supplyReplyId,
-            supplyTrace,
             supplyTypeId,
             lookupStoreInfo,
             counters);

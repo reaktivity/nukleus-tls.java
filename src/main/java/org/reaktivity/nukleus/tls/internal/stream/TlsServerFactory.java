@@ -30,7 +30,6 @@ import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
 import java.util.function.ToIntFunction;
 
@@ -146,7 +145,6 @@ public final class TlsServerFactory implements StreamFactory
     private final BufferPool bufferPool;
     private final LongUnaryOperator supplyInitialId;
     private final LongUnaryOperator supplyReplyId;
-    private final LongSupplier supplyTraceId;
     private final int replyPaddingAdjust;
 
     private final Long2ObjectHashMap<TlsServer.TlsStream> correlations;
@@ -169,13 +167,11 @@ public final class TlsServerFactory implements StreamFactory
         BufferPool bufferPool,
         LongUnaryOperator supplyInitialId,
         LongUnaryOperator supplyReplyId,
-        LongSupplier supplyTraceId,
         ToIntFunction<String> supplyTypeId,
         Function<String, TlsStoreInfo> lookupContext,
         TlsCounters counters)
     {
         this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
-        this.supplyTraceId = requireNonNull(supplyTraceId);
         this.executor = requireNonNull(executor);
         this.lookupContext = requireNonNull(lookupContext);
         this.router = requireNonNull(router);
@@ -1372,7 +1368,10 @@ public final class TlsServerFactory implements StreamFactory
             long traceId,
             long groupId)
         {
-            tlsEngine.closeOutbound();
+            if (tlsEngine != null)
+            {
+                tlsEngine.closeOutbound();
+            }
             state = TlsState.closingReply(state);
 
             doEncodeWrapIfNecessary(traceId, groupId);
