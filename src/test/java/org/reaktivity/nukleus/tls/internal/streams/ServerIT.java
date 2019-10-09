@@ -256,6 +256,15 @@ public class ServerIT
 
     @Test
     @Specification({
+            "${route}/server/controller",
+            "${client}/client.sent.write.close.before.handshake/client"})
+    public void shouldReceiveClientSentWriteCloseBeforeHandshake() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
         "${route}/server/controller",
         "${client}/client.sent.write.close/client",
         "${server}/client.sent.write.close/server"})

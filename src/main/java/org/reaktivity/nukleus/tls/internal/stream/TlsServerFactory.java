@@ -1375,6 +1375,8 @@ public final class TlsServerFactory implements StreamFactory
             state = TlsState.closingReply(state);
 
             doEncodeWrapIfNecessary(traceId, groupId);
+
+            doNetworkEndIfNecessary(traceId);
         }
 
         private void doEncodeWrapIfNecessary(
