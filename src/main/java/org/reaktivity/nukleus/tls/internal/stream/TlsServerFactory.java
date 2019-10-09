@@ -1368,7 +1368,10 @@ public final class TlsServerFactory implements StreamFactory
             long traceId,
             long groupId)
         {
-            tlsEngine.closeOutbound();
+            if (tlsEngine != null)
+            {
+                tlsEngine.closeOutbound();
+            }
             state = TlsState.closingReply(state);
 
             doEncodeWrapIfNecessary(traceId, groupId);
