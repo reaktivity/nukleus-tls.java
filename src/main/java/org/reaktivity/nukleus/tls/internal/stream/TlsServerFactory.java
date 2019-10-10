@@ -128,6 +128,8 @@ public final class TlsServerFactory implements StreamFactory
 
     private final TlsServerDecoder decodeClientHello = this::decodeClientHello;
     private final TlsServerDecoder decodeHandshake = this::decodeHandshake;
+    private final TlsServerDecoder decodeHandshakeFinished = this::decodeHandshakeFinished;
+    private final TlsServerDecoder decodeHandshakeNeedTask = this::decodeHandshakeNeedTask;
     private final TlsServerDecoder decodeHandshakeNeedUnwrap = this::decodeHandshakeNeedUnwrap;
     private final TlsServerDecoder decodeHandshakeNeedWrap = this::decodeHandshakeNeedWrap;
     private final TlsServerDecoder decodeNotHandshaking = this::decodeNotHandshaking;
@@ -390,9 +392,10 @@ public final class TlsServerFactory implements StreamFactory
         int reserved,
         DirectBuffer buffer,
         int offset,
+        int progress,
         int limit)
     {
-        TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRO.tryWrap(buffer, offset, limit);
+        TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRO.tryWrap(buffer, progress, limit);
 
         if (tlsRecordInfo != null)
         {
@@ -449,7 +452,7 @@ public final class TlsServerFactory implements StreamFactory
             }
         }
 
-        return offset;
+        return progress;
     }
 
     private int decodeHandshake(
@@ -460,6 +463,7 @@ public final class TlsServerFactory implements StreamFactory
         int reserved,
         DirectBuffer buffer,
         int offset,
+        int progress,
         int limit)
     {
         final SSLEngine tlsEngine = server.tlsEngine;
@@ -469,10 +473,10 @@ public final class TlsServerFactory implements StreamFactory
             server.decoder = decodeNotHandshaking;
             break;
         case FINISHED:
-            server.onDecodeHandshakeFinished(traceId, groupId);
+            server.decoder = decodeHandshakeFinished;
             break;
         case NEED_TASK:
-            server.onDecodeHandshakeNeedTask(traceId, authorization);
+            server.decoder = decodeHandshakeNeedTask;
             break;
         case NEED_WRAP:
             server.decoder = decodeHandshakeNeedWrap;
@@ -485,7 +489,7 @@ public final class TlsServerFactory implements StreamFactory
             break;
         }
 
-        return offset;
+        return progress;
     }
 
     private int decodeNotHandshaking(
@@ -496,56 +500,97 @@ public final class TlsServerFactory implements StreamFactory
         int reserved,
         DirectBuffer buffer,
         int offset,
+        int progress,
         int limit)
     {
-        int progress = offset;
-
-        final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRO.tryWrap(buffer, offset, limit);
-        if (tlsRecordInfo != null &&
-            server.stream.filter(s -> TlsState.initialOpened(s.state)).isPresent())
+        final int length = limit - progress;
+        if (length != 0)
         {
-            final int tlsRecordSize = tlsRecordInfo.limit() + tlsRecordInfo.length() - offset;
-            if (offset + tlsRecordSize <= limit)
+            final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRO.tryWrap(buffer, progress, limit);
+            if (tlsRecordInfo != null &&
+                server.stream.filter(s -> TlsState.initialOpened(s.state)).isPresent())
             {
-                inNetByteBuffer.clear();
-                inNetBuffer.putBytes(0, buffer, offset, tlsRecordSize);
-                inNetByteBuffer.limit(tlsRecordSize);
-                outAppByteBuffer.clear();
-
-                try
+                final int tlsRecordSize = tlsRecordInfo.sizeof() + tlsRecordInfo.length();
+                if (tlsRecordSize <= length)
                 {
-                    final SSLEngineResult result = server.tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-                    switch (result.getStatus())
+                    inNetByteBuffer.clear();
+                    inNetBuffer.putBytes(0, buffer, progress, tlsRecordSize);
+                    inNetByteBuffer.limit(tlsRecordSize);
+                    outAppByteBuffer.clear();
+
+                    try
                     {
-                    case BUFFER_UNDERFLOW:
-                        break;
-                    case BUFFER_OVERFLOW:
-                        assert false;
-                        break;
-                    case OK:
-                        if (result.bytesProduced() > 0)
-                        {
-                            server.onDecodeUnwrapped(traceId, authorization, groupId, reserved,
-                                                     outAppBuffer, 0, result.bytesProduced());
-                        }
-                        server.decoder = decodeHandshake;
-                        break;
-                    case CLOSED:
-                        assert result.bytesProduced() == 0;
-                        server.onDecodeInboundClosed(traceId);
-                        server.decoder = decodeIgnoreAll;
-                        break;
-                    }
+                        final SSLEngineResult result = server.tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+                        final int bytesProduced = result.bytesProduced();
+                        final int bytesConsumed = result.bytesConsumed();
+                        final int bytesReserved = bytesConsumed * reserved / (limit - offset);
 
-                    progress += result.bytesConsumed();
-                }
-                catch (SSLException ex)
-                {
-                    server.cleanupNetwork(traceId);
+                        switch (result.getStatus())
+                        {
+                        case BUFFER_UNDERFLOW:
+                            break;
+                        case BUFFER_OVERFLOW:
+                            assert false;
+                            break;
+                        case OK:
+                            if (bytesProduced > 0)
+                            {
+                                assert bytesReserved >= bytesProduced;
+                                server.onDecodeUnwrapped(traceId, authorization, groupId, bytesReserved,
+                                                         outAppBuffer, 0, bytesProduced);
+                            }
+                            server.decoder = decodeHandshake;
+                            break;
+                        case CLOSED:
+                            assert bytesProduced == 0;
+                            server.onDecodeInboundClosed(traceId);
+                            server.decoder = decodeIgnoreAll;
+                            break;
+                        }
+
+                        progress += bytesConsumed;
+                    }
+                    catch (SSLException ex)
+                    {
+                        server.cleanupNetwork(traceId);
+                        server.decoder = decodeIgnoreAll;
+                    }
                 }
             }
         }
 
+        return progress;
+    }
+
+    private int decodeHandshakeFinished(
+        TlsServer server,
+        long traceId,
+        long authorization,
+        long groupId,
+        int reserved,
+        DirectBuffer buffer,
+        int offset,
+        int progress,
+        int limit)
+    {
+        server.onDecodeHandshakeFinished(traceId, authorization);
+        server.decoder = decodeHandshake;
+        return progress;
+    }
+
+    private int decodeHandshakeNeedTask(
+        TlsServer server,
+        long traceId,
+        long authorization,
+        long groupId,
+        int reserved,
+        DirectBuffer buffer,
+        int offset,
+        int progress,
+        int limit)
+    {
+        server.onDecodeHandshakeNeedTask(traceId, authorization);
+        server.decoder = decodeHandshake;
         return progress;
     }
 
@@ -557,46 +602,54 @@ public final class TlsServerFactory implements StreamFactory
         int reserved,
         DirectBuffer buffer,
         int offset,
+        int progress,
         int limit)
     {
-        final int length = limit - offset;
-        inNetBuffer.putBytes(0, buffer, offset, length);
-        inNetByteBuffer.rewind();
-        inNetByteBuffer.limit(length);
-        outAppByteBuffer.rewind();
-
-        int progress = offset;
-
-        try
+        final int length = limit - progress;
+        if (length != 0)
         {
-            final SSLEngineResult result = server.tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
-            switch (result.getStatus())
+            inNetByteBuffer.clear();
+            inNetBuffer.putBytes(0, buffer, progress, length);
+            inNetByteBuffer.limit(length);
+            outAppByteBuffer.clear();
+
+            try
             {
-            case BUFFER_UNDERFLOW:
-                break;
-            case BUFFER_OVERFLOW:
-                assert false;
-                break;
-            case OK:
-                if (result.bytesProduced() > 0)
-                {
-                    server.onDecodeUnwrapped(traceId, authorization, groupId, reserved,
-                                             outAppBuffer, 0, result.bytesProduced());
-                }
-                server.decoder = decodeHandshake;
-                break;
-            case CLOSED:
-                assert result.bytesProduced() == 0;
-                server.onDecodeInboundClosed(traceId);
-                server.decoder = decodeIgnoreAll;
-                break;
-            }
+                final SSLEngineResult result = server.tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
+                final int bytesConsumed = result.bytesConsumed();
+                final int bytesProduced = result.bytesProduced();
+                final int bytesReserved = bytesConsumed * reserved / (limit - offset);
 
-            progress += result.bytesConsumed();
-        }
-        catch (SSLException ex)
-        {
-            server.cleanupNetwork(traceId);
+                switch (result.getStatus())
+                {
+                case BUFFER_UNDERFLOW:
+                    break;
+                case BUFFER_OVERFLOW:
+                    assert false;
+                    break;
+                case OK:
+                    if (bytesProduced > 0)
+                    {
+                        assert bytesReserved >= bytesProduced;
+                        server.onDecodeUnwrapped(traceId, authorization, groupId, bytesReserved,
+                                                 outAppBuffer, 0, bytesProduced);
+                    }
+                    server.decoder = decodeHandshake;
+                    break;
+                case CLOSED:
+                    assert bytesProduced == 0;
+                    server.onDecodeInboundClosed(traceId);
+                    server.decoder = decodeIgnoreAll;
+                    break;
+                }
+
+                progress += bytesConsumed;
+            }
+            catch (SSLException ex)
+            {
+                server.cleanupNetwork(traceId);
+                server.decoder = decodeIgnoreAll;
+            }
         }
 
         return progress;
@@ -610,11 +663,12 @@ public final class TlsServerFactory implements StreamFactory
         int reserved,
         DirectBuffer buffer,
         int offset,
+        int progress,
         int limit)
     {
         server.doEncodeWrap(traceId, groupId, EMPTY_OCTETS);
         server.decoder = decodeHandshake;
-        return offset;
+        return progress;
     }
 
     private int decodeIgnoreAll(
@@ -625,6 +679,7 @@ public final class TlsServerFactory implements StreamFactory
         int reserved,
         DirectBuffer buffer,
         int offset,
+        int progress,
         int limit)
     {
         return limit;
@@ -688,6 +743,7 @@ public final class TlsServerFactory implements StreamFactory
             int reserved,
             DirectBuffer buffer,
             int offset,
+            int progress,
             int limit);
     }
 
@@ -1119,7 +1175,7 @@ public final class TlsServerFactory implements StreamFactory
             while (progress <= limit && previous != decoder)
             {
                 previous = decoder;
-                progress = decoder.decode(this, traceId, authorization, groupId, reserved, buffer, progress, limit);
+                progress = decoder.decode(this, traceId, authorization, groupId, reserved, buffer, offset, progress, limit);
             }
 
             if (progress < limit)
@@ -1138,7 +1194,7 @@ public final class TlsServerFactory implements StreamFactory
                     final MutableDirectBuffer decodeBuffer = bufferPool.buffer(decodeSlot);
                     decodeBuffer.putBytes(0, buffer, progress, limit - progress);
                     decodeSlotOffset = limit - progress;
-                    decodeSlotReserved = progress == offset ? reserved : 0;
+                    decodeSlotReserved = (limit - progress) * reserved / (limit - offset);
                 }
             }
             else
