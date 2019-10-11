@@ -90,7 +90,7 @@ public final class TlsServerFactory implements StreamFactory
     private static final OctetsFW EMPTY_OCTETS = new OctetsFW().wrap(new UnsafeBuffer(new byte[0]), 0, 0);
     private static final Consumer<OctetsFW.Builder> EMPTY_EXTENSION = ex -> {};
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
-    private static final long FLUSH_HANDSHAKE_SIGNAL = 1L;
+    private static final int HANDSHAKE_TASK_COMPLETE_SIGNAL = 1;
     private static final DirectBuffer EMPTY_DIRECT_BUFFER = new UnsafeBuffer(new byte[0]);
 
     private static final Optional<TlsServer.TlsStream> NULL_STREAM = Optional.ofNullable(null);
@@ -755,8 +755,8 @@ public final class TlsServerFactory implements StreamFactory
         private final long replyId;
         private long authorization;
 
-        private final Set<Future<?>> delegatedTaskFutures;
-        private int delegatedTasks;
+        private final Set<Future<?>> handshakeTaskFutures;
+        private int handshakeTasks;
 
         private int decodeSlot = NO_SLOT;
         private int decodeSlotOffset;
@@ -788,7 +788,7 @@ public final class TlsServerFactory implements StreamFactory
             this.initialId = networkInitialId;
             this.replyId = supplyReplyId.applyAsLong(initialId);
             this.decoder = decodeClientHello;
-            this.delegatedTaskFutures = new HashSet<>();
+            this.handshakeTaskFutures = new HashSet<>();
             this.stream = NULL_STREAM;
         }
 
@@ -990,17 +990,25 @@ public final class TlsServerFactory implements StreamFactory
         private void onNetworkSignal(
             SignalFW signal)
         {
-            assert signal.signalId() == FLUSH_HANDSHAKE_SIGNAL;
-
-            delegatedTasks--;
-
-            if (delegatedTasks == 0)
+            switch ((int) signal.signalId())
             {
-                delegatedTaskFutures.clear();
+            case HANDSHAKE_TASK_COMPLETE_SIGNAL:
+                onNetworkSignalHandshakeTaskComplete(signal);
+                break;
+            }
+        }
+
+        private void onNetworkSignalHandshakeTaskComplete(
+            SignalFW signal)
+        {
+            handshakeTasks--;
+
+            if (handshakeTasks == 0)
+            {
+                handshakeTaskFutures.clear();
 
                 final long traceId = signal.trace();
                 final long authorization = signal.authorization();
-
                 final long groupId = decodeSlotGroupId; // TODO: signal.groupId ?
 
                 DirectBuffer buffer = EMPTY_DIRECT_BUFFER;
@@ -1106,6 +1114,8 @@ public final class TlsServerFactory implements StreamFactory
             {
                 doNetworkWindow(traceId, initialCredit, initialPadding, groupId);
             }
+
+            decodeNetworkIfNecessary(traceId);
         }
 
         private void encodeNetwork(
@@ -1212,6 +1222,22 @@ public final class TlsServerFactory implements StreamFactory
             }
         }
 
+        private void decodeNetworkIfNecessary(
+            long traceId)
+        {
+            if (decodeSlot != NO_SLOT)
+            {
+                final long groupId = decodeSlotGroupId; // TODO: signal.groupId ?
+
+                final DirectBuffer buffer = bufferPool.buffer(decodeSlot);
+                final int offset = 0;
+                final int limit = decodeSlotOffset;
+                final int reserved = decodeSlotReserved;
+
+                decodeNetwork(traceId, authorization, groupId, reserved, buffer, offset, limit);
+            }
+        }
+
         private void onDecodeClientHello(
             long traceId,
             long authorization,
@@ -1302,9 +1328,9 @@ public final class TlsServerFactory implements StreamFactory
                     runnable != null;
                     runnable = tlsEngine.getDelegatedTask())
             {
-                final Future<?> future = executor.execute(runnable, routeId, replyId, FLUSH_HANDSHAKE_SIGNAL);
-                delegatedTaskFutures.add(future);
-                delegatedTasks++;
+                final Future<?> future = executor.execute(runnable, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
+                handshakeTaskFutures.add(future);
+                handshakeTasks++;
             }
         }
 
