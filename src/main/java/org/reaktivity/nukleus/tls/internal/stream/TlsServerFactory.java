@@ -73,6 +73,8 @@ import org.reaktivity.nukleus.tls.internal.types.codec.TlsProtocolVersionFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsRecordInfoFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsServerNameExtensionFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsServerNameFW;
+import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedDataFW;
+import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedInfoFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsVector16FW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
@@ -91,7 +93,7 @@ public final class TlsServerFactory implements StreamFactory
     private static final Consumer<OctetsFW.Builder> EMPTY_EXTENSION = ex -> {};
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
     private static final int HANDSHAKE_TASK_COMPLETE_SIGNAL = 1;
-    private static final DirectBuffer EMPTY_DIRECT_BUFFER = new UnsafeBuffer(new byte[0]);
+    private static final MutableDirectBuffer EMPTY_MUTABLE_DIRECT_BUFFER = new UnsafeBuffer(new byte[0]);
 
     private static final Optional<TlsServer.TlsStream> NULL_STREAM = Optional.ofNullable(null);
 
@@ -126,6 +128,10 @@ public final class TlsServerFactory implements StreamFactory
     private final TlsServerNameFW tlsServerNameRO = new TlsServerNameFW();
     private final StringFW tlsProtocolNameRO = new StringFW();
 
+    private final TlsUnwrappedInfoFW.Builder tlsUnwrappedInfoRW = new TlsUnwrappedInfoFW.Builder();
+    private final TlsUnwrappedDataFW tlsUnwrappedDataRO = new TlsUnwrappedDataFW();
+    private final TlsUnwrappedDataFW.Builder tlsUnwrappedDataRW = new TlsUnwrappedDataFW.Builder();
+
     private final TlsServerDecoder decodeClientHello = this::decodeClientHello;
     private final TlsServerDecoder decodeHandshake = this::decodeHandshake;
     private final TlsServerDecoder decodeHandshakeFinished = this::decodeHandshakeFinished;
@@ -133,6 +139,7 @@ public final class TlsServerFactory implements StreamFactory
     private final TlsServerDecoder decodeHandshakeNeedUnwrap = this::decodeHandshakeNeedUnwrap;
     private final TlsServerDecoder decodeHandshakeNeedWrap = this::decodeHandshakeNeedWrap;
     private final TlsServerDecoder decodeNotHandshaking = this::decodeNotHandshaking;
+    private final TlsServerDecoder decodeNotHandshakingUnwrapped = this::decodeNotHandshakingUnwrapped;
     private final TlsServerDecoder decodeIgnoreAll = this::decodeIgnoreAll;
 
     private final MessageFunction<RouteFW> wrapRoute = (t, b, i, l) -> routeRO.get().wrap(b, i, i + l);
@@ -498,7 +505,7 @@ public final class TlsServerFactory implements StreamFactory
         long authorization,
         long groupId,
         int reserved,
-        DirectBuffer buffer,
+        MutableDirectBuffer buffer,
         int offset,
         int progress,
         int limit)
@@ -507,15 +514,16 @@ public final class TlsServerFactory implements StreamFactory
         if (length != 0)
         {
             final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRO.tryWrap(buffer, progress, limit);
-            if (tlsRecordInfo != null &&
-                server.stream.filter(s -> TlsState.initialOpened(s.state)).isPresent())
+            if (tlsRecordInfo != null)
             {
-                final int tlsRecordSize = tlsRecordInfo.sizeof() + tlsRecordInfo.length();
-                if (tlsRecordSize <= length)
+                final int tlsRecordOffset = tlsRecordInfo.offset();
+                final int tlsRecordDataOffset = tlsRecordInfo.limit();
+                final int tlsRecordDataLimit = tlsRecordDataOffset + tlsRecordInfo.length();
+                if (tlsRecordDataLimit <= limit)
                 {
                     inNetByteBuffer.clear();
-                    inNetBuffer.putBytes(0, buffer, progress, tlsRecordSize);
-                    inNetByteBuffer.limit(tlsRecordSize);
+                    inNetBuffer.putBytes(0, buffer, progress, tlsRecordDataLimit - progress);
+                    inNetByteBuffer.limit(tlsRecordDataLimit - progress);
                     outAppByteBuffer.clear();
 
                     try
@@ -523,38 +531,117 @@ public final class TlsServerFactory implements StreamFactory
                         final SSLEngineResult result = server.tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
                         final int bytesProduced = result.bytesProduced();
                         final int bytesConsumed = result.bytesConsumed();
-                        final int bytesReserved = bytesConsumed * reserved / (limit - offset);
 
                         switch (result.getStatus())
                         {
                         case BUFFER_UNDERFLOW:
+                            server.decoder = decodeHandshake;
                             break;
                         case BUFFER_OVERFLOW:
                             assert false;
                             break;
                         case OK:
-                            if (bytesProduced > 0)
+                            if (bytesProduced == 0)
                             {
-                                assert bytesReserved >= bytesProduced;
-                                server.onDecodeUnwrapped(traceId, authorization, groupId, bytesReserved,
-                                                         outAppBuffer, 0, bytesProduced);
+                                server.decoder = decodeHandshake;
                             }
-                            server.decoder = decodeHandshake;
+                            else
+                            {
+                                assert bytesConsumed == tlsRecordDataLimit - tlsRecordOffset;
+                                assert bytesProduced <= bytesConsumed;
+
+                                tlsUnwrappedDataRW.wrap(buffer, tlsRecordDataOffset, tlsRecordDataLimit)
+                                                  .payload(outAppBuffer, 0, bytesProduced)
+                                                  .build();
+
+                                server.decoder = decodeNotHandshakingUnwrapped;
+                            }
                             break;
                         case CLOSED:
                             assert bytesProduced == 0;
                             server.onDecodeInboundClosed(traceId);
-                            server.decoder = decodeIgnoreAll;
+                            server.decoder = decodeHandshake;
+                            progress += bytesConsumed;
                             break;
                         }
-
-                        progress += bytesConsumed;
                     }
                     catch (SSLException ex)
                     {
                         server.cleanupNetwork(traceId);
                         server.decoder = decodeIgnoreAll;
                     }
+                }
+            }
+        }
+
+        return progress;
+    }
+
+    private int decodeNotHandshakingUnwrapped(
+        TlsServer server,
+        long traceId,
+        long authorization,
+        long groupId,
+        int reserved,
+        MutableDirectBuffer buffer,
+        int offset,
+        int progress,
+        int limit)
+    {
+        final int length = limit - progress;
+        if (length != 0)
+        {
+            final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRO.wrap(buffer, progress, limit);
+            final int tlsRecordDataOffset = tlsRecordInfo.limit();
+            final int tlsRecordDataLimit = tlsRecordDataOffset + tlsRecordInfo.length();
+
+            final TlsUnwrappedDataFW tlsUnwrappedData = tlsUnwrappedDataRO.wrap(buffer, tlsRecordDataOffset, tlsRecordDataLimit);
+            final TlsServer.TlsStream stream = server.stream.orElse(null);
+            final int initialBudget = stream != null ? stream.initialBudget : 0;
+
+            final int bytesOffset = tlsRecordInfo.sizeof();
+            final int bytesConsumed = bytesOffset + tlsRecordInfo.length();
+            final int bytesProduced = tlsUnwrappedData.length();
+            final int bytesReserved = reserved * bytesConsumed / (limit - offset);
+
+            final int bytesPosition = tlsUnwrappedData.info().position();
+            final int bytesProgress = bytesOffset + bytesPosition;
+            final int bytesLimit = bytesOffset + bytesProduced;
+
+            assert bytesPosition < bytesProduced;
+            assert bytesReserved >= bytesOffset;
+            assert bytesReserved >= bytesProduced;
+
+            final int bytesReservedOffset =
+                    bytesPosition != 0 ? bytesOffset + (bytesReserved - bytesOffset) * bytesPosition / bytesProduced : 0;
+            final int bytesReservedLimit = bytesReservedOffset + Math.min(bytesReserved - bytesReservedOffset, initialBudget);
+
+            final int maxBytesReserved = bytesReservedLimit - bytesReservedOffset;
+
+            final int maxBytesLimit = bytesOffset + bytesProduced * bytesReservedLimit / bytesReserved;
+            final int maxBytesProduced = maxBytesLimit - bytesProgress;
+
+            assert maxBytesReserved >= maxBytesProduced;
+            assert maxBytesLimit <= bytesLimit;
+
+            if (maxBytesProduced > 0)
+            {
+                final OctetsFW payload = tlsUnwrappedData.payload();
+
+                server.onDecodeUnwrapped(traceId, authorization, groupId, maxBytesReserved,
+                        payload.buffer(), payload.offset() + bytesPosition, maxBytesProduced);
+
+                final int newBytesPosition = bytesPosition + maxBytesProduced;
+                if (newBytesPosition == bytesProduced)
+                {
+                    progress += bytesConsumed;
+                    server.decoder = decodeHandshake;
+                }
+                else
+                {
+                    tlsUnwrappedInfoRW.wrap(buffer, tlsRecordDataOffset, tlsRecordDataLimit)
+                                      .position(newBytesPosition)
+                                      .build();
                 }
             }
         }
@@ -618,7 +705,6 @@ public final class TlsServerFactory implements StreamFactory
                 final SSLEngineResult result = server.tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
                 final int bytesConsumed = result.bytesConsumed();
                 final int bytesProduced = result.bytesProduced();
-                final int bytesReserved = bytesConsumed * reserved / (limit - offset);
 
                 switch (result.getStatus())
                 {
@@ -628,12 +714,7 @@ public final class TlsServerFactory implements StreamFactory
                     assert false;
                     break;
                 case OK:
-                    if (bytesProduced > 0)
-                    {
-                        assert bytesReserved >= bytesProduced;
-                        server.onDecodeUnwrapped(traceId, authorization, groupId, bytesReserved,
-                                                 outAppBuffer, 0, bytesProduced);
-                    }
+                    assert bytesProduced == 0;
                     server.decoder = decodeHandshake;
                     break;
                 case CLOSED:
@@ -741,7 +822,7 @@ public final class TlsServerFactory implements StreamFactory
             long authorization,
             long groupId,
             int reserved,
-            DirectBuffer buffer,
+            MutableDirectBuffer buffer,
             int offset,
             int progress,
             int limit);
@@ -873,17 +954,15 @@ public final class TlsServerFactory implements StreamFactory
                 {
                     final OctetsFW payload = data.payload();
                     int reserved = data.reserved();
-                    DirectBuffer buffer = payload.buffer();
                     int offset = payload.offset();
                     int limit = payload.limit();
 
-                    final MutableDirectBuffer decodeBuffer = bufferPool.buffer(decodeSlot);
-                    decodeBuffer.putBytes(decodeSlotOffset, buffer, offset, limit - offset);
+                    final MutableDirectBuffer buffer = bufferPool.buffer(decodeSlot);
+                    buffer.putBytes(decodeSlotOffset, payload.buffer(), offset, limit - offset);
                     decodeSlotOffset += limit - offset;
                     decodeSlotReserved += reserved;
                     decodeSlotGroupId = groupId;
 
-                    buffer = decodeBuffer;
                     offset = 0;
                     limit = decodeSlotOffset;
                     reserved = decodeSlotReserved;
@@ -1011,7 +1090,7 @@ public final class TlsServerFactory implements StreamFactory
                 final long authorization = signal.authorization();
                 final long groupId = decodeSlotGroupId; // TODO: signal.groupId ?
 
-                DirectBuffer buffer = EMPTY_DIRECT_BUFFER;
+                MutableDirectBuffer buffer = EMPTY_MUTABLE_DIRECT_BUFFER;
                 int offset = 0;
                 int limit = 0;
                 int reserved = 0;
@@ -1176,7 +1255,7 @@ public final class TlsServerFactory implements StreamFactory
             long authorization,
             long groupId,
             int reserved,
-            DirectBuffer buffer,
+            MutableDirectBuffer buffer,
             int offset,
             int limit)
         {
@@ -1229,7 +1308,7 @@ public final class TlsServerFactory implements StreamFactory
             {
                 final long groupId = decodeSlotGroupId; // TODO: signal.groupId ?
 
-                final DirectBuffer buffer = bufferPool.buffer(decodeSlot);
+                final MutableDirectBuffer buffer = bufferPool.buffer(decodeSlot);
                 final int offset = 0;
                 final int limit = decodeSlotOffset;
                 final int reserved = decodeSlotReserved;
@@ -1814,12 +1893,6 @@ public final class TlsServerFactory implements StreamFactory
             int state)
         {
             return openingInitial(state) | INITIAL_OPENED;
-        }
-
-        static boolean initialOpened(
-            int state)
-        {
-            return (state & INITIAL_OPENED) != 0;
         }
 
         static int closeInitial(

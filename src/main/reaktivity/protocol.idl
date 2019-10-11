@@ -118,5 +118,17 @@ scope protocol
             case 0:
                 string16 hostname;
         }
+
+        struct TlsUnwrappedInfo
+        {
+            uint16 position = 0;
+        }
+
+        struct TlsUnwrappedData
+        {
+            TlsUnwrappedInfo info;
+            uint16 length;
+            octets[length] payload;
+        }
     }
 }
