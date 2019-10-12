@@ -50,6 +50,7 @@ import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.reaktivity.nukleus.buffer.BufferPool;
+import org.reaktivity.nukleus.buffer.CountingBufferPool;
 import org.reaktivity.nukleus.concurrent.SignalingExecutor;
 import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessageFunction;
@@ -151,13 +152,15 @@ public final class TlsServerFactory implements StreamFactory
     private final SignalingExecutor executor;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
-    private final BufferPool bufferPool;
+    private final BufferPool decodePool;
+    private final BufferPool encodePool;
     private final LongUnaryOperator supplyInitialId;
     private final LongUnaryOperator supplyReplyId;
     private final int replyPaddingAdjust;
 
     private final Long2ObjectHashMap<TlsServer.TlsStream> correlations;
     private final Function<String, TlsStoreInfo> lookupContext;
+    private final TlsCounters counters;
 
     private final ByteBuffer inNetByteBuffer;
     private final MutableDirectBuffer inNetBuffer;
@@ -183,9 +186,11 @@ public final class TlsServerFactory implements StreamFactory
         this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
         this.executor = requireNonNull(executor);
         this.lookupContext = requireNonNull(lookupContext);
+        this.counters = requireNonNull(counters);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
-        this.bufferPool = requireNonNull(bufferPool);
+        this.decodePool = new CountingBufferPool(bufferPool, counters.serverDecodeAcquires, counters.serverDecodeReleases);
+        this.encodePool = new CountingBufferPool(bufferPool, counters.serverEncodeAcquires, counters.serverEncodeReleases);
         this.supplyInitialId = requireNonNull(supplyInitialId);
         this.supplyReplyId = requireNonNull(supplyReplyId);
         this.replyPaddingAdjust = Math.min(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
@@ -422,8 +427,6 @@ public final class TlsServerFactory implements StreamFactory
 
             if (limit >= tlsRecordLimit)
             {
-                server.decoder = decodeHandshake;
-
                 if (tlsRecordInfo.type() == TlsContentType.HANDSHAKE.value())
                 {
                     final TlsHandshakeFW tlsHandshake = tlsHandshakeRO.tryWrap(buffer, tlsFragmentOffset, tlsRecordLimit);
@@ -435,26 +438,31 @@ public final class TlsServerFactory implements StreamFactory
                         if (tlsClientHello != null)
                         {
                             server.onDecodeClientHello(traceId, authorization, tlsClientHello);
-
-                            if (server.tlsEngine != null)
-                            {
-                                try
-                                {
-                                    server.tlsEngine.beginHandshake();
-                                }
-                                catch (SSLException ex)
-                                {
-                                    server.tlsEngine = null;
-                                }
-                            }
-
-                            if (server.tlsEngine == null)
-                            {
-                                server.cleanupNetwork(traceId);
-                                server.decoder = decodeIgnoreAll;
-                            }
                         }
                     }
+                }
+
+                if (server.tlsEngine == null)
+                {
+                    counters.serverDecodeNoClientHello.getAsLong();
+                }
+                else
+                {
+                    try
+                    {
+                        server.tlsEngine.beginHandshake();
+                        server.decoder = decodeHandshake;
+                    }
+                    catch (SSLException ex)
+                    {
+                        server.tlsEngine = null;
+                    }
+                }
+
+                if (server.tlsEngine == null)
+                {
+                    server.cleanupNetwork(traceId);
+                    server.decoder = decodeIgnoreAll;
                 }
             }
         }
@@ -922,7 +930,7 @@ public final class TlsServerFactory implements StreamFactory
             authorization = begin.authorization();
             state = TlsState.openInitial(state);
 
-            doNetworkWindow(traceId, bufferPool.slotCapacity(), 0, 0L);
+            doNetworkWindow(traceId, decodePool.slotCapacity(), 0, 0L);
             doNetworkBegin(traceId);
         }
 
@@ -943,7 +951,7 @@ public final class TlsServerFactory implements StreamFactory
             {
                 if (decodeSlot == NO_SLOT)
                 {
-                    decodeSlot = bufferPool.acquire(initialId);
+                    decodeSlot = decodePool.acquire(initialId);
                 }
 
                 if (decodeSlot == NO_SLOT)
@@ -957,7 +965,7 @@ public final class TlsServerFactory implements StreamFactory
                     int offset = payload.offset();
                     int limit = payload.limit();
 
-                    final MutableDirectBuffer buffer = bufferPool.buffer(decodeSlot);
+                    final MutableDirectBuffer buffer = decodePool.buffer(decodeSlot);
                     buffer.putBytes(decodeSlotOffset, payload.buffer(), offset, limit - offset);
                     decodeSlotOffset += limit - offset;
                     decodeSlotReserved += reserved;
@@ -1054,7 +1062,7 @@ public final class TlsServerFactory implements StreamFactory
 
             if (encodeSlot != NO_SLOT)
             {
-                final MutableDirectBuffer buffer = bufferPool.buffer(encodeSlot);
+                final MutableDirectBuffer buffer = encodePool.buffer(encodeSlot);
                 final int limit = encodeSlotOffset;
 
                 encodeNetwork(encodeSlotTraceId, authorization, groupId, buffer, 0, limit);
@@ -1097,7 +1105,7 @@ public final class TlsServerFactory implements StreamFactory
 
                 if (decodeSlot != NO_SLOT)
                 {
-                    buffer = bufferPool.buffer(decodeSlot);
+                    buffer = decodePool.buffer(decodeSlot);
                     limit = decodeSlotOffset;
                     reserved = decodeSlotReserved;
                 }
@@ -1123,7 +1131,7 @@ public final class TlsServerFactory implements StreamFactory
         {
             if (encodeSlot != NO_SLOT)
             {
-                final MutableDirectBuffer encodeBuffer = bufferPool.buffer(encodeSlot);
+                final MutableDirectBuffer encodeBuffer = encodePool.buffer(encodeSlot);
                 encodeBuffer.putBytes(encodeSlotOffset, buffer, offset, limit - offset);
                 encodeSlotOffset += limit - offset;
                 encodeSlotTraceId = traceId;
@@ -1225,7 +1233,7 @@ public final class TlsServerFactory implements StreamFactory
             {
                 if (encodeSlot == NO_SLOT)
                 {
-                    encodeSlot = bufferPool.acquire(replyId);
+                    encodeSlot = encodePool.acquire(replyId);
                 }
 
                 if (encodeSlot == NO_SLOT)
@@ -1234,7 +1242,7 @@ public final class TlsServerFactory implements StreamFactory
                 }
                 else
                 {
-                    final MutableDirectBuffer encodeBuffer = bufferPool.buffer(encodeSlot);
+                    final MutableDirectBuffer encodeBuffer = encodePool.buffer(encodeSlot);
                     encodeBuffer.putBytes(0, buffer, offset + length, remaining);
                     encodeSlotOffset = remaining;
                 }
@@ -1271,7 +1279,7 @@ public final class TlsServerFactory implements StreamFactory
             {
                 if (decodeSlot == NO_SLOT)
                 {
-                    decodeSlot = bufferPool.acquire(initialId);
+                    decodeSlot = decodePool.acquire(initialId);
                 }
 
                 if (decodeSlot == NO_SLOT)
@@ -1280,7 +1288,7 @@ public final class TlsServerFactory implements StreamFactory
                 }
                 else
                 {
-                    final MutableDirectBuffer decodeBuffer = bufferPool.buffer(decodeSlot);
+                    final MutableDirectBuffer decodeBuffer = decodePool.buffer(decodeSlot);
                     decodeBuffer.putBytes(0, buffer, progress, limit - progress);
                     decodeSlotOffset = limit - progress;
                     decodeSlotReserved = (limit - progress) * reserved / (limit - offset);
@@ -1308,7 +1316,7 @@ public final class TlsServerFactory implements StreamFactory
             {
                 final long groupId = decodeSlotGroupId; // TODO: signal.groupId ?
 
-                final MutableDirectBuffer buffer = bufferPool.buffer(decodeSlot);
+                final MutableDirectBuffer buffer = decodePool.buffer(decodeSlot);
                 final int offset = 0;
                 final int limit = decodeSlotOffset;
                 final int reserved = decodeSlotReserved;
@@ -1564,7 +1572,7 @@ public final class TlsServerFactory implements StreamFactory
         {
             if (decodeSlot != NO_SLOT)
             {
-                bufferPool.release(decodeSlot);
+                decodePool.release(decodeSlot);
                 decodeSlot = NO_SLOT;
                 decodeSlotOffset = 0;
                 decodeSlotReserved = 0;
@@ -1575,7 +1583,7 @@ public final class TlsServerFactory implements StreamFactory
         {
             if (encodeSlot != NO_SLOT)
             {
-                bufferPool.release(encodeSlot);
+                encodePool.release(encodeSlot);
                 encodeSlot = NO_SLOT;
                 encodeSlotOffset = 0;
                 encodeSlotTraceId = 0;
