@@ -21,13 +21,11 @@ import java.util.function.LongSupplier;
 
 public class TlsCounters
 {
-    public final Function<String, LongSupplier> supplyCounter;
-    public final Function<String, LongConsumer> supplyAccumulator;
-
-    public final LongSupplier serverNetworkAcquires;
-    public final LongSupplier serverNetworkReleases;
-    public final LongSupplier serverApplicationAcquires;
-    public final LongSupplier serverApplicationReleases;
+    public final LongSupplier serverDecodeNoClientHello;
+    public final LongSupplier serverDecodeAcquires;
+    public final LongSupplier serverDecodeReleases;
+    public final LongSupplier serverEncodeAcquires;
+    public final LongSupplier serverEncodeReleases;
     public final LongSupplier clientNetworkAcquires;
     public final LongSupplier clientNetworkReleases;
     public final LongSupplier clientApplicationAcquires;
@@ -37,13 +35,11 @@ public class TlsCounters
         Function<String, LongSupplier> supplyCounter,
         Function<String, LongConsumer> supplyAccumulator)
     {
-        this.supplyCounter = supplyCounter;
-        this.supplyAccumulator = supplyAccumulator;
-
-        this.serverNetworkAcquires = supplyCounter.apply("tls.server.network.acquires");
-        this.serverNetworkReleases = supplyCounter.apply("tls.server.network.releases");
-        this.serverApplicationAcquires = supplyCounter.apply("tls.server.application.acquires");
-        this.serverApplicationReleases = supplyCounter.apply("tls.server.application.releases");
+        this.serverDecodeNoClientHello = supplyCounter.apply("tls.server.decode.no.client.hello");
+        this.serverDecodeAcquires = supplyCounter.apply("tls.server.decode.acquires");
+        this.serverDecodeReleases = supplyCounter.apply("tls.server.decode.releases");
+        this.serverEncodeAcquires = supplyCounter.apply("tls.server.encode.acquires");
+        this.serverEncodeReleases = supplyCounter.apply("tls.server.encode.releases");
         this.clientNetworkAcquires = supplyCounter.apply("tls.client.network.acquires");
         this.clientNetworkReleases = supplyCounter.apply("tls.client.network.releases");
         this.clientApplicationAcquires = supplyCounter.apply("tls.client.application.acquires");
