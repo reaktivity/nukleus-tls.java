@@ -998,15 +998,11 @@ public final class TlsServerFactory implements StreamFactory
 
                 cleanupDecodeSlotIfNecessary();
 
-                if (stream.isPresent())
-                {
-                    stream.get().doApplicationAbortIfNecessary(traceId);
-                    doEncodeWrapIfNecessary(traceId, budgetId);
-                }
-                else
-                {
-                    doEncodeCloseOutbound(traceId, budgetId);
-                }
+                // TODO: support half-closed in-bound plus close-on-flush out-bound
+                stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
+                stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
+
+                doEncodeCloseOutbound(traceId, budgetId);
 
                 decoder = decodeIgnoreAll;
             }
