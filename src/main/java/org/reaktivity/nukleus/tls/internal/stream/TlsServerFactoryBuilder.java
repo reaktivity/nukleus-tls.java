@@ -24,7 +24,7 @@ import java.util.function.ToIntFunction;
 
 import org.agrona.MutableDirectBuffer;
 import org.reaktivity.nukleus.buffer.BufferPool;
-import org.reaktivity.nukleus.concurrent.SignalingExecutor;
+import org.reaktivity.nukleus.concurrent.Signaler;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
@@ -38,7 +38,7 @@ public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
     private final Function<String, TlsStoreInfo> lookupStoreInfo;
 
     private RouteManager router;
-    private SignalingExecutor executor;
+    private Signaler signaler;
     private MutableDirectBuffer writeBuffer;
     private LongUnaryOperator supplyInitialId;
     private LongUnaryOperator supplyReplyId;
@@ -64,10 +64,10 @@ public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public TlsServerFactoryBuilder setExecutor(
-        SignalingExecutor executor)
+    public TlsServerFactoryBuilder setSignaler(
+        Signaler signaler)
     {
-        this.executor = executor;
+        this.signaler = signaler;
         return this;
     }
 
@@ -105,7 +105,7 @@ public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
 
     @Override
     public StreamFactoryBuilder setCounterSupplier(
-            Function<String, LongSupplier> supplyCounter)
+        Function<String, LongSupplier> supplyCounter)
     {
         this.supplyCounter = supplyCounter;
         return this;
@@ -135,7 +135,7 @@ public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
 
         return new TlsServerFactory(
             config,
-            executor,
+            signaler,
             router,
             writeBuffer,
             bufferPool,
