@@ -556,7 +556,7 @@ public final class TlsServerFactory implements StreamFactory
                             else
                             {
                                 assert bytesConsumed == tlsRecordDataLimit - tlsRecordOffset;
-                                assert bytesProduced <= bytesConsumed;
+                                assert bytesProduced <= bytesConsumed : String.format("%d <= %d", bytesProduced, bytesConsumed);
 
                                 tlsUnwrappedDataRW.wrap(buffer, tlsRecordDataOffset, tlsRecordDataLimit)
                                                   .payload(outAppBuffer, 0, bytesProduced)
@@ -616,9 +616,9 @@ public final class TlsServerFactory implements StreamFactory
             final int bytesProgress = bytesOffset + bytesPosition;
             final int bytesLimit = bytesOffset + bytesProduced;
 
-            assert bytesPosition < bytesProduced;
-            assert bytesReserved >= bytesOffset;
-            assert bytesReserved >= bytesProduced;
+            assert bytesPosition < bytesProduced : String.format("%d < %d", bytesPosition, bytesProduced);
+            assert bytesReserved >= bytesOffset : String.format("%d >= %d", bytesReserved, bytesOffset);
+            assert bytesReserved >= bytesProduced : String.format("%d >= %d", bytesReserved, bytesProduced);
 
             final int bytesReservedOffset =
                     bytesPosition != 0 ? bytesOffset + (bytesReserved - bytesOffset) * bytesPosition / bytesProduced : 0;
@@ -629,8 +629,8 @@ public final class TlsServerFactory implements StreamFactory
             final int maxBytesLimit = bytesOffset + bytesProduced * bytesReservedLimit / bytesReserved;
             final int maxBytesProduced = maxBytesLimit - bytesProgress;
 
-            assert maxBytesReserved >= maxBytesProduced;
-            assert maxBytesLimit <= bytesLimit;
+            assert maxBytesReserved >= maxBytesProduced : String.format("%d >= %d", maxBytesReserved, maxBytesProduced);
+            assert maxBytesLimit <= bytesLimit : String.format("%d <= %d", maxBytesLimit, bytesLimit);
 
             if (maxBytesProduced > 0)
             {
@@ -1181,7 +1181,7 @@ public final class TlsServerFactory implements StreamFactory
             int credit,
             int padding)
         {
-            assert credit > 0;
+            assert credit > 0 : String.format("%d > 0", credit);
 
             initialBudget += credit;
 
@@ -1220,7 +1220,7 @@ public final class TlsServerFactory implements StreamFactory
 
                 replyBudget -= reserved;
 
-                assert replyBudget >= 0;
+                assert replyBudget >= 0 : String.format("%d >= 0", replyBudget);
 
                 doData(network, routeId, replyId, traceId, authorization, budgetId,
                        reserved, buffer, offset, length, EMPTY_EXTENSION);
@@ -1296,7 +1296,19 @@ public final class TlsServerFactory implements StreamFactory
             {
                 cleanupDecodeSlotIfNecessary();
 
-                if (!stream.isPresent())
+                if (TlsState.initialClosed(state))
+                {
+                    closeInboundQuietly(tlsEngine);
+
+                    // TODO: support half-closed in-bound plus close-on-flush out-bound
+                    stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
+                    stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
+
+                    doEncodeCloseOutbound(traceId, budgetId);
+
+                    decoder = decodeIgnoreAll;
+                }
+                else if (!stream.isPresent())
                 {
                     final int credit = progress - offset;
                     if (credit > 0)
@@ -1755,7 +1767,7 @@ public final class TlsServerFactory implements StreamFactory
                 int offset,
                 int length)
             {
-                assert reserved >= length + initialPadding;
+                assert reserved >= length + initialPadding : String.format("%d >= %d", reserved, length + initialPadding);
 
                 initialBudget -= reserved;
 
