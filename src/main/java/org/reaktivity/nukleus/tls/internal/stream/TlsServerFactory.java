@@ -551,6 +551,7 @@ public final class TlsServerFactory implements StreamFactory
                         case OK:
                             if (bytesProduced == 0)
                             {
+                                assert result.getHandshakeStatus() != HandshakeStatus.FINISHED;
                                 server.decoder = decodeHandshake;
                             }
                             else
@@ -723,6 +724,10 @@ public final class TlsServerFactory implements StreamFactory
                     break;
                 case OK:
                     assert bytesProduced == 0;
+                    if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
+                    {
+                        server.onDecodeHandshakeFinished(traceId, budgetId);
+                    }
                     server.decoder = decodeHandshake;
                     break;
                 case CLOSED:
@@ -1075,7 +1080,7 @@ public final class TlsServerFactory implements StreamFactory
         private void onNetworkSignal(
             SignalFW signal)
         {
-            switch ((int) signal.signalId())
+            switch (signal.signalId())
             {
             case HANDSHAKE_TASK_COMPLETE_SIGNAL:
                 onNetworkSignalHandshakeTaskComplete(signal);
@@ -1097,15 +1102,15 @@ public final class TlsServerFactory implements StreamFactory
                 final long budgetId = decodeSlotBudgetId; // TODO: signal.budgetId ?
 
                 MutableDirectBuffer buffer = EMPTY_MUTABLE_DIRECT_BUFFER;
+                int reserved = 0;
                 int offset = 0;
                 int limit = 0;
-                int reserved = 0;
 
                 if (decodeSlot != NO_SLOT)
                 {
+                    reserved = decodeSlotReserved;
                     buffer = decodePool.buffer(decodeSlot);
                     limit = decodeSlotOffset;
-                    reserved = decodeSlotReserved;
                 }
 
                 decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
@@ -1345,9 +1350,9 @@ public final class TlsServerFactory implements StreamFactory
                 final long budgetId = decodeSlotBudgetId; // TODO: signal.budgetId ?
 
                 final MutableDirectBuffer buffer = decodePool.buffer(decodeSlot);
+                final int reserved = decodeSlotReserved;
                 final int offset = 0;
                 final int limit = decodeSlotOffset;
-                final int reserved = decodeSlotReserved;
 
                 decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
             }
@@ -1490,7 +1495,7 @@ public final class TlsServerFactory implements StreamFactory
             }
             else
             {
-                doEncodeCloseOutbound(traceId, budgetId);
+                tlsEngine.closeOutbound();
             }
         }
 
@@ -1541,6 +1546,7 @@ public final class TlsServerFactory implements StreamFactory
                         assert result.bytesProduced() > 0;
                         bytesProduced += result.bytesProduced();
                         stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
+                        state = TlsState.closingReply(state);
                         break loop;
                     case OK:
                         assert result.bytesProduced() > 0;
@@ -1961,7 +1967,8 @@ public final class TlsServerFactory implements StreamFactory
             return (state & REPLY_OPENED) != 0;
         }
 
-        static int closingReply(int state)
+        static int closingReply(
+            int state)
         {
             return state | REPLY_CLOSING;
         }
@@ -1978,7 +1985,8 @@ public final class TlsServerFactory implements StreamFactory
             return (state & REPLY_CLOSING) != 0;
         }
 
-        static boolean replyClosed(int state)
+        static boolean replyClosed(
+            int state)
         {
             return (state & REPLY_CLOSED) != 0;
         }
