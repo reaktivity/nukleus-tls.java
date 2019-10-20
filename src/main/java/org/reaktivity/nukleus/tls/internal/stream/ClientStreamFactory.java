@@ -1349,7 +1349,7 @@ public final class ClientStreamFactory implements StreamFactory
                     }
                 }
             }
-            catch (Exception ex)
+            catch (SSLException ex)
             {
                 networkReplySlotOffset = 0;
                 applicationReplySlotOffset = 0;
