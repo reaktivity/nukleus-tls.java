@@ -129,6 +129,9 @@ public final class ClientStreamFactory implements StreamFactory
     private final ByteBuffer outNetByteBuffer;
     private final DirectBuffer outNetBuffer;
 
+    private final ByteBuffer inNetByteBuffer;
+    private final MutableDirectBuffer inNetBuffer;
+
     public ClientStreamFactory(
         TlsConfiguration config,
         SignalingExecutor executor,
@@ -163,6 +166,9 @@ public final class ClientStreamFactory implements StreamFactory
         this.outAppByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outNetByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
+
+        this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
+        this.inNetBuffer = new UnsafeBuffer(inNetByteBuffer);
     }
 
     @Override
@@ -1261,10 +1267,11 @@ public final class ClientStreamFactory implements StreamFactory
                 }
                 else
                 {
-                    final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkReplySlot);
-                    final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkReplySlot);
-                    final int inNetByteBufferPosition = inNetByteBuffer.position();
-                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset);
+                    final MutableDirectBuffer inNetPoolBuffer = networkPool.buffer(networkReplySlot);
+
+                    inNetByteBuffer.clear();
+                    inNetBuffer.putBytes(0, inNetPoolBuffer, 0, networkReplySlotOffset);
+                    inNetByteBuffer.limit(networkReplySlotOffset);
 
                     loop:
                     while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
@@ -1278,9 +1285,9 @@ public final class ClientStreamFactory implements StreamFactory
                         {
                         case BUFFER_OVERFLOW:
                         case BUFFER_UNDERFLOW:
-                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
+                            final int totalBytesConsumed = inNetByteBuffer.position();
                             final int totalBytesRemaining = inNetByteBuffer.remaining();
-                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
+                            alignSlotBuffer(inNetPoolBuffer, totalBytesConsumed, totalBytesRemaining);
                             networkReplySlotOffset = totalBytesRemaining;
                             if (networkReplySlotOffset == networkPool.slotCapacity() &&
                                     result.getStatus() == BUFFER_UNDERFLOW)
