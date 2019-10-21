@@ -129,7 +129,8 @@ public final class ClientStreamFactory implements StreamFactory
     private final ByteBuffer outNetByteBuffer;
     private final DirectBuffer outNetBuffer;
 
-    private final ByteBuffer tempInNetByteBuffer;
+    private final ByteBuffer inNetByteBuffer;
+    private final MutableDirectBuffer inNetBuffer;
 
     public ClientStreamFactory(
         TlsConfiguration config,
@@ -166,7 +167,8 @@ public final class ClientStreamFactory implements StreamFactory
         this.outNetByteBuffer = allocateDirect(writeBuffer.capacity());
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
 
-        this.tempInNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
+        this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
+        this.inNetBuffer = new UnsafeBuffer(inNetByteBuffer);
     }
 
     @Override
@@ -1265,37 +1267,27 @@ public final class ClientStreamFactory implements StreamFactory
                 }
                 else
                 {
-                    final MutableDirectBuffer inNetBuffer = networkPool.buffer(networkReplySlot);
-                    final ByteBuffer inNetByteBuffer = networkPool.byteBuffer(networkReplySlot);
-                    final int inNetByteBufferPosition = inNetByteBuffer.position();
-                    inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset);
+                    final MutableDirectBuffer inNetPoolBuffer = networkPool.buffer(networkReplySlot);
 
-                    tempInNetByteBuffer.clear();
-                    tempInNetByteBuffer.put(inNetByteBuffer);
-                    inNetByteBuffer.position(inNetByteBufferPosition);
-                    final int position = tempInNetByteBuffer.position();
-                    tempInNetByteBuffer.position(0);
-                    tempInNetByteBuffer.limit(position);
-
-                    int bytesConsumed = 0;
+                    inNetByteBuffer.clear();
+                    inNetBuffer.putBytes(0, inNetPoolBuffer, 0, networkReplySlotOffset);
+                    inNetByteBuffer.limit(networkReplySlotOffset);
 
                     loop:
-                    while (tempInNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
                         final ByteBuffer outAppByteBuffer = applicationPool.byteBuffer(applicationReplySlot);
                         outAppByteBuffer.position(outAppByteBuffer.position() + applicationReplySlotOffset);
 
-                        SSLEngineResult result = tlsEngine.unwrap(tempInNetByteBuffer, outAppByteBuffer);
-
-                        bytesConsumed += result.bytesConsumed();
+                        SSLEngineResult result = tlsEngine.unwrap(inNetByteBuffer, outAppByteBuffer);
 
                         switch (result.getStatus())
                         {
                         case BUFFER_OVERFLOW:
                         case BUFFER_UNDERFLOW:
-                            final int totalBytesConsumed = inNetByteBuffer.position() - inNetByteBufferPosition;
+                            final int totalBytesConsumed = inNetByteBuffer.position();
                             final int totalBytesRemaining = inNetByteBuffer.remaining();
-                            alignSlotBuffer(inNetBuffer, totalBytesConsumed, totalBytesRemaining);
+                            alignSlotBuffer(inNetPoolBuffer, totalBytesConsumed, totalBytesRemaining);
                             networkReplySlotOffset = totalBytesRemaining;
                             if (networkReplySlotOffset == networkPool.slotCapacity() &&
                                     result.getStatus() == BUFFER_UNDERFLOW)
@@ -1325,8 +1317,6 @@ public final class ClientStreamFactory implements StreamFactory
                             break;
                         }
                     }
-
-                    inNetByteBuffer.position(inNetByteBufferPosition + bytesConsumed);
 
                     handleFlushAppData();
 
