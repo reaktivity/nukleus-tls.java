@@ -130,7 +130,6 @@ public final class ClientStreamFactory implements StreamFactory
     private final DirectBuffer outNetBuffer;
 
     private final ByteBuffer tempInNetByteBuffer;
-    private final ByteBuffer tempOutAppByteBuffer;
 
     public ClientStreamFactory(
         TlsConfiguration config,
@@ -168,7 +167,6 @@ public final class ClientStreamFactory implements StreamFactory
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
 
         this.tempInNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
-        this.tempOutAppByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
     }
 
     @Override
@@ -1272,30 +1270,24 @@ public final class ClientStreamFactory implements StreamFactory
                     final int inNetByteBufferPosition = inNetByteBuffer.position();
                     inNetByteBuffer.limit(inNetByteBuffer.position() + networkReplySlotOffset);
 
+                    tempInNetByteBuffer.clear();
+                    tempInNetByteBuffer.put(inNetByteBuffer);
+                    inNetByteBuffer.position(inNetByteBufferPosition);
+                    final int position = tempInNetByteBuffer.position();
+                    tempInNetByteBuffer.position(0);
+                    tempInNetByteBuffer.limit(position);
+
+                    int bytesConsumed = 0;
+
                     loop:
-                    while (inNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
+                    while (tempInNetByteBuffer.hasRemaining() && !tlsEngine.isInboundDone())
                     {
-                        tempInNetByteBuffer.clear();
-                        tempInNetByteBuffer.put(inNetByteBuffer);
-                        final int position = tempInNetByteBuffer.position();
-                        tempInNetByteBuffer.position(0);
-                        tempInNetByteBuffer.limit(position);
-                        tempOutAppByteBuffer.clear();
-                        tempOutAppByteBuffer.limit(position);
-
-                        SSLEngineResult result = tlsEngine.unwrap(tempInNetByteBuffer, tempOutAppByteBuffer);
-
-                        final int bytesConsumed = result.bytesConsumed();
-                        final int bytesProduced = result.bytesProduced();
-                        inNetByteBuffer.position(inNetByteBufferPosition + bytesConsumed);
-
                         final ByteBuffer outAppByteBuffer = applicationPool.byteBuffer(applicationReplySlot);
                         outAppByteBuffer.position(outAppByteBuffer.position() + applicationReplySlotOffset);
 
-                        if (bytesProduced > 0)
-                        {
-                            outAppByteBuffer.put(tempOutAppByteBuffer.array(), 0, bytesProduced);
-                        }
+                        SSLEngineResult result = tlsEngine.unwrap(tempInNetByteBuffer, outAppByteBuffer);
+
+                        bytesConsumed += result.bytesConsumed();
 
                         switch (result.getStatus())
                         {
@@ -1333,6 +1325,8 @@ public final class ClientStreamFactory implements StreamFactory
                             break;
                         }
                     }
+
+                    inNetByteBuffer.position(inNetByteBufferPosition + bytesConsumed);
 
                     handleFlushAppData();
 
