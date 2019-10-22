@@ -997,7 +997,7 @@ public final class TlsServerFactory implements StreamFactory
             authorization = end.authorization();
             state = TlsState.closeInitial(state);
 
-            if (decodeSlot == NO_SLOT)
+            if (decodeSlot == NO_SLOT || !stream.isPresent())
             {
                 closeInboundQuietly(tlsEngine);
 
@@ -1047,7 +1047,7 @@ public final class TlsServerFactory implements StreamFactory
             stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
             stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
 
-            doNetworkReset(traceId);
+            doNetworkResetIfNecessary(traceId);
         }
 
         private void onNetworkWindow(
@@ -1164,20 +1164,28 @@ public final class TlsServerFactory implements StreamFactory
             }
         }
 
-        private void doNetworkAbort(
+        private void doNetworkAbortIfNecessary(
             long traceId)
         {
+            if (!TlsState.replyClosed(state))
+            {
+                doAbort(network, routeId, replyId, traceId, authorization, EMPTY_EXTENSION);
+                state = TlsState.closeReply(state);
+            }
+
             cleanupEncodeSlotIfNecessary();
-            doAbort(network, routeId, replyId, traceId, authorization, EMPTY_EXTENSION);
-            state = TlsState.closeReply(state);
         }
 
-        private void doNetworkReset(
+        private void doNetworkResetIfNecessary(
             long traceId)
         {
+            if (!TlsState.initialClosed(state))
+            {
+                doReset(network, routeId, initialId, traceId, authorization);
+                state = TlsState.closeInitial(state);
+            }
+
             cleanupDecodeSlotIfNecessary();
-            doReset(network, routeId, initialId, traceId, authorization);
-            state = TlsState.closeInitial(state);
         }
 
         private void doNetworkWindow(
@@ -1206,24 +1214,6 @@ public final class TlsServerFactory implements StreamFactory
             }
 
             decodeNetworkIfNecessary(traceId);
-        }
-
-        private void doNetworkResetIfNecessary(
-            long traceId)
-        {
-            if (!TlsState.initialClosed(state))
-            {
-                doNetworkReset(traceId);
-            }
-        }
-
-        private void doNetworkAbortIfNecessary(
-            long traceId)
-        {
-            if (!TlsState.replyClosed(state))
-            {
-                doNetworkAbort(traceId);
-            }
         }
 
         private void encodeNetwork(
@@ -1706,7 +1696,7 @@ public final class TlsServerFactory implements StreamFactory
                 if (replyBudget < 0)
                 {
                     cleanupApplication(traceId);
-                    doNetworkAbort(traceId);
+                    doNetworkAbortIfNecessary(traceId);
                 }
                 else if (data.length() > 0)
                 {
@@ -1803,7 +1793,7 @@ public final class TlsServerFactory implements StreamFactory
 
                 if (initialBudget < 0)
                 {
-                    doNetworkReset(traceId);
+                    doNetworkResetIfNecessary(traceId);
                     cleanupApplication(traceId);
                 }
                 else
