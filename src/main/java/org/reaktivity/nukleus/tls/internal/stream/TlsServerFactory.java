@@ -1513,19 +1513,23 @@ public final class TlsServerFactory implements StreamFactory
             long budgetId,
             OctetsFW payload)
         {
+            final DirectBuffer buffer = payload.buffer();
+            final int offset = payload.offset();
+            final int length = payload.sizeof();
+
             inAppByteBuffer.clear();
-            inAppBuffer.putBytes(0, payload.buffer(), payload.offset(), payload.sizeof());
-            inAppByteBuffer.limit(payload.sizeof());
+            inAppBuffer.putBytes(0, buffer, offset, length);
+            inAppByteBuffer.limit(length);
             outNetByteBuffer.clear();
 
             try
             {
-                int bytesProduced = 0;
-
                 loop:
                 do
                 {
                     final SSLEngineResult result = tlsEngine.wrap(inAppByteBuffer, outNetByteBuffer);
+                    final int bytesProduced = result.bytesProduced();
+
                     switch (result.getStatus())
                     {
                     case BUFFER_OVERFLOW:
@@ -1533,14 +1537,12 @@ public final class TlsServerFactory implements StreamFactory
                         assert false;
                         break;
                     case CLOSED:
-                        assert result.bytesProduced() > 0;
-                        bytesProduced += result.bytesProduced();
+                        assert bytesProduced > 0;
                         stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
                         state = TlsState.closingReply(state);
                         break loop;
                     case OK:
-                        assert result.bytesProduced() > 0;
-                        bytesProduced += result.bytesProduced();
+                        assert bytesProduced > 0;
                         if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
                         {
                             onDecodeHandshakeFinished(traceId, budgetId);
@@ -1549,7 +1551,8 @@ public final class TlsServerFactory implements StreamFactory
                     }
                 } while (inAppByteBuffer.hasRemaining());
 
-                doNetworkData(traceId, budgetId, outNetBuffer, 0, bytesProduced);
+                final int outNetBytesProduced = outNetByteBuffer.position();
+                doNetworkData(traceId, budgetId, outNetBuffer, 0, outNetBytesProduced);
             }
             catch (SSLException ex)
             {
