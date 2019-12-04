@@ -131,6 +131,8 @@ public final class TlsServerFactory implements StreamFactory
     private final TlsUnwrappedDataFW tlsUnwrappedDataRO = new TlsUnwrappedDataFW();
     private final TlsUnwrappedDataFW.Builder tlsUnwrappedDataRW = new TlsUnwrappedDataFW.Builder();
 
+    private final List<Runnable> decodeDelegateTasks = new ArrayList<>();
+
     private final TlsServerDecoder decodeClientHello = this::decodeClientHello;
     private final TlsServerDecoder decodeHandshake = this::decodeHandshake;
     private final TlsServerDecoder decodeHandshakeFinished = this::decodeHandshakeFinished;
@@ -1280,7 +1282,7 @@ public final class TlsServerFactory implements StreamFactory
         {
             TlsServerDecoder previous = null;
             int progress = offset;
-            while (progress <= limit && previous != decoder)
+            while (progress <= limit && previous != decoder && handshakeTasks == 0)
             {
                 previous = decoder;
                 progress = decoder.decode(this, traceId, authorization, budgetId, reserved, buffer, offset, progress, limit);
@@ -1434,13 +1436,22 @@ public final class TlsServerFactory implements StreamFactory
             long traceId,
             long authorization)
         {
-            for (Runnable runnable = tlsEngine.getDelegatedTask();
-                    runnable != null;
-                    runnable = tlsEngine.getDelegatedTask())
+            if (handshakeTasks == 0)
             {
-                final long futureId = signaler.signalTask(runnable, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
-                handshakeTaskFutureIds.add(futureId);
-                handshakeTasks++;
+                decodeDelegateTasks.clear();
+                for (Runnable delegatedTask = tlsEngine.getDelegatedTask();
+                     delegatedTask != null;
+                     delegatedTask = tlsEngine.getDelegatedTask())
+                {
+                    decodeDelegateTasks.add(delegatedTask);
+                }
+
+                for (Runnable delegateTask : decodeDelegateTasks)
+                {
+                    final long futureId = signaler.signalTask(delegateTask, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
+                    handshakeTaskFutureIds.add(futureId);
+                    handshakeTasks++;
+                }
             }
         }
 
