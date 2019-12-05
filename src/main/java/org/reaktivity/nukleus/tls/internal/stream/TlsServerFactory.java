@@ -17,6 +17,7 @@ package org.reaktivity.nukleus.tls.internal.stream;
 
 import static java.util.Objects.requireNonNull;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
+import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
 
 import java.nio.ByteBuffer;
 import java.security.cert.Certificate;
@@ -45,7 +46,6 @@ import javax.security.auth.x500.X500Principal;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
-import org.agrona.collections.LongHashSet;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.reaktivity.nukleus.buffer.BufferPool;
 import org.reaktivity.nukleus.buffer.CountingBufferPool;
@@ -130,8 +130,6 @@ public final class TlsServerFactory implements StreamFactory
     private final TlsUnwrappedInfoFW.Builder tlsUnwrappedInfoRW = new TlsUnwrappedInfoFW.Builder();
     private final TlsUnwrappedDataFW tlsUnwrappedDataRO = new TlsUnwrappedDataFW();
     private final TlsUnwrappedDataFW.Builder tlsUnwrappedDataRW = new TlsUnwrappedDataFW.Builder();
-
-    private final List<Runnable> decodeDelegateTasks = new ArrayList<>();
 
     private final TlsServerDecoder decodeClientHello = this::decodeClientHello;
     private final TlsServerDecoder decodeHandshake = this::decodeHandshake;
@@ -852,8 +850,7 @@ public final class TlsServerFactory implements StreamFactory
         private long authorization;
         private long affinity;
 
-        private final LongHashSet handshakeTaskFutureIds;
-        private int handshakeTasks;
+        private long handshakeTaskFutureId = NO_CANCEL_ID;
 
         private int decodeSlot = NO_SLOT;
         private int decodeSlotOffset;
@@ -885,7 +882,6 @@ public final class TlsServerFactory implements StreamFactory
             this.initialId = networkInitialId;
             this.replyId = supplyReplyId.applyAsLong(initialId);
             this.decoder = decodeClientHello;
-            this.handshakeTaskFutureIds = new LongHashSet();
             this.stream = NULL_STREAM;
         }
 
@@ -1093,30 +1089,27 @@ public final class TlsServerFactory implements StreamFactory
         private void onNetworkSignalHandshakeTaskComplete(
             SignalFW signal)
         {
-            handshakeTasks--;
+            assert handshakeTaskFutureId != NO_CANCEL_ID;
 
-            if (handshakeTasks == 0)
+            handshakeTaskFutureId = NO_CANCEL_ID;
+
+            final long traceId = signal.traceId();
+            final long authorization = signal.authorization();
+            final long budgetId = decodeSlotBudgetId; // TODO: signal.budgetId ?
+
+            MutableDirectBuffer buffer = EMPTY_MUTABLE_DIRECT_BUFFER;
+            int reserved = 0;
+            int offset = 0;
+            int limit = 0;
+
+            if (decodeSlot != NO_SLOT)
             {
-                handshakeTaskFutureIds.clear();
-
-                final long traceId = signal.traceId();
-                final long authorization = signal.authorization();
-                final long budgetId = decodeSlotBudgetId; // TODO: signal.budgetId ?
-
-                MutableDirectBuffer buffer = EMPTY_MUTABLE_DIRECT_BUFFER;
-                int reserved = 0;
-                int offset = 0;
-                int limit = 0;
-
-                if (decodeSlot != NO_SLOT)
-                {
-                    reserved = decodeSlotReserved;
-                    buffer = decodePool.buffer(decodeSlot);
-                    limit = decodeSlotOffset;
-                }
-
-                decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
+                reserved = decodeSlotReserved;
+                buffer = decodePool.buffer(decodeSlot);
+                limit = decodeSlotOffset;
             }
+
+            decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
         }
 
         private void doNetworkBegin(
@@ -1282,7 +1275,7 @@ public final class TlsServerFactory implements StreamFactory
         {
             TlsServerDecoder previous = null;
             int progress = offset;
-            while (progress <= limit && previous != decoder && handshakeTasks == 0)
+            while (progress <= limit && previous != decoder && handshakeTaskFutureId == NO_CANCEL_ID)
             {
                 previous = decoder;
                 progress = decoder.decode(this, traceId, authorization, budgetId, reserved, buffer, offset, progress, limit);
@@ -1436,22 +1429,11 @@ public final class TlsServerFactory implements StreamFactory
             long traceId,
             long authorization)
         {
-            if (handshakeTasks == 0)
+            if (handshakeTaskFutureId == NO_CANCEL_ID)
             {
-                decodeDelegateTasks.clear();
-                for (Runnable delegatedTask = tlsEngine.getDelegatedTask();
-                     delegatedTask != null;
-                     delegatedTask = tlsEngine.getDelegatedTask())
-                {
-                    decodeDelegateTasks.add(delegatedTask);
-                }
-
-                for (Runnable delegateTask : decodeDelegateTasks)
-                {
-                    final long futureId = signaler.signalTask(delegateTask, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
-                    handshakeTaskFutureIds.add(futureId);
-                    handshakeTasks++;
-                }
+                final Runnable delegatedTask = tlsEngine.getDelegatedTask();
+                assert delegatedTask != null;
+                handshakeTaskFutureId = signaler.signalTask(delegatedTask, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
             }
         }
 
