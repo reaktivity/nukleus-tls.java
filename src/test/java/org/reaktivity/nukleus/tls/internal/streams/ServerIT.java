@@ -51,11 +51,6 @@ public class ServerIT
     @Rule
     public final TestRule chain = outerRule(reaktor).around(k3po).around(timeout);
 
-    /*
-     * no route for protocol2, route for null protocol
-     * client omits ALPN
-     * negotiates successfully without ALPN, so protocol == "" => null    --> BEGIN(appplicationProtocol=null)
-     */
     @Test
     @Specification({
         "${route}/server/controller",
@@ -80,11 +75,6 @@ public class ServerIT
         k3po.finish();
     }
 
-    /*
-     * route for protocol2
-     * client sends ALPN w/ protocol2
-     * negotiates successfully with ALPN, so protocol = protocol2       --> BEGIN(appplicationProtocol=protocol2)
-     */
     @Test
     @Specification({
             "${route}/server.alpn/controller",
@@ -97,11 +87,6 @@ public class ServerIT
         k3po.finish();
     }
 
-    /*
-     * no route for protocol2, route for null protocol
-     * client sends ALPN w/ protocol2
-     * negotiates successfully without ALPN, so protocol == "" => null    --> BEGIN(appplicationProtocol=null)
-     */
     @Test
     @Specification({
             "${route}/server/controller",
@@ -114,11 +99,6 @@ public class ServerIT
         k3po.finish();
     }
 
-    /*
-     * only one route, for protocol2
-     * client sends ALPN w/ protocol3
-     * negotiates unsuccessfully with ALPN, so protocol == null => TLS ERROR
-     */
     @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
@@ -132,11 +112,6 @@ public class ServerIT
         k3po.finish();
     }
 
-    /*
-     * only one route, for protocol2
-     * client omits ALPN
-     * negotiates successfully without ALPN, but protocol != protocol2 => RESET transport
-     */
     @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
@@ -149,10 +124,6 @@ public class ServerIT
         k3po.finish();
     }
 
-    /* Two routes, one for protocol2, one for null
-     * client sends ALPN w/ protocol2
-     * negotiates successfully with ALPN, so protocol = protocol2       --> BEGIN(appplicationProtocol=protocol2)
-     */
     @Test
     @Specification({
             "${route}/server.alpn.default/controller",
@@ -165,11 +136,6 @@ public class ServerIT
         k3po.finish();
     }
 
-    /*
-     * Two routes, one for protocol2, one for null
-     * client omits ALPN
-     * negotiates successfully without ALPN, so protocol = "" => null     --> BEGIN(appplicationProtocol=null)
-     */
     @Test
     @Specification({
             "${route}/server.alpn.default/controller",
@@ -363,7 +329,7 @@ public class ServerIT
         "${server}/server.want.auth/server"})
     @ScriptProperty({
         "clientAccept \"nukleus://streams/target#0\"",
-        "authorization  -2666130979403333631L" })           // "0xdb00000000000001"
+        "authorization  -2666130979403333631L" })           // "0xdb00000000000001L"
     public void serverWantClientAuth() throws Exception
     {
         k3po.finish();

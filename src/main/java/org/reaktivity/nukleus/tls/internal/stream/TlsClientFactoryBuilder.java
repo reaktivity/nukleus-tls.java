@@ -22,46 +22,41 @@ import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 
-import javax.net.ssl.SSLContext;
-
 import org.agrona.MutableDirectBuffer;
-import org.agrona.collections.Long2ObjectHashMap;
 import org.reaktivity.nukleus.buffer.BufferPool;
-import org.reaktivity.nukleus.concurrent.SignalingExecutor;
+import org.reaktivity.nukleus.concurrent.Signaler;
 import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
+import org.reaktivity.nukleus.tls.internal.TlsStoreInfo;
 
-public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
+public final class TlsClientFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final Function<String, SSLContext> lookupContext;
-    private final Long2ObjectHashMap<ClientStreamFactory.ClientHandshake> correlations;
+    private final Function<String, TlsStoreInfo> lookupStore;
 
     private RouteManager router;
-    private SignalingExecutor executor;
+    private Signaler signaler;
     private MutableDirectBuffer writeBuffer;
     private LongUnaryOperator supplyInitialId;
     private LongUnaryOperator supplyReplyId;
-    private LongSupplier supplyTraceId;
-    private ToIntFunction<String> supplyTypeId;
     private Supplier<BufferPool> supplyBufferPool;
+    private ToIntFunction<String> supplyTypeId;
     private Function<String, LongSupplier> supplyCounter;
     private Function<String, LongConsumer> supplyAccumulator;
 
-    public ClientStreamFactoryBuilder(
+    public TlsClientFactoryBuilder(
         TlsConfiguration config,
-        Function<String, SSLContext> lookupContext)
+        Function<String, TlsStoreInfo> lookupStore)
     {
         this.config = config;
-        this.lookupContext = lookupContext;
-        this.correlations = new Long2ObjectHashMap<>();
+        this.lookupStore = lookupStore;
     }
 
     @Override
-    public ClientStreamFactoryBuilder setRouteManager(
+    public TlsClientFactoryBuilder setRouteManager(
         RouteManager router)
     {
         this.router = router;
@@ -69,15 +64,15 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public ClientStreamFactoryBuilder setExecutor(
-        SignalingExecutor executor)
+    public TlsClientFactoryBuilder setSignaler(
+        Signaler signaler)
     {
-        this.executor = executor;
+        this.signaler = signaler;
         return this;
     }
 
     @Override
-    public ClientStreamFactoryBuilder setWriteBuffer(
+    public TlsClientFactoryBuilder setWriteBuffer(
         MutableDirectBuffer writeBuffer)
     {
         this.writeBuffer = writeBuffer;
@@ -85,7 +80,15 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public ClientStreamFactoryBuilder setInitialIdSupplier(
+    public StreamFactoryBuilder setTypeIdSupplier(
+        ToIntFunction<String> supplyTypeId)
+    {
+        this.supplyTypeId = supplyTypeId;
+        return this;
+    }
+
+    @Override
+    public TlsClientFactoryBuilder setInitialIdSupplier(
         LongUnaryOperator supplyInitialId)
     {
         this.supplyInitialId = supplyInitialId;
@@ -101,32 +104,8 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
-    public StreamFactoryBuilder setTraceIdSupplier(
-            LongSupplier supplyTraceId)
-    {
-        this.supplyTraceId = supplyTraceId;
-        return this;
-    }
-
-    @Override
-    public StreamFactoryBuilder setTypeIdSupplier(
-        ToIntFunction<String> supplyTypeId)
-    {
-        this.supplyTypeId = supplyTypeId;
-        return this;
-    }
-
-    @Override
-    public StreamFactoryBuilder setBufferPoolSupplier(
-        Supplier<BufferPool> supplyBufferPool)
-    {
-        this.supplyBufferPool = supplyBufferPool;
-        return this;
-    }
-
-    @Override
     public StreamFactoryBuilder setCounterSupplier(
-            Function<String, LongSupplier> supplyCounter)
+        Function<String, LongSupplier> supplyCounter)
     {
         this.supplyCounter = supplyCounter;
         return this;
@@ -141,23 +120,29 @@ public final class ClientStreamFactoryBuilder implements StreamFactoryBuilder
     }
 
     @Override
+    public StreamFactoryBuilder setBufferPoolSupplier(
+        Supplier<BufferPool> supplyBufferPool)
+    {
+        this.supplyBufferPool = supplyBufferPool;
+        return this;
+    }
+
+    @Override
     public StreamFactory build()
     {
         final BufferPool bufferPool = supplyBufferPool.get();
         final TlsCounters counters = new TlsCounters(supplyCounter, supplyAccumulator);
 
-        return new ClientStreamFactory(
+        return new TlsClientFactory(
             config,
-            executor,
+            signaler,
             router,
             writeBuffer,
             bufferPool,
             supplyInitialId,
             supplyReplyId,
-            supplyTraceId,
             supplyTypeId,
-            correlations,
-            lookupContext,
+            lookupStore,
             counters);
     }
 }

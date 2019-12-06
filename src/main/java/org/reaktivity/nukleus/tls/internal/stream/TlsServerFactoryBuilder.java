@@ -35,7 +35,7 @@ import org.reaktivity.nukleus.tls.internal.TlsStoreInfo;
 public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final Function<String, TlsStoreInfo> lookupStoreInfo;
+    private final Function<String, TlsStoreInfo> lookupStore;
 
     private RouteManager router;
     private Signaler signaler;
@@ -49,10 +49,10 @@ public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
 
     public TlsServerFactoryBuilder(
         TlsConfiguration config,
-        Function<String, TlsStoreInfo> lookupStoreInfo)
+        Function<String, TlsStoreInfo> lookupStore)
     {
         this.config = config;
-        this.lookupStoreInfo = lookupStoreInfo;
+        this.lookupStore = lookupStore;
     }
 
     @Override
@@ -142,7 +142,7 @@ public final class TlsServerFactoryBuilder implements StreamFactoryBuilder
             supplyInitialId,
             supplyReplyId,
             supplyTypeId,
-            lookupStoreInfo,
+            lookupStore,
             counters);
     }
 }

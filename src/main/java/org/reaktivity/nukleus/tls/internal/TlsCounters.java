@@ -26,10 +26,10 @@ public class TlsCounters
     public final LongSupplier serverDecodeReleases;
     public final LongSupplier serverEncodeAcquires;
     public final LongSupplier serverEncodeReleases;
-    public final LongSupplier clientNetworkAcquires;
-    public final LongSupplier clientNetworkReleases;
-    public final LongSupplier clientApplicationAcquires;
-    public final LongSupplier clientApplicationReleases;
+    public final LongSupplier clientDecodeAcquires;
+    public final LongSupplier clientDecodeReleases;
+    public final LongSupplier clientEncodeAcquires;
+    public final LongSupplier clientEncodeReleases;
 
     public TlsCounters(
         Function<String, LongSupplier> supplyCounter,
@@ -40,9 +40,9 @@ public class TlsCounters
         this.serverDecodeReleases = supplyCounter.apply("tls.server.decode.releases");
         this.serverEncodeAcquires = supplyCounter.apply("tls.server.encode.acquires");
         this.serverEncodeReleases = supplyCounter.apply("tls.server.encode.releases");
-        this.clientNetworkAcquires = supplyCounter.apply("tls.client.network.acquires");
-        this.clientNetworkReleases = supplyCounter.apply("tls.client.network.releases");
-        this.clientApplicationAcquires = supplyCounter.apply("tls.client.application.acquires");
-        this.clientApplicationReleases = supplyCounter.apply("tls.client.application.releases");
+        this.clientDecodeAcquires = supplyCounter.apply("tls.client.decode.acquires");
+        this.clientDecodeReleases = supplyCounter.apply("tls.client.decode.releases");
+        this.clientEncodeAcquires = supplyCounter.apply("tls.client.encode.acquires");
+        this.clientEncodeReleases = supplyCounter.apply("tls.client.encode.releases");
     }
 }

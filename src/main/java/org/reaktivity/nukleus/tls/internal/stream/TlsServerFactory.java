@@ -94,7 +94,7 @@ public final class TlsServerFactory implements StreamFactory
     private static final int HANDSHAKE_TASK_COMPLETE_SIGNAL = 1;
     private static final MutableDirectBuffer EMPTY_MUTABLE_DIRECT_BUFFER = new UnsafeBuffer(new byte[0]);
 
-    private static final Optional<TlsServer.TlsStream> NULL_STREAM = Optional.ofNullable(null);
+    static final Optional<TlsServer.TlsStream> NULL_STREAM = Optional.ofNullable(null);
 
     private final ThreadLocal<RouteFW> routeRO = ThreadLocal.withInitial(RouteFW::new);
     private final ThreadLocal<TlsRouteExFW> tlsRouteExRO = ThreadLocal.withInitial(TlsRouteExFW::new);
@@ -156,8 +156,11 @@ public final class TlsServerFactory implements StreamFactory
     private final LongUnaryOperator supplyReplyId;
     private final int replyPaddingAdjust;
 
+    private final int decodeMaxCredit;
+    private final int handshakeMaxCredit;
+
     private final Long2ObjectHashMap<TlsServer.TlsStream> correlations;
-    private final Function<String, TlsStoreInfo> lookupContext;
+    private final Function<String, TlsStoreInfo> lookupStore;
     private final TlsCounters counters;
 
     private final ByteBuffer inNetByteBuffer;
@@ -178,12 +181,12 @@ public final class TlsServerFactory implements StreamFactory
         LongUnaryOperator supplyInitialId,
         LongUnaryOperator supplyReplyId,
         ToIntFunction<String> supplyTypeId,
-        Function<String, TlsStoreInfo> lookupContext,
+        Function<String, TlsStoreInfo> lookupStore,
         TlsCounters counters)
     {
         this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
         this.signaler = requireNonNull(signaler);
-        this.lookupContext = requireNonNull(lookupContext);
+        this.lookupStore = requireNonNull(lookupStore);
         this.counters = requireNonNull(counters);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
@@ -192,6 +195,8 @@ public final class TlsServerFactory implements StreamFactory
         this.supplyInitialId = requireNonNull(supplyInitialId);
         this.supplyReplyId = requireNonNull(supplyReplyId);
         this.replyPaddingAdjust = Math.min(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
+        this.decodeMaxCredit = decodePool.slotCapacity();
+        this.handshakeMaxCredit = Math.min(config.handshakeWindowBytes(), decodeMaxCredit);
         this.correlations = new Long2ObjectHashMap<>();
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
@@ -841,7 +846,7 @@ public final class TlsServerFactory implements StreamFactory
             int limit);
     }
 
-    private final class TlsServer
+    final class TlsServer
     {
         private final MessageConsumer network;
         private final long routeId;
@@ -935,7 +940,7 @@ public final class TlsServerFactory implements StreamFactory
             affinity = begin.affinity();
             state = TlsState.openInitial(state);
 
-            doNetworkWindow(traceId, 0L, decodePool.slotCapacity(), 0);
+            doNetworkWindow(traceId, 0L, handshakeMaxCredit, 0);
             doNetworkBegin(traceId);
         }
 
@@ -982,7 +987,6 @@ public final class TlsServerFactory implements StreamFactory
 
                     decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
                 }
-
             }
         }
 
@@ -1299,6 +1303,15 @@ public final class TlsServerFactory implements StreamFactory
                     decodeSlotOffset = limit - progress;
                     decodeSlotReserved = (limit - progress) * reserved / (limit - offset);
                 }
+
+                if (!stream.isPresent())
+                {
+                    final int credit = Math.min(handshakeMaxCredit, decodeMaxCredit - decodeSlotOffset - initialBudget);
+                    if (credit > 0)
+                    {
+                        doNetworkWindow(traceId, budgetId, credit, 0);
+                    }
+                }
             }
             else
             {
@@ -1401,7 +1414,7 @@ public final class TlsServerFactory implements StreamFactory
             {
                 final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO.get()::tryWrap);
                 final String store = routeEx != null ? routeEx.store().asString() : null;
-                final TlsStoreInfo newTlsStoreInfo = lookupContext.apply(store);
+                final TlsStoreInfo newTlsStoreInfo = lookupStore.apply(store);
                 final SSLContext sslContext = newTlsStoreInfo == null ? null : newTlsStoreInfo.context;
 
                 if (sslContext != null)
@@ -1431,9 +1444,9 @@ public final class TlsServerFactory implements StreamFactory
         {
             if (handshakeTaskFutureId == NO_CANCEL_ID)
             {
-                final Runnable delegatedTask = tlsEngine.getDelegatedTask();
-                assert delegatedTask != null;
-                handshakeTaskFutureId = signaler.signalTask(delegatedTask, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
+                final Runnable task = tlsEngine.getDelegatedTask();
+                assert task != null;
+                handshakeTaskFutureId = signaler.signalTask(task, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
             }
         }
 
@@ -1610,7 +1623,7 @@ public final class TlsServerFactory implements StreamFactory
             }
         }
 
-        private final class TlsStream
+        final class TlsStream
         {
             private final MessageConsumer application;
             private final long routeId;
@@ -1710,7 +1723,7 @@ public final class TlsServerFactory implements StreamFactory
                 final long budgetId = 0L; // TODO
 
                 state = TlsState.closeReply(state);
-                stream = TlsState.nullIfClosed(state, stream);
+                stream = nullIfClosed(state, stream);
 
                 doEncodeCloseOutbound(traceId, budgetId);
             }
@@ -1721,7 +1734,7 @@ public final class TlsServerFactory implements StreamFactory
                 final long traceId = abort.traceId();
 
                 state = TlsState.closeReply(state);
-                stream = TlsState.nullIfClosed(state, stream);
+                stream = nullIfClosed(state, stream);
 
                 doNetworkAbortIfNecessary(traceId);
 
@@ -1749,7 +1762,7 @@ public final class TlsServerFactory implements StreamFactory
                 final long traceId = reset.traceId();
 
                 state = TlsState.closeInitial(state);
-                stream = TlsState.nullIfClosed(state, stream);
+                stream = nullIfClosed(state, stream);
 
                 doNetworkResetIfNecessary(traceId);
 
@@ -1765,6 +1778,7 @@ public final class TlsServerFactory implements StreamFactory
                 stream = Optional.of(this);
                 state = TlsState.openingInitial(state);
 
+                router.setThrottle(initialId, this::onApplication);
                 doBegin(application, routeId, initialId, traceId, authorization, affinity,
                     ex -> ex.set((b, o, l) -> tlsBeginExRW.wrap(b, o, l)
                                                           .typeId(tlsTypeId)
@@ -1772,7 +1786,6 @@ public final class TlsServerFactory implements StreamFactory
                                                           .protocol(protocol)
                                                           .build()
                                                           .sizeof()));
-                router.setThrottle(initialId, this::onApplication);
             }
 
             private void doApplicationData(
@@ -1803,7 +1816,7 @@ public final class TlsServerFactory implements StreamFactory
                 long traceId)
             {
                 state = TlsState.closeInitial(state);
-                stream = TlsState.nullIfClosed(state, stream);
+                stream = nullIfClosed(state, stream);
                 doEnd(application, routeId, initialId, traceId, authorization, EMPTY_EXTENSION);
             }
 
@@ -1811,7 +1824,7 @@ public final class TlsServerFactory implements StreamFactory
                 long traceId)
             {
                 state = TlsState.closeInitial(state);
-                stream = TlsState.nullIfClosed(state, stream);
+                stream = nullIfClosed(state, stream);
                 doAbort(application, routeId, initialId, traceId, authorization, EMPTY_EXTENSION);
             }
 
@@ -1819,7 +1832,7 @@ public final class TlsServerFactory implements StreamFactory
                 long traceId)
             {
                 state = TlsState.closeReply(state);
-                stream = TlsState.nullIfClosed(state, stream);
+                stream = nullIfClosed(state, stream);
 
                 correlations.remove(replyId);
                 doReset(application, routeId, replyId, traceId, authorization);
@@ -1908,80 +1921,10 @@ public final class TlsServerFactory implements StreamFactory
         }
     }
 
-    private static final class TlsState
+    private static Optional<TlsServer.TlsStream> nullIfClosed(
+        int state,
+        Optional<TlsServer.TlsStream> stream)
     {
-        private static final int INITIAL_OPENING = 0x10;
-        private static final int INITIAL_OPENED = 0x20;
-        private static final int INITIAL_CLOSED = 0x40;
-        private static final int REPLY_OPENED = 0x01;
-        private static final int REPLY_CLOSING = 0x02;
-        private static final int REPLY_CLOSED = 0x04;
-
-        static int openingInitial(
-            int state)
-        {
-            return state | INITIAL_OPENING;
-        }
-
-        static int openInitial(
-            int state)
-        {
-            return openingInitial(state) | INITIAL_OPENED;
-        }
-
-        static int closeInitial(
-            int state)
-        {
-            return state | INITIAL_CLOSED;
-        }
-
-        static boolean initialClosed(
-            int state)
-        {
-            return (state & INITIAL_CLOSED) != 0;
-        }
-
-        static int openReply(
-            int state)
-        {
-            return state | REPLY_OPENED;
-        }
-
-        static boolean replyOpened(
-            int state)
-        {
-            return (state & REPLY_OPENED) != 0;
-        }
-
-        static int closingReply(
-            int state)
-        {
-            return state | REPLY_CLOSING;
-        }
-
-        static int closeReply(
-            int state)
-        {
-            return closingReply(state) | REPLY_CLOSED;
-        }
-
-        static boolean replyClosing(
-            int state)
-        {
-            return (state & REPLY_CLOSING) != 0;
-        }
-
-        static boolean replyClosed(
-            int state)
-        {
-            return (state & REPLY_CLOSED) != 0;
-        }
-
-        static Optional<TlsServer.TlsStream> nullIfClosed(
-            int state,
-            Optional<TlsServer.TlsStream> stream)
-        {
-            return initialClosed(state) && replyClosed(state) ? NULL_STREAM : stream;
-        }
+        return TlsState.initialClosed(state) && TlsState.replyClosed(state) ? NULL_STREAM : stream;
     }
 }
