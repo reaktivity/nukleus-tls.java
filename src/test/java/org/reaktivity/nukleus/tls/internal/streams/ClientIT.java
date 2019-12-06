@@ -97,7 +97,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    @Ignore("reaktivity/nukleus-tls.java#47")
     @Test
     @Specification({
             "${route}/client.alpn/controller",
@@ -122,13 +121,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    /*
-     * No route for protocol2, route for null protocol
-     * > BEGIN=protocol2
-     * negotiates successfully without ALPN, so protocol == "" => null
-     * need to reverify route still matches with negotiated protocol
-     * < BEGIN=null
-     */
     @Test
     @Specification({
             "${route}/client/controller",
@@ -141,13 +133,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    /*
-     * only one route, for protocol2
-     * > BEGIN=protocol2
-     * negotiates successfully without ALPN, so protocol == "" => null
-     * need to reverify route still matches with negotiated protocol
-     * < RESET
-     */
     @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
@@ -161,13 +146,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    /*
-     * two routes, one for protocol2, one for null, both to same target + targetRef
-     * > BEGIN=protocol2
-     * negotiates successfully without ALPN, so protocol == "" => null
-     * need to reverify route target + targetRef still matches with negotiated protocol
-     * < BEGIN=null
-     */
     @Test
     @Specification({
             "${route}/client.alpn.default/controller",
