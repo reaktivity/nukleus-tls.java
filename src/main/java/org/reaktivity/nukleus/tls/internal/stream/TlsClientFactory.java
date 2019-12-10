@@ -130,8 +130,8 @@ public final class TlsClientFactory implements StreamFactory
     private final LongUnaryOperator supplyReplyId;
     private final int initialPaddingAdjust;
 
-    private final int decodeMaxCredit;
-    private final int handshakeMaxCredit;
+    private final int decodeBudgetMax;
+    private final int handshakeBudgetMax;
 
     private final Long2ObjectHashMap<TlsStream.TlsClient> correlations;
     private final Function<String, TlsStoreInfo> lookupStore;
@@ -167,8 +167,8 @@ public final class TlsClientFactory implements StreamFactory
         this.supplyInitialId = requireNonNull(supplyInitialId);
         this.supplyReplyId = requireNonNull(supplyReplyId);
         this.correlations = new Long2ObjectHashMap<>();
-        this.decodeMaxCredit = decodePool.slotCapacity();
-        this.handshakeMaxCredit = Math.min(config.handshakeWindowBytes(), decodeMaxCredit);
+        this.decodeBudgetMax = decodePool.slotCapacity();
+        this.handshakeBudgetMax = Math.min(config.handshakeWindowBytes(), decodeBudgetMax);
         this.initialPaddingAdjust = Math.min(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
@@ -1005,7 +1005,7 @@ public final class TlsClientFactory implements StreamFactory
             long traceId,
             long budgetId)
         {
-            int initialCredit = client.initialBudget - initialBudget;
+            int initialCredit = client.initialBudget - client.encodeSlotOffset - initialBudget;
             if (initialCredit > 0 && TlsState.initialOpened(state))
             {
                 final int initialPadding = client.initialPadding + initialPaddingAdjust;
@@ -1118,7 +1118,7 @@ public final class TlsClientFactory implements StreamFactory
                 authorization = begin.authorization();
                 state = TlsState.openReply(state);
 
-                doNetworkWindow(traceId, 0L, handshakeMaxCredit, 0);
+                doNetworkWindow(traceId, 0L, handshakeBudgetMax, 0);
             }
 
             private void onNetworkData(
@@ -1398,10 +1398,10 @@ public final class TlsClientFactory implements StreamFactory
             private void flushNetworkWindow(
                 long traceId,
                 long budgetId,
-                int maxReplyBudget,
+                int replyBudgetMax,
                 int replyPadding)
             {
-                int replyCredit = maxReplyBudget - replyBudget - decodeSlotOffset;
+                int replyCredit = Math.min(replyBudgetMax, decodeBudgetMax) - replyBudget - decodeSlotOffset;
                 if (replyCredit > 0)
                 {
                     doNetworkWindow(traceId, budgetId, replyCredit, replyPadding);
@@ -1501,7 +1501,7 @@ public final class TlsClientFactory implements StreamFactory
 
                     if (!stream.isPresent())
                     {
-                        final int credit = Math.min(handshakeMaxCredit, decodeMaxCredit - decodeSlotOffset - replyBudget);
+                        final int credit = Math.min(handshakeBudgetMax, decodeBudgetMax - decodeSlotOffset - replyBudget);
                         if (credit > 0)
                         {
                             doNetworkWindow(traceId, budgetId, credit, 0);

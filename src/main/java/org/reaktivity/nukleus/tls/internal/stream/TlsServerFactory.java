@@ -156,8 +156,8 @@ public final class TlsServerFactory implements StreamFactory
     private final LongUnaryOperator supplyReplyId;
     private final int replyPaddingAdjust;
 
-    private final int decodeMaxCredit;
-    private final int handshakeMaxCredit;
+    private final int decodeBudgetMax;
+    private final int handshakeBudgetMax;
 
     private final Long2ObjectHashMap<TlsServer.TlsStream> correlations;
     private final Function<String, TlsStoreInfo> lookupStore;
@@ -195,8 +195,8 @@ public final class TlsServerFactory implements StreamFactory
         this.supplyInitialId = requireNonNull(supplyInitialId);
         this.supplyReplyId = requireNonNull(supplyReplyId);
         this.replyPaddingAdjust = Math.min(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
-        this.decodeMaxCredit = decodePool.slotCapacity();
-        this.handshakeMaxCredit = Math.min(config.handshakeWindowBytes(), decodeMaxCredit);
+        this.decodeBudgetMax = decodePool.slotCapacity();
+        this.handshakeBudgetMax = Math.min(config.handshakeWindowBytes(), decodeBudgetMax);
         this.correlations = new Long2ObjectHashMap<>();
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
@@ -867,6 +867,8 @@ public final class TlsServerFactory implements StreamFactory
         private long encodeSlotTraceId;
 
         private int initialBudget;
+
+        private long replyBudgetId;
         private int replyBudget;
         private int replyPadding;
 
@@ -940,7 +942,7 @@ public final class TlsServerFactory implements StreamFactory
             affinity = begin.affinity();
             state = TlsState.openInitial(state);
 
-            doNetworkWindow(traceId, 0L, handshakeMaxCredit, 0);
+            doNetworkWindow(traceId, 0L, handshakeBudgetMax, 0);
             doNetworkBegin(traceId);
         }
 
@@ -1062,6 +1064,7 @@ public final class TlsServerFactory implements StreamFactory
 
             authorization = window.authorization();
 
+            replyBudgetId = budgetId;
             replyBudget += credit;
             replyPadding = padding;
 
@@ -1075,7 +1078,7 @@ public final class TlsServerFactory implements StreamFactory
 
             if (encodeSlot == NO_SLOT)
             {
-                stream.ifPresent(s -> s.flushReplyWindow(traceId));
+                stream.ifPresent(s -> s.flushApplicationWindow(traceId));
             }
         }
 
@@ -1203,10 +1206,10 @@ public final class TlsServerFactory implements StreamFactory
         private void flushNetworkWindow(
             long traceId,
             long budgetId,
-            int maxInitialBudget,
+            int initialBudgetMax,
             int initialPadding)
         {
-            int initialCredit = maxInitialBudget - initialBudget - decodeSlotOffset;
+            int initialCredit = Math.min(initialBudgetMax, decodeBudgetMax) - initialBudget - decodeSlotOffset;
             if (initialCredit > 0)
             {
                 doNetworkWindow(traceId, budgetId, initialCredit, initialPadding);
@@ -1306,7 +1309,7 @@ public final class TlsServerFactory implements StreamFactory
 
                 if (!stream.isPresent())
                 {
-                    final int credit = Math.min(handshakeMaxCredit, decodeMaxCredit - decodeSlotOffset - initialBudget);
+                    final int credit = Math.min(handshakeBudgetMax, decodeBudgetMax - decodeSlotOffset - initialBudget);
                     if (credit > 0)
                     {
                         doNetworkWindow(traceId, budgetId, credit, 0);
@@ -1692,7 +1695,7 @@ public final class TlsServerFactory implements StreamFactory
 
                 state = TlsState.openReply(state);
 
-                flushReplyWindow(traceId);
+                flushApplicationWindow(traceId);
             }
 
             private void onApplicationData(
@@ -1856,18 +1859,16 @@ public final class TlsServerFactory implements StreamFactory
                 }
             }
 
-            private void flushReplyWindow(
+            private void flushApplicationWindow(
                 long traceId)
             {
-                final long budgetId = 0L; // TODO
-
-                int replyCredit = TlsServer.this.replyBudget - replyBudget;
+                int replyCredit = TlsServer.this.replyBudget - TlsServer.this.encodeSlotOffset - replyBudget;
                 if (replyCredit > 0 && TlsState.replyOpened(state))
                 {
                     final int replyPadding = TlsServer.this.replyPadding + replyPaddingAdjust;
                     replyBudget += replyCredit;
                     doWindow(application, routeId, replyId, traceId, authorization,
-                             budgetId, replyCredit, replyPadding);
+                             replyBudgetId, replyCredit, replyPadding);
                 }
             }
 
