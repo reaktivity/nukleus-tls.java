@@ -759,7 +759,6 @@ public final class TlsClientFactory implements StreamFactory
             int limit);
     }
 
-
     private final class TlsStream
     {
         private final MessageConsumer application;
@@ -1364,7 +1363,7 @@ public final class TlsClientFactory implements StreamFactory
                 if (!TlsState.initialClosed(state))
                 {
                     doAbort(network, routeId, initialId, traceId, authorization, EMPTY_EXTENSION);
-                    state = TlsState.closeReply(state);
+                    state = TlsState.closeInitial(state);
                 }
 
                 cleanupEncodeSlotIfNecessary();
@@ -1376,7 +1375,7 @@ public final class TlsClientFactory implements StreamFactory
                 if (!TlsState.replyClosed(state))
                 {
                     doReset(network, routeId, replyId, traceId, authorization);
-                    state = TlsState.closeInitial(state);
+                    state = TlsState.closeReply(state);
                 }
 
                 cleanupDecodeSlotIfNecessary();
