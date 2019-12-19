@@ -514,9 +514,21 @@ public final class TlsClientFactory implements StreamFactory
                             assert false;
                             break;
                         case OK:
+                            if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
+                            {
+                                if (TlsNukleus.DEBUG_HANDSHAKE_FINISHED)
+                                {
+                                    System.out.format("result = %s, stream = %s\n", result, client.stream);
+                                }
+
+                                if (!client.stream.isPresent())
+                                {
+                                    client.onDecodeHandshakeFinished(traceId, budgetId);
+                                }
+                            }
+
                             if (bytesProduced == 0)
                             {
-                                assert result.getHandshakeStatus() != HandshakeStatus.FINISHED;
                                 client.decoder = decodeHandshake;
                             }
                             else
@@ -758,7 +770,6 @@ public final class TlsClientFactory implements StreamFactory
             int progress,
             int limit);
     }
-
 
     private final class TlsStream
     {
@@ -1364,7 +1375,7 @@ public final class TlsClientFactory implements StreamFactory
                 if (!TlsState.initialClosed(state))
                 {
                     doAbort(network, routeId, initialId, traceId, authorization, EMPTY_EXTENSION);
-                    state = TlsState.closeReply(state);
+                    state = TlsState.closeInitial(state);
                 }
 
                 cleanupEncodeSlotIfNecessary();
@@ -1376,7 +1387,7 @@ public final class TlsClientFactory implements StreamFactory
                 if (!TlsState.replyClosed(state))
                 {
                     doReset(network, routeId, replyId, traceId, authorization);
-                    state = TlsState.closeInitial(state);
+                    state = TlsState.closeReply(state);
                 }
 
                 cleanupDecodeSlotIfNecessary();
@@ -1567,6 +1578,7 @@ public final class TlsClientFactory implements StreamFactory
                 long traceId,
                 long budgetId)
             {
+                assert stream == NULL_STREAM;
                 stream = Optional.of(TlsStream.this);
 
                 final String protocol = tlsEngine.getApplicationProtocol();

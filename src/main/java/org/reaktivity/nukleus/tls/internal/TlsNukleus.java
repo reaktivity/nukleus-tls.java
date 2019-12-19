@@ -62,6 +62,8 @@ public final class TlsNukleus implements Nukleus
 {
     public static final String NAME = "tls";
 
+    public static final boolean DEBUG_HANDSHAKE_FINISHED = Boolean.getBoolean("tls.debug.handshake.finished");
+
     private static final String PROPERTY_TLS_KEYSTORE = "tls.keystore";
     private static final String PROPERTY_TLS_KEYSTORE_TYPE = "tls.keystore.type";
     private static final String PROPERTY_TLS_KEYSTORE_PASSWORD = "tls.keystore.password";
