@@ -514,9 +514,21 @@ public final class TlsClientFactory implements StreamFactory
                             assert false;
                             break;
                         case OK:
+                            if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
+                            {
+                                if (TlsNukleus.DEBUG_HANDSHAKE_FINISHED)
+                                {
+                                    System.out.format("result = %s, stream = %s\n", result, client.stream);
+                                }
+
+                                if (!client.stream.isPresent())
+                                {
+                                    client.onDecodeHandshakeFinished(traceId, budgetId);
+                                }
+                            }
+
                             if (bytesProduced == 0)
                             {
-                                assert result.getHandshakeStatus() != HandshakeStatus.FINISHED;
                                 client.decoder = decodeHandshake;
                             }
                             else
@@ -1566,6 +1578,7 @@ public final class TlsClientFactory implements StreamFactory
                 long traceId,
                 long budgetId)
             {
+                assert stream == NULL_STREAM;
                 stream = Optional.of(TlsStream.this);
 
                 final String protocol = tlsEngine.getApplicationProtocol();
