@@ -583,7 +583,7 @@ public final class TlsClientFactory implements StreamFactory
 
             final TlsUnwrappedDataFW tlsUnwrappedData = tlsUnwrappedDataRO.wrap(buffer, tlsRecordDataOffset, tlsRecordDataLimit);
             final TlsStream stream = client.stream.orElse(null);
-            final int initialBudget = stream != null ? stream.initialBudget : 0;
+            final int replyBudget = stream != null ? stream.replyBudget : 0;
 
             final int bytesOffset = tlsRecordInfo.sizeof();
             final int bytesConsumed = bytesOffset + tlsRecordInfo.length();
@@ -600,7 +600,7 @@ public final class TlsClientFactory implements StreamFactory
 
             final int bytesReservedOffset =
                     bytesPosition != 0 ? bytesOffset + (bytesReserved - bytesOffset) * bytesPosition / bytesProduced : 0;
-            final int bytesReservedLimit = bytesReservedOffset + Math.min(bytesReserved - bytesReservedOffset, initialBudget);
+            final int bytesReservedLimit = bytesReservedOffset + Math.min(bytesReserved - bytesReservedOffset, replyBudget);
 
             final int maxBytesReserved = bytesReservedLimit - bytesReservedOffset;
 
