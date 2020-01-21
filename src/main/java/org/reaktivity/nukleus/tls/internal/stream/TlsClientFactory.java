@@ -1507,7 +1507,7 @@ public final class TlsClientFactory implements StreamFactory
                         final MutableDirectBuffer decodeBuffer = decodePool.buffer(decodeSlot);
                         decodeBuffer.putBytes(0, buffer, progress, limit - progress);
                         decodeSlotOffset = limit - progress;
-                        decodeSlotReserved = (limit - progress) * reserved / (limit - offset);
+                        decodeSlotReserved = (limit - progress) * (reserved / (limit - offset));
                     }
 
                     if (!stream.isPresent())
