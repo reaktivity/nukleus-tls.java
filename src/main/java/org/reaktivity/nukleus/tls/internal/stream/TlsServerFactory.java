@@ -616,7 +616,7 @@ public final class TlsServerFactory implements StreamFactory
             final int bytesOffset = tlsRecordInfo.sizeof();
             final int bytesConsumed = bytesOffset + tlsRecordInfo.length();
             final int bytesProduced = tlsUnwrappedData.length();
-            final int bytesReserved = reserved * bytesConsumed / (limit - offset);
+            final int bytesReserved = (int)((long) reserved * bytesConsumed / (limit - offset));
 
             final int bytesPosition = tlsUnwrappedData.info().position();
             final int bytesProgress = bytesOffset + bytesPosition;
@@ -626,13 +626,13 @@ public final class TlsServerFactory implements StreamFactory
             assert bytesReserved >= bytesOffset : String.format("%d >= %d", bytesReserved, bytesOffset);
             assert bytesReserved >= bytesProduced : String.format("%d >= %d", bytesReserved, bytesProduced);
 
-            final int bytesReservedOffset =
-                    bytesPosition != 0 ? bytesOffset + (bytesReserved - bytesOffset) * bytesPosition / bytesProduced : 0;
+            final int bytesReservedOffset = bytesOffset +
+                (int)((long) (bytesReserved - bytesOffset) * bytesPosition / bytesProduced);
             final int bytesReservedLimit = bytesReservedOffset + Math.min(bytesReserved - bytesReservedOffset, initialBudget);
 
             final int maxBytesReserved = bytesReservedLimit - bytesReservedOffset;
 
-            final int maxBytesLimit = bytesOffset + bytesProduced * bytesReservedLimit / bytesReserved;
+            final int maxBytesLimit = bytesOffset + (int)((long) bytesProduced * bytesReservedLimit / bytesReserved);
             final int maxBytesProduced = maxBytesLimit - bytesProgress;
 
             assert maxBytesReserved >= maxBytesProduced : String.format("%d >= %d", maxBytesReserved, maxBytesProduced);
