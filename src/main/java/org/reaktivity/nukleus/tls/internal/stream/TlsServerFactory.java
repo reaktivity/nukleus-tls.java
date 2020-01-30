@@ -616,7 +616,7 @@ public final class TlsServerFactory implements StreamFactory
             final int bytesOffset = tlsRecordInfo.sizeof();
             final int bytesConsumed = bytesOffset + tlsRecordInfo.length();
             final int bytesProduced = tlsUnwrappedData.length();
-            final int bytesReserved = (int) ((long) reserved * bytesConsumed / (limit - offset));
+            final int bytesReserved = (int)((long) reserved * bytesConsumed / (limit - offset));
 
             final int bytesPosition = tlsUnwrappedData.info().position();
             final int bytesProgress = bytesOffset + bytesPosition;
