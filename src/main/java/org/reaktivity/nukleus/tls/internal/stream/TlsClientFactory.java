@@ -598,8 +598,8 @@ public final class TlsClientFactory implements StreamFactory
             assert bytesReserved >= bytesOffset : String.format("%d >= %d", bytesReserved, bytesOffset);
             assert bytesReserved >= bytesProduced : String.format("%d >= %d", bytesReserved, bytesProduced);
 
-            final int bytesReservedOffset = bytesOffset +
-                (int)((long) (bytesReserved - bytesOffset) * bytesPosition / bytesProduced);
+            final int bytesReservedOffset = bytesPosition != 0 ?
+                bytesOffset + (int)((long) (bytesReserved - bytesOffset) * bytesPosition / bytesProduced) : 0;
             final int bytesReservedLimit = bytesReservedOffset + Math.min(bytesReserved - bytesReservedOffset, replyBudget);
 
             final int maxBytesReserved = bytesReservedLimit - bytesReservedOffset;
