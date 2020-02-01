@@ -584,6 +584,8 @@ public final class TlsClientFactory implements StreamFactory
             final TlsUnwrappedDataFW tlsUnwrappedData = tlsUnwrappedDataRO.wrap(buffer, tlsRecordDataOffset, tlsRecordDataLimit);
             final TlsStream stream = client.stream.orElse(null);
             final int replyBudget = stream != null ? stream.replyBudget : 0;
+            final int replyPadding = stream != null ? stream.replyPadding : 0;
+            assert replyPadding == 0;
 
             final int bytesOffset = tlsRecordInfo.sizeof();
             final int bytesConsumed = bytesOffset + tlsRecordInfo.length();
