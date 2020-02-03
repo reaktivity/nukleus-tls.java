@@ -584,11 +584,13 @@ public final class TlsClientFactory implements StreamFactory
             final TlsUnwrappedDataFW tlsUnwrappedData = tlsUnwrappedDataRO.wrap(buffer, tlsRecordDataOffset, tlsRecordDataLimit);
             final TlsStream stream = client.stream.orElse(null);
             final int replyBudget = stream != null ? stream.replyBudget : 0;
+            final int replyPadding = stream != null ? stream.replyPadding : 0;
+            assert replyPadding == 0;
 
             final int bytesOffset = tlsRecordInfo.sizeof();
             final int bytesConsumed = bytesOffset + tlsRecordInfo.length();
             final int bytesProduced = tlsUnwrappedData.length();
-            final int bytesReserved = reserved * bytesConsumed / (limit - offset);
+            final int bytesReserved = (int)((long) reserved * bytesConsumed / (limit - offset));
 
             final int bytesPosition = tlsUnwrappedData.info().position();
             final int bytesProgress = bytesOffset + bytesPosition;
@@ -598,13 +600,13 @@ public final class TlsClientFactory implements StreamFactory
             assert bytesReserved >= bytesOffset : String.format("%d >= %d", bytesReserved, bytesOffset);
             assert bytesReserved >= bytesProduced : String.format("%d >= %d", bytesReserved, bytesProduced);
 
-            final int bytesReservedOffset =
-                    bytesPosition != 0 ? bytesOffset + (bytesReserved - bytesOffset) * bytesPosition / bytesProduced : 0;
+            final int bytesReservedOffset = bytesPosition != 0 ?
+                bytesOffset + (int)((long) (bytesReserved - bytesOffset) * bytesPosition / bytesProduced) : 0;
             final int bytesReservedLimit = bytesReservedOffset + Math.min(bytesReserved - bytesReservedOffset, replyBudget);
 
             final int maxBytesReserved = bytesReservedLimit - bytesReservedOffset;
 
-            final int maxBytesLimit = bytesOffset + bytesProduced * bytesReservedLimit / bytesReserved;
+            final int maxBytesLimit = bytesOffset + (int)((long) bytesProduced * bytesReservedLimit / bytesReserved);
             final int maxBytesProduced = maxBytesLimit - bytesProgress;
 
             assert maxBytesReserved >= maxBytesProduced : String.format("%d >= %d", maxBytesReserved, maxBytesProduced);
