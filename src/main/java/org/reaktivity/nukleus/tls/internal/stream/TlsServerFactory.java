@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2019 The Reaktivity Project
+ * Copyright 2016-2020 The Reaktivity Project
  *
  * The Reaktivity Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -548,8 +548,6 @@ public final class TlsServerFactory implements StreamFactory
                         switch (result.getStatus())
                         {
                         case BUFFER_UNDERFLOW:
-                            server.decoder = decodeHandshake;
-                            break;
                         case BUFFER_OVERFLOW:
                             assert false;
                             break;
@@ -584,6 +582,10 @@ public final class TlsServerFactory implements StreamFactory
                         server.cleanupNetwork(traceId);
                         server.decoder = decodeIgnoreAll;
                     }
+                }
+                else if (TlsState.initialClosed(server.state))
+                {
+                    server.decoder = decodeIgnoreAll;
                 }
             }
         }
@@ -725,6 +727,10 @@ public final class TlsServerFactory implements StreamFactory
                 switch (result.getStatus())
                 {
                 case BUFFER_UNDERFLOW:
+                    if (TlsState.initialClosed(server.state))
+                    {
+                        server.decoder = decodeIgnoreAll;
+                    }
                     break;
                 case BUFFER_OVERFLOW:
                     assert false;
@@ -1017,6 +1023,10 @@ public final class TlsServerFactory implements StreamFactory
 
                 decoder = decodeIgnoreAll;
             }
+            else
+            {
+                decodeNetworkIfNecessary(traceId);
+            }
         }
 
         private void onNetworkAbort(
@@ -1063,6 +1073,8 @@ public final class TlsServerFactory implements StreamFactory
             final long budgetId = window.budgetId();
             final int credit = window.credit();
             final int padding = window.padding();
+
+            state = TlsState.openReply(state);
 
             authorization = window.authorization();
 
@@ -1126,7 +1138,7 @@ public final class TlsServerFactory implements StreamFactory
         {
             doBegin(network, routeId, replyId, traceId, authorization, affinity, EMPTY_EXTENSION);
             router.setThrottle(replyId, this::onNetwork);
-            state = TlsState.openReply(state);
+            state = TlsState.openingReply(state);
         }
 
         private void doNetworkData(

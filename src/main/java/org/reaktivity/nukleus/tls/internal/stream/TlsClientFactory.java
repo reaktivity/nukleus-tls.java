@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2019 The Reaktivity Project
+ * Copyright 2016-2020 The Reaktivity Project
  *
  * The Reaktivity Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -508,8 +508,6 @@ public final class TlsClientFactory implements StreamFactory
                         switch (result.getStatus())
                         {
                         case BUFFER_UNDERFLOW:
-                            client.decoder = decodeHandshake;
-                            break;
                         case BUFFER_OVERFLOW:
                             assert false;
                             break;
@@ -556,6 +554,10 @@ public final class TlsClientFactory implements StreamFactory
                         client.cleanupNetwork(traceId);
                         client.decoder = decodeIgnoreAll;
                     }
+                }
+                else if (TlsState.replyClosed(client.state))
+                {
+                    client.decoder = decodeIgnoreAll;
                 }
             }
         }
@@ -697,6 +699,10 @@ public final class TlsClientFactory implements StreamFactory
                 switch (result.getStatus())
                 {
                 case BUFFER_UNDERFLOW:
+                    if (TlsState.replyClosed(client.state))
+                    {
+                        client.decoder = decodeIgnoreAll;
+                    }
                     break;
                 case BUFFER_OVERFLOW:
                     assert false;
@@ -1202,6 +1208,10 @@ public final class TlsClientFactory implements StreamFactory
                     doEncodeCloseOutbound(traceId, budgetId);
 
                     decoder = decodeIgnoreAll;
+                }
+                else
+                {
+                    decodeNetworkIfNecessary(traceId);
                 }
             }
 
