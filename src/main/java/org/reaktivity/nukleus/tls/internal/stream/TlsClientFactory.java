@@ -169,7 +169,7 @@ public final class TlsClientFactory implements StreamFactory
         this.correlations = new Long2ObjectHashMap<>();
         this.decodeBudgetMax = decodePool.slotCapacity();
         this.handshakeBudgetMax = Math.min(config.handshakeWindowBytes(), decodeBudgetMax);
-        this.initialPaddingAdjust = Math.min(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
+        this.initialPaddingAdjust = Math.max(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
         this.inNetBuffer = new UnsafeBuffer(inNetByteBuffer);
