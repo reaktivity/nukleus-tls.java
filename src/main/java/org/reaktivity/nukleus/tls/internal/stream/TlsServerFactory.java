@@ -201,7 +201,7 @@ public final class TlsServerFactory implements StreamFactory
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
         this.inNetBuffer = new UnsafeBuffer(inNetByteBuffer);
-        this.outNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
+        this.outNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity() << 1);
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
         this.inAppByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
         this.inAppBuffer = new UnsafeBuffer(inAppByteBuffer);
