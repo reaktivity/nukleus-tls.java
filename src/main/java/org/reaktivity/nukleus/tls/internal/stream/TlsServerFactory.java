@@ -194,14 +194,14 @@ public final class TlsServerFactory implements StreamFactory
         this.encodePool = new CountingBufferPool(bufferPool, counters.serverEncodeAcquires, counters.serverEncodeReleases);
         this.supplyInitialId = requireNonNull(supplyInitialId);
         this.supplyReplyId = requireNonNull(supplyReplyId);
-        this.replyPaddingAdjust = Math.min(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
+        this.replyPaddingAdjust = Math.max(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
         this.decodeBudgetMax = decodePool.slotCapacity();
         this.handshakeBudgetMax = Math.min(config.handshakeWindowBytes(), decodeBudgetMax);
         this.correlations = new Long2ObjectHashMap<>();
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
         this.inNetBuffer = new UnsafeBuffer(inNetByteBuffer);
-        this.outNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
+        this.outNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity() << 1);
         this.outNetBuffer = new UnsafeBuffer(outNetByteBuffer);
         this.inAppByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
         this.inAppBuffer = new UnsafeBuffer(inAppByteBuffer);

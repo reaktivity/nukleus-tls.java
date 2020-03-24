@@ -34,7 +34,7 @@ import org.reaktivity.reaktor.test.ReaktorRule;
 
 public class ClientRouteCountersIT
 {
-    private static final long CLIENT_ROUTE_ID = 0x2000110000001L;
+    private static final long CLIENT_ROUTE_ID = 0x0003000210000001L;
 
     private final K3poRule k3po = new K3poRule()
             .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
