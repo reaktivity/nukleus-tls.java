@@ -60,7 +60,7 @@ import org.reaktivity.nukleus.tls.internal.TlsCounters;
 import org.reaktivity.nukleus.tls.internal.TlsNukleus;
 import org.reaktivity.nukleus.tls.internal.TlsStoreInfo;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
-import org.reaktivity.nukleus.tls.internal.types.StringFW;
+import org.reaktivity.nukleus.tls.internal.types.String8FW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsClientHelloFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsContentType;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsExtensionFW;
@@ -125,7 +125,7 @@ public final class TlsServerFactory implements StreamFactory
     private final TlsVector16FW tlsVector16RO = new TlsVector16FW();
     private final TlsServerNameExtensionFW tlsServerNameExtensionRO = new TlsServerNameExtensionFW();
     private final TlsServerNameFW tlsServerNameRO = new TlsServerNameFW();
-    private final StringFW tlsProtocolNameRO = new StringFW();
+    private final String8FW tlsProtocolNameRO = new String8FW();
 
     private final TlsUnwrappedInfoFW.Builder tlsUnwrappedInfoRW = new TlsUnwrappedInfoFW.Builder();
     private final TlsUnwrappedDataFW tlsUnwrappedDataRO = new TlsUnwrappedDataFW();
@@ -827,7 +827,7 @@ public final class TlsServerFactory implements StreamFactory
         final int dataLimit = tlsAlpnData.limit();
         for (int dataOffset = tlsAlpnData.offset(); dataOffset < dataLimit; )
         {
-            final StringFW tlsProtocolName = tlsProtocolNameRO.wrap(dataBuffer, dataOffset, dataLimit);
+            final String8FW tlsProtocolName = tlsProtocolNameRO.wrap(dataBuffer, dataOffset, dataLimit);
             final String protocolName = tlsProtocolName.asString();
             if (protocolName != null && !protocolName.isEmpty())
             {
