@@ -1202,8 +1202,8 @@ public final class TlsClientFactory implements StreamFactory
                     cleanupDecodeSlotIfNecessary();
 
                     // TODO: support half-closed in-bound plus close-on-flush out-bound
-                    stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
-                    stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
+                    doApplicationAbortIfNecessary(traceId);
+                    doApplicationResetIfNecessary(traceId);
 
                     doEncodeCloseOutbound(traceId, budgetId);
 
@@ -1228,8 +1228,8 @@ public final class TlsClientFactory implements StreamFactory
 
                 cleanupDecodeSlotIfNecessary();
 
-                stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
-                stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
+                doApplicationAbortIfNecessary(traceId);
+                doApplicationResetIfNecessary(traceId);
 
                 doEncodeCloseOutbound(traceId, budgetId);
             }
@@ -1246,8 +1246,8 @@ public final class TlsClientFactory implements StreamFactory
 
                 closeInboundQuietly(tlsEngine);
 
-                stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
-                stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
+                doApplicationResetIfNecessary(traceId);
+                doApplicationAbortIfNecessary(traceId);
 
                 doNetworkResetIfNecessary(traceId);
             }
@@ -1540,8 +1540,8 @@ public final class TlsClientFactory implements StreamFactory
                         closeInboundQuietly(tlsEngine);
 
                         // TODO: support half-closed in-bound plus close-on-flush out-bound
-                        stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
-                        stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
+                        doApplicationAbortIfNecessary(traceId);
+                        doApplicationResetIfNecessary(traceId);
 
                         doEncodeCloseOutbound(traceId, budgetId);
 
@@ -1650,7 +1650,7 @@ public final class TlsClientFactory implements StreamFactory
                             break;
                         case CLOSED:
                             assert bytesProduced > 0;
-                            stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
+                            doApplicationResetIfNecessary(traceId);
                             state = TlsState.closingReply(state);
                             break loop;
                         case OK:
