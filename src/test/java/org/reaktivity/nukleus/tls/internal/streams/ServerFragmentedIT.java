@@ -64,4 +64,17 @@ public class ServerFragmentedIT
     {
         k3po.finish();
     }
+
+    @Test
+    @Specification({
+        "${route}/server/controller",
+        "${client}/echo.payload.length.100k/client",
+        "${server}/echo.payload.length.100k/server"})
+    @ScriptProperty({
+        "clientAccept \"nukleus://streams/target#0\"",
+        "serverWindow 8192"})
+    public void shouldEchoPayloadLength100kWithLimitedPayloadWindow() throws Exception
+    {
+        k3po.finish();
+    }
 }
