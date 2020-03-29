@@ -489,14 +489,20 @@ public final class TlsClientFactory implements StreamFactory
             final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRO.tryWrap(buffer, progress, limit);
             if (tlsRecordInfo != null)
             {
-                final int tlsRecordOffset = tlsRecordInfo.offset();
-                final int tlsRecordDataOffset = tlsRecordInfo.limit();
-                final int tlsRecordDataLimit = tlsRecordDataOffset + tlsRecordInfo.length();
-                if (tlsRecordDataLimit <= limit)
+                final int tlsRecordBytes = tlsRecordInfo.sizeof() + tlsRecordInfo.length();
+
+                client.decodableRecordBytes = tlsRecordBytes;
+
+                if (tlsRecordBytes <= length)
                 {
+                    final int tlsRecordDataOffset = tlsRecordInfo.limit();
+                    final int tlsRecordDataLimit = tlsRecordDataOffset + tlsRecordInfo.length();
+
+                    assert tlsRecordBytes == tlsRecordDataLimit - progress;
+
                     inNetByteBuffer.clear();
-                    inNetBuffer.putBytes(0, buffer, progress, tlsRecordDataLimit - progress);
-                    inNetByteBuffer.limit(tlsRecordDataLimit - progress);
+                    inNetBuffer.putBytes(0, buffer, progress, tlsRecordBytes);
+                    inNetByteBuffer.limit(tlsRecordBytes);
                     outAppByteBuffer.clear();
 
                     try
@@ -531,12 +537,15 @@ public final class TlsClientFactory implements StreamFactory
                             }
                             else
                             {
-                                assert bytesConsumed == tlsRecordDataLimit - tlsRecordOffset;
+                                assert bytesConsumed == tlsRecordBytes;
                                 assert bytesProduced <= bytesConsumed : String.format("%d <= %d", bytesProduced, bytesConsumed);
 
                                 tlsUnwrappedDataRW.wrap(buffer, tlsRecordDataOffset, tlsRecordDataLimit)
                                                   .payload(outAppBuffer, 0, bytesProduced)
                                                   .build();
+
+                                client.decodableRecordBytes -= bytesConsumed;
+                                assert client.decodableRecordBytes == 0;
 
                                 client.decoder = decodeNotHandshakingUnwrapped;
                             }
@@ -579,6 +588,8 @@ public final class TlsClientFactory implements StreamFactory
         final int length = limit - progress;
         if (length != 0)
         {
+            assert client.decodableRecordBytes == 0;
+
             final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRO.wrap(buffer, progress, limit);
             final int tlsRecordDataOffset = tlsRecordInfo.limit();
             final int tlsRecordDataLimit = tlsRecordDataOffset + tlsRecordInfo.length();
@@ -592,36 +603,27 @@ public final class TlsClientFactory implements StreamFactory
             final int bytesOffset = tlsRecordInfo.sizeof();
             final int bytesConsumed = bytesOffset + tlsRecordInfo.length();
             final int bytesProduced = tlsUnwrappedData.length();
-            final int bytesReserved = (int)((long) reserved * bytesConsumed / (limit - offset));
 
             final int bytesPosition = tlsUnwrappedData.info().position();
-            final int bytesProgress = bytesOffset + bytesPosition;
-            final int bytesLimit = bytesOffset + bytesProduced;
+            final int bytesRemaining = bytesProduced - bytesPosition;
 
-            assert bytesPosition < bytesProduced : String.format("%d < %d", bytesPosition, bytesProduced);
-            assert bytesReserved >= bytesOffset : String.format("%d >= %d", bytesReserved, bytesOffset);
-            assert bytesReserved >= bytesProduced : String.format("%d >= %d", bytesReserved, bytesProduced);
+            assert bytesRemaining > 0 : String.format("%d > 0", bytesRemaining);
 
-            final int bytesReservedOffset = bytesPosition != 0 ?
-                bytesOffset + (int)((long) (bytesReserved - bytesOffset) * bytesPosition / bytesProduced) : 0;
-            final int bytesReservedLimit = bytesReservedOffset + Math.min(bytesReserved - bytesReservedOffset, replyBudget);
+            final int bytesReservedMax = Math.min(replyBudget, bytesRemaining + replyPadding);
+            final int bytesRemainingMax = Math.max(bytesReservedMax - replyPadding, 0);
 
-            final int maxBytesReserved = bytesReservedLimit - bytesReservedOffset;
+            assert bytesReservedMax >= bytesRemainingMax : String.format("%d >= %d", bytesReservedMax, bytesRemainingMax);
 
-            final int maxBytesLimit = bytesOffset + (int)((long) bytesProduced * bytesReservedLimit / bytesReserved);
-            final int maxBytesProduced = maxBytesLimit - bytesProgress;
-
-            assert maxBytesReserved >= maxBytesProduced : String.format("%d >= %d", maxBytesReserved, maxBytesProduced);
-            assert maxBytesLimit <= bytesLimit : String.format("%d <= %d", maxBytesLimit, bytesLimit);
-
-            if (maxBytesProduced > 0)
+            if (bytesRemainingMax > 0)
             {
                 final OctetsFW payload = tlsUnwrappedData.payload();
 
-                client.onDecodeUnwrapped(traceId, authorization, budgetId, maxBytesReserved,
-                        payload.buffer(), payload.offset() + bytesPosition, maxBytesProduced);
+                client.onDecodeUnwrapped(traceId, authorization, budgetId, bytesReservedMax,
+                        payload.buffer(), payload.offset() + bytesPosition, bytesRemainingMax);
 
-                final int newBytesPosition = bytesPosition + maxBytesProduced;
+                final int newBytesPosition = bytesPosition + bytesRemainingMax;
+                assert newBytesPosition <= bytesProduced;
+
                 if (newBytesPosition == bytesProduced)
                 {
                     progress += bytesConsumed;
@@ -1068,6 +1070,8 @@ public final class TlsClientFactory implements StreamFactory
             private int decodeSlotOffset;
             private int decodeSlotReserved;
             private long decodeSlotBudgetId;
+
+            private int decodableRecordBytes;
 
             private long handshakeTaskFutureId = NO_CANCEL_ID;
 
@@ -1521,15 +1525,6 @@ public final class TlsClientFactory implements StreamFactory
                         decodeSlotOffset = limit - progress;
                         decodeSlotReserved = (limit - progress) * (reserved / (limit - offset));
                     }
-
-                    if (!stream.isPresent())
-                    {
-                        final int credit = Math.min(handshakeBudgetMax, decodeBudgetMax - decodeSlotOffset - replyBudget);
-                        if (credit > 0)
-                        {
-                            doNetworkWindow(traceId, budgetId, credit, 0);
-                        }
-                    }
                 }
                 else
                 {
@@ -1547,13 +1542,16 @@ public final class TlsClientFactory implements StreamFactory
 
                         decoder = decodeIgnoreAll;
                     }
-                    else if (!stream.isPresent())
+                }
+
+                if (!tlsEngine.isInboundDone())
+                {
+                    final int decodeCreditMax = decodeBudgetMax - decodeSlotOffset - replyBudget;
+
+                    final int credit = stream.isPresent() ? decodeCreditMax : Math.min(handshakeBudgetMax, decodeCreditMax);
+                    if (credit > 0)
                     {
-                        final int credit = progress - offset;
-                        if (credit > 0)
-                        {
-                            doNetworkWindow(traceId, budgetId, credit, 0);
-                        }
+                        doNetworkWindow(traceId, budgetId, credit, 0);
                     }
                 }
             }
