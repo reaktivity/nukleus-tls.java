@@ -17,7 +17,7 @@ package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
-import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_WINDOW_BYTES;
+import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_WINDOW_BYTES_NAME;
 import static org.reaktivity.reaktor.test.ReaktorRule.EXTERNAL_AFFINITY_MASK;
 
 import org.junit.Rule;
@@ -29,6 +29,7 @@ import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
+import org.reaktivity.reaktor.test.annotation.Configure;
 
 public class ServerFragmentedIT
 {
@@ -44,7 +45,6 @@ public class ServerFragmentedIT
             .commandBufferCapacity(1024)
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(8192)
-            .configure(TLS_HANDSHAKE_WINDOW_BYTES, 8)
             .nukleus("tls"::equals)
             .affinityMask("target#0", EXTERNAL_AFFINITY_MASK)
             .clean();
@@ -59,7 +59,8 @@ public class ServerFragmentedIT
         "${server}/connection.established/server" })
     @ScriptProperty({
         "clientAccept \"nukleus://streams/target#0\"" })
-    public void shouldEstablishConnection() throws Exception
+    @Configure(name = TLS_HANDSHAKE_WINDOW_BYTES_NAME, value = "8")
+    public void shouldEstablishConnectionWithLimitedHandshakeWindow() throws Exception
     {
         k3po.finish();
     }
