@@ -458,7 +458,7 @@ public final class TlsServerFactory implements StreamFactory
                         server.tlsEngine.beginHandshake();
                         server.decoder = decodeHandshake;
                     }
-                    catch (SSLException ex)
+                    catch (SSLException | RuntimeException ex)
                     {
                         server.tlsEngine = null;
                     }
@@ -586,7 +586,7 @@ public final class TlsServerFactory implements StreamFactory
                             break;
                         }
                     }
-                    catch (SSLException ex)
+                    catch (SSLException | RuntimeException ex)
                     {
                         server.cleanupNetwork(traceId);
                         server.decoder = decodeIgnoreAll;
@@ -754,7 +754,7 @@ public final class TlsServerFactory implements StreamFactory
 
                 progress += bytesConsumed;
             }
-            catch (SSLException ex)
+            catch (SSLException | RuntimeException ex)
             {
                 server.cleanupNetwork(traceId);
                 server.decoder = decodeIgnoreAll;
@@ -1575,7 +1575,7 @@ public final class TlsServerFactory implements StreamFactory
                 final int outNetBytesProduced = outNetByteBuffer.position();
                 doNetworkData(traceId, budgetId, outNetBuffer, 0, outNetBytesProduced);
             }
-            catch (SSLException ex)
+            catch (SSLException | RuntimeException ex)
             {
                 cleanupNetwork(traceId);
             }
@@ -1928,7 +1928,7 @@ public final class TlsServerFactory implements StreamFactory
                 tlsEngine.closeInbound();
             }
         }
-        catch (SSLException ex)
+        catch (SSLException | RuntimeException ex)
         {
             // ignore
         }
