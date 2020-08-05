@@ -1389,9 +1389,15 @@ public final class TlsServerFactory implements StreamFactory
                 final int maxLimit = tlsExtensionsData.limit();
 
                 // TODO: reuse TlsRouter instance, with RouteFW resolve(routeId, authorization) method
+                extensions:
                 for (int offset = tlsExtensionsData.offset(); offset < maxLimit; )
                 {
-                    final TlsExtensionFW tlsExtension = tlsExtensionRO.wrap(buffer, offset, maxLimit);
+                    final TlsExtensionFW tlsExtension = tlsExtensionRO.tryWrap(buffer, offset, maxLimit);
+                    if (tlsExtension == null)
+                    {
+                        break extensions;
+                    }
+
                     final TlsExtensionType tlsExtensionType = TlsExtensionType.valueOf(tlsExtension.type());
                     if (tlsExtensionType != null)
                     {
