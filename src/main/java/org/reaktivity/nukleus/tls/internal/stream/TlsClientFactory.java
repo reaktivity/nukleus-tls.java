@@ -553,7 +553,7 @@ public final class TlsClientFactory implements StreamFactory
                         case CLOSED:
                             assert bytesProduced == 0;
                             client.onDecodeInboundClosed(traceId);
-                            client.decoder = TlsState.initialClosed(client.state) ? decodeIgnoreAll : decodeHandshake;
+                            client.decoder = TlsState.replyClosed(client.state) ? decodeIgnoreAll : decodeHandshake;
                             progress += bytesConsumed;
                             break;
                         }
