@@ -534,6 +534,7 @@ public final class TlsClientFactory implements StreamFactory
                             if (bytesProduced == 0)
                             {
                                 client.decoder = decodeHandshake;
+                                progress += bytesConsumed;
                             }
                             else
                             {
