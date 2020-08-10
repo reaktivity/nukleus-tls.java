@@ -562,6 +562,7 @@ public final class TlsServerFactory implements StreamFactory
                             {
                                 assert result.getHandshakeStatus() != HandshakeStatus.FINISHED;
                                 server.decoder = decodeHandshake;
+                                progress += bytesConsumed;
                             }
                             else
                             {
