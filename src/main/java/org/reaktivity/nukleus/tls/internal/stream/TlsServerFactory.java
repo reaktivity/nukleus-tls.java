@@ -800,20 +800,23 @@ public final class TlsServerFactory implements StreamFactory
     {
         String serverName = null;
 
-        final TlsServerNameExtensionFW tlsServerNameExtension = tlsExtension.data().get(tlsServerNameExtensionRO::wrap);
-        final TlsVector16FW tlsServerNames = tlsServerNameExtension.serverNames();
-        final OctetsFW tlsServerNamesData = tlsServerNames.data();
-        final DirectBuffer dataBuffer = tlsServerNamesData.buffer();
-        final int dataLimit = tlsServerNamesData.limit();
-        for (int dataOffset = tlsServerNamesData.offset(); dataOffset < dataLimit; )
+        final TlsServerNameExtensionFW tlsServerNameExtension = tlsExtension.data().get(tlsServerNameExtensionRO::tryWrap);
+        if (tlsServerNameExtension != null)
         {
-            final TlsServerNameFW tlsServerName = tlsServerNameRO.wrap(dataBuffer, dataOffset, dataLimit);
-            if (tlsServerName.kind() == TlsNameType.HOSTNAME.value())
+            final TlsVector16FW tlsServerNames = tlsServerNameExtension.serverNames();
+            final OctetsFW tlsServerNamesData = tlsServerNames.data();
+            final DirectBuffer dataBuffer = tlsServerNamesData.buffer();
+            final int dataLimit = tlsServerNamesData.limit();
+            for (int dataOffset = tlsServerNamesData.offset(); dataOffset < dataLimit; )
             {
-                serverName = tlsServerName.hostname().asString();
-                break;
+                final TlsServerNameFW tlsServerName = tlsServerNameRO.wrap(dataBuffer, dataOffset, dataLimit);
+                if (tlsServerName.kind() == TlsNameType.HOSTNAME.value())
+                {
+                    serverName = tlsServerName.hostname().asString();
+                    break;
+                }
+                dataOffset = tlsServerName.limit();
             }
-            dataOffset = tlsServerName.limit();
         }
 
         return serverName;
@@ -824,19 +827,22 @@ public final class TlsServerFactory implements StreamFactory
     {
         final List<String> protocolNames = new ArrayList<>(3);
 
-        final TlsVector16FW tlsExtensionData = tlsExtension.data().get(tlsVector16RO::wrap);
-        final OctetsFW tlsAlpnData = tlsExtensionData.data();
-        final DirectBuffer dataBuffer = tlsAlpnData.buffer();
-        final int dataLimit = tlsAlpnData.limit();
-        for (int dataOffset = tlsAlpnData.offset(); dataOffset < dataLimit; )
+        final TlsVector16FW tlsExtensionData = tlsExtension.data().get(tlsVector16RO::tryWrap);
+        if (tlsExtensionData != null)
         {
-            final String8FW tlsProtocolName = tlsProtocolNameRO.wrap(dataBuffer, dataOffset, dataLimit);
-            final String protocolName = tlsProtocolName.asString();
-            if (protocolName != null && !protocolName.isEmpty())
+            final OctetsFW tlsAlpnData = tlsExtensionData.data();
+            final DirectBuffer dataBuffer = tlsAlpnData.buffer();
+            final int dataLimit = tlsAlpnData.limit();
+            for (int dataOffset = tlsAlpnData.offset(); dataOffset < dataLimit; )
             {
-                protocolNames.add(protocolName);
+                final String8FW tlsProtocolName = tlsProtocolNameRO.wrap(dataBuffer, dataOffset, dataLimit);
+                final String protocolName = tlsProtocolName.asString();
+                if (protocolName != null && !protocolName.isEmpty())
+                {
+                    protocolNames.add(protocolName);
+                }
+                dataOffset = tlsProtocolName.limit();
             }
-            dataOffset = tlsProtocolName.limit();
         }
 
         return protocolNames;
