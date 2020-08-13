@@ -809,8 +809,8 @@ public final class TlsServerFactory implements StreamFactory
             final int dataLimit = tlsServerNamesData.limit();
             for (int dataOffset = tlsServerNamesData.offset(); dataOffset < dataLimit; )
             {
-                final TlsServerNameFW tlsServerName = tlsServerNameRO.wrap(dataBuffer, dataOffset, dataLimit);
-                if (tlsServerName.kind() == TlsNameType.HOSTNAME.value())
+                final TlsServerNameFW tlsServerName = tlsServerNameRO.tryWrap(dataBuffer, dataOffset, dataLimit);
+                if (tlsServerName != null && tlsServerName.kind() == TlsNameType.HOSTNAME.value())
                 {
                     serverName = tlsServerName.hostname().asString();
                     break;
@@ -835,8 +835,8 @@ public final class TlsServerFactory implements StreamFactory
             final int dataLimit = tlsAlpnData.limit();
             for (int dataOffset = tlsAlpnData.offset(); dataOffset < dataLimit; )
             {
-                final String8FW tlsProtocolName = tlsProtocolNameRO.wrap(dataBuffer, dataOffset, dataLimit);
-                final String protocolName = tlsProtocolName.asString();
+                final String8FW tlsProtocolName = tlsProtocolNameRO.tryWrap(dataBuffer, dataOffset, dataLimit);
+                final String protocolName = tlsProtocolName != null ? tlsProtocolName.asString() : null;
                 if (protocolName != null && !protocolName.isEmpty())
                 {
                     protocolNames.add(protocolName);
