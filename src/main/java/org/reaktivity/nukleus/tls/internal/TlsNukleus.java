@@ -143,7 +143,7 @@ public final class TlsNukleus implements Nukleus
     @Override
     public TlsElektron supplyElektron()
     {
-        return new TlsElektron(config, this::findStore);
+        return new TlsElektron(config, routeId -> findStore(storesByRouteId.get(routeId)), this::findStore);
     }
 
     private boolean handleRoute(

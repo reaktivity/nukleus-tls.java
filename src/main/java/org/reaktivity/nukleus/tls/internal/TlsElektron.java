@@ -34,11 +34,12 @@ final class TlsElektron implements Elektron
 
     TlsElektron(
         TlsConfiguration config,
-        Function<String, TlsStoreInfo> lookupStoreInfo)
+        Function<Long, TlsStoreInfo> lookupStoreInfoByRouteId,
+        Function<String, TlsStoreInfo> lookupStoreInfoByStore)
     {
         Map<RouteKind, StreamFactoryBuilder> streamFactoryBuilders = new EnumMap<>(RouteKind.class);
-        streamFactoryBuilders.put(SERVER, new TlsServerFactoryBuilder(config, lookupStoreInfo));
-        streamFactoryBuilders.put(CLIENT, new TlsClientFactoryBuilder(config, lookupStoreInfo));
+        streamFactoryBuilders.put(SERVER, new TlsServerFactoryBuilder(config, lookupStoreInfoByRouteId));
+        streamFactoryBuilders.put(CLIENT, new TlsClientFactoryBuilder(config, lookupStoreInfoByStore));
         this.streamFactoryBuilders = streamFactoryBuilders;
     }
 
