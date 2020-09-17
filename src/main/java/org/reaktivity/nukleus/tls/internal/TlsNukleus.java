@@ -18,6 +18,7 @@ package org.reaktivity.nukleus.tls.internal;
 import static java.lang.System.getProperty;
 import static org.reaktivity.nukleus.route.RouteKind.CLIENT;
 import static org.reaktivity.nukleus.route.RouteKind.SERVER;
+import static org.reaktivity.reaktor.internal.router.RouteId.localId;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -93,7 +94,7 @@ public final class TlsNukleus implements Nukleus
     private final Map<RouteKind, MessagePredicate> routeHandlers;
     private final Int2ObjectHashMap<CommandHandler> commandHandlers;
 
-    private final Map<Integer, String> storesByLocalId;
+    private final Int2ObjectHashMap<String> storesByLocalId;
 
     private final TlsStoreInfo[] storeInfos;
 
@@ -102,7 +103,7 @@ public final class TlsNukleus implements Nukleus
     {
         this.config = config;
 
-        this.storesByLocalId = new HashMap<>();
+        this.storesByLocalId = new Int2ObjectHashMap<>();
         this.storeInfos = new TlsStoreInfo[256];
 
         Map<RouteKind, MessagePredicate> routeHandlers = new EnumMap<>(RouteKind.class);
@@ -175,7 +176,11 @@ public final class TlsNukleus implements Nukleus
         final String store = routeEx.store().asString();
         final long routeId = route.correlationId();
 
-        storesByLocalId.put(RouteId.localId(routeId), store);
+        if (store != null)
+        {
+            storesByLocalId.put(localId(routeId), store);
+        }
+
         TlsStoreInfo storeInfo = newStoreInfoIfNecessary(store);
         if (storeInfo != null)
         {
@@ -190,7 +195,7 @@ public final class TlsNukleus implements Nukleus
     {
         final long routeId = unroute.routeId();
 
-        final String store = storesByLocalId.remove(RouteId.localId(routeId));
+        final String store = storesByLocalId.remove(localId(routeId));
         TlsStoreInfo storeInfo = findStore(store);
         if (storeInfo != null)
         {
