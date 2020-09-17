@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
-import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.function.LongUnaryOperator;
 import java.util.function.ToIntFunction;
 
@@ -69,6 +69,7 @@ import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
+import org.reaktivity.reaktor.internal.router.RouteId;
 
 public final class TlsClientFactory implements StreamFactory
 {
@@ -134,7 +135,7 @@ public final class TlsClientFactory implements StreamFactory
     private final int handshakeBudgetMax;
 
     private final Long2ObjectHashMap<TlsStream.TlsClient> correlations;
-    private final Function<String, TlsStoreInfo> lookupStore;
+    private final IntFunction<TlsStoreInfo> lookupStore;
 
     private final ByteBuffer inNetByteBuffer;
     private final MutableDirectBuffer inNetBuffer;
@@ -154,7 +155,7 @@ public final class TlsClientFactory implements StreamFactory
         LongUnaryOperator supplyInitialId,
         LongUnaryOperator supplyReplyId,
         ToIntFunction<String> supplyTypeId,
-        Function<String, TlsStoreInfo> lookupStore,
+        IntFunction<TlsStoreInfo> lookupStore,
         TlsCounters counters)
     {
         this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
@@ -239,7 +240,6 @@ public final class TlsClientFactory implements StreamFactory
         {
             final TlsRouteExFW tlsRouteExRO = TlsClientFactory.this.tlsRouteExRO.get();
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-            String store = routeEx.store().asString();
 
             String tlsHostname = tlsBeginEx != null ? tlsBeginEx.hostname().asString() : null;
             if (tlsHostname == null)
@@ -259,7 +259,7 @@ public final class TlsClientFactory implements StreamFactory
             final long applicationRouteId = begin.routeId();
             final long applicationAffinity = begin.affinity();
 
-            final TlsStoreInfo storeInfo = lookupStore.apply(store);
+            final TlsStoreInfo storeInfo = lookupStore.apply(RouteId.remoteId(applicationRouteId));
             final SSLContext context = storeInfo != null ? storeInfo.context : null;
             if (context != null)
             {

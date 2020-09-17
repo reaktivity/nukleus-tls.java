@@ -57,6 +57,7 @@ import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnresolveFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnresolvedFW;
 import org.reaktivity.nukleus.tls.internal.types.control.UnrouteFW;
+import org.reaktivity.reaktor.internal.router.RouteId;
 
 public final class TlsNukleus implements Nukleus
 {
@@ -92,7 +93,7 @@ public final class TlsNukleus implements Nukleus
     private final Map<RouteKind, MessagePredicate> routeHandlers;
     private final Int2ObjectHashMap<CommandHandler> commandHandlers;
 
-    private final Map<Long, String> storesByRouteId;
+    private final Map<Integer, String> storesByRouteId;
 
     private final TlsStoreInfo[] storeInfos;
 
@@ -143,7 +144,7 @@ public final class TlsNukleus implements Nukleus
     @Override
     public TlsElektron supplyElektron()
     {
-        return new TlsElektron(config, routeId -> findStore(storesByRouteId.get(routeId)), this::findStore);
+        return new TlsElektron(config, localAdd -> findStore(storesByRouteId.get(localAdd)));
     }
 
     private boolean handleRoute(
@@ -174,7 +175,7 @@ public final class TlsNukleus implements Nukleus
         final String store = routeEx.store().asString();
         final long routeId = route.correlationId();
 
-        storesByRouteId.put(routeId, store);
+        storesByRouteId.put(RouteId.localId(routeId), store);
         TlsStoreInfo storeInfo = newStoreInfoIfNecessary(store);
         if (storeInfo != null)
         {
@@ -189,7 +190,7 @@ public final class TlsNukleus implements Nukleus
     {
         final long routeId = unroute.routeId();
 
-        final String store = storesByRouteId.remove(routeId);
+        final String store = storesByRouteId.remove(RouteId.localId(routeId));
         TlsStoreInfo storeInfo = findStore(store);
         if (storeInfo != null)
         {
