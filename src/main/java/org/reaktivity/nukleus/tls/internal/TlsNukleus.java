@@ -93,7 +93,7 @@ public final class TlsNukleus implements Nukleus
     private final Map<RouteKind, MessagePredicate> routeHandlers;
     private final Int2ObjectHashMap<CommandHandler> commandHandlers;
 
-    private final Map<Integer, String> storesByRouteId;
+    private final Map<Integer, String> storesByLocalId;
 
     private final TlsStoreInfo[] storeInfos;
 
@@ -102,7 +102,7 @@ public final class TlsNukleus implements Nukleus
     {
         this.config = config;
 
-        this.storesByRouteId = new HashMap<>();
+        this.storesByLocalId = new HashMap<>();
         this.storeInfos = new TlsStoreInfo[256];
 
         Map<RouteKind, MessagePredicate> routeHandlers = new EnumMap<>(RouteKind.class);
@@ -144,7 +144,7 @@ public final class TlsNukleus implements Nukleus
     @Override
     public TlsElektron supplyElektron()
     {
-        return new TlsElektron(config, localAddr -> findStore(storesByRouteId.get(localAddr)));
+        return new TlsElektron(config, localId -> findStore(storesByLocalId.get(localId)));
     }
 
     private boolean handleRoute(
@@ -175,7 +175,7 @@ public final class TlsNukleus implements Nukleus
         final String store = routeEx.store().asString();
         final long routeId = route.correlationId();
 
-        storesByRouteId.put(RouteId.localId(routeId), store);
+        storesByLocalId.put(RouteId.localId(routeId), store);
         TlsStoreInfo storeInfo = newStoreInfoIfNecessary(store);
         if (storeInfo != null)
         {
@@ -190,7 +190,7 @@ public final class TlsNukleus implements Nukleus
     {
         final long routeId = unroute.routeId();
 
-        final String store = storesByRouteId.remove(RouteId.localId(routeId));
+        final String store = storesByLocalId.remove(RouteId.localId(routeId));
         TlsStoreInfo storeInfo = findStore(store);
         if (storeInfo != null)
         {
