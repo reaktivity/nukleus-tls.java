@@ -18,7 +18,7 @@ package org.reaktivity.nukleus.tls.internal;
 import static java.lang.System.getProperty;
 import static org.reaktivity.nukleus.route.RouteKind.CLIENT;
 import static org.reaktivity.nukleus.route.RouteKind.SERVER;
-import static org.reaktivity.reaktor.internal.router.RouteId.localId;
+import static org.reaktivity.reaktor.AddressId.localId;
 
 import java.io.File;
 import java.io.FileInputStream;

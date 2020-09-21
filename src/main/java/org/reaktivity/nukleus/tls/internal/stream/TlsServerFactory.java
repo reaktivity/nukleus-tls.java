@@ -18,7 +18,7 @@ package org.reaktivity.nukleus.tls.internal.stream;
 import static java.util.Objects.requireNonNull;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
-import static org.reaktivity.reaktor.internal.router.RouteId.localId;
+import static org.reaktivity.reaktor.AddressId.localId;
 
 import java.nio.ByteBuffer;
 import java.security.cert.Certificate;
@@ -257,7 +257,7 @@ public final class TlsServerFactory implements StreamFactory
                 tlsEngine.setWantClientAuth(tlsStoreInfo.supportsClientAuth);
 
                 tlsEngine.setHandshakeApplicationProtocolSelector((ex, ps) ->
-                    setAlpnSelector(routeId, authorization, tlsEngine));
+                    setApplicationProtocolSelector(routeId, authorization, tlsEngine));
 
                 final TlsServer server = new TlsServer(network, routeId, initialId, authorization,
                     tlsEngine, tlsStoreInfo::authorization);
@@ -269,7 +269,7 @@ public final class TlsServerFactory implements StreamFactory
         return newStream;
     }
 
-    private String setAlpnSelector(
+    private String setApplicationProtocolSelector(
         long routeId,
         long authorization,
         SSLEngine tlsEngine)

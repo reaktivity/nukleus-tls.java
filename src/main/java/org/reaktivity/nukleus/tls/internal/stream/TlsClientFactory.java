@@ -20,7 +20,7 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
-import static org.reaktivity.reaktor.internal.router.RouteId.remoteId;
+import static org.reaktivity.reaktor.AddressId.remoteId;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
@@ -70,7 +70,6 @@ import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
-import org.reaktivity.reaktor.internal.router.RouteId;
 
 public final class TlsClientFactory implements StreamFactory
 {
