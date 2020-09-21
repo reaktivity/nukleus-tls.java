@@ -96,7 +96,7 @@ public class ServerIT
             "${server}/connection.established/server" })
     @ScriptProperty({
             "clientAccept \"nukleus://streams/target#0\"" })
-    public void shouldNotNegotiateALPNWithDefaultRoute() throws Exception
+    public void shouldNotNegotiateAlpnWithDefaultRoute() throws Exception
     {
         k3po.finish();
     }

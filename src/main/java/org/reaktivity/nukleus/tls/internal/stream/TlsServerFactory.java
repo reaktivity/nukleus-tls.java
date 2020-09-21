@@ -125,6 +125,7 @@ public final class TlsServerFactory implements StreamFactory
     private final TlsUnwrappedDataFW.Builder tlsUnwrappedDataRW = new TlsUnwrappedDataFW.Builder();
 
     private final TlsServerDecoder decodeHandshake = this::decodeHandshake;
+    private final TlsServerDecoder decodeBeforeHandshake = this::decodeBeforeHandshake;
     private final TlsServerDecoder decodeHandshakeFinished = this::decodeHandshakeFinished;
     private final TlsServerDecoder decodeHandshakeNeedTask = this::decodeHandshakeNeedTask;
     private final TlsServerDecoder decodeHandshakeNeedUnwrap = this::decodeHandshakeNeedUnwrap;
@@ -287,10 +288,17 @@ public final class TlsServerFactory implements StreamFactory
                         return hostname != null && Objects.equals(tlsHostname0, hostname.value());
                     };
 
-                    final RouteFW newRoute = router.resolve(routeId, authorization, filter, wrapRoute);
-                    final TlsRouteExFW newRouteEx = newRoute.extension().get(tlsRouteExRO.get()::tryWrap);
+                    final RouteFW alpnRoute = router.resolve(routeId, authorization, filter, wrapRoute);
 
-                    return newRouteEx.protocol().asString();
+                    String protocol = null;
+                    if (alpnRoute != null)
+                    {
+                        final TlsRouteExFW newRouteEx = alpnRoute.extension().get(tlsRouteExRO.get()::tryWrap);
+                        final String alpnProtocol = newRouteEx.protocol().asString();
+                        protocol = alpnProtocol == null ? "" : alpnProtocol;
+                    }
+
+                    return protocol;
                 });
 
                 final TlsServer server = new TlsServer(network, routeId, initialId, authorization,
@@ -444,6 +452,36 @@ public final class TlsServerFactory implements StreamFactory
                 .build();
 
         receiver.accept(reset.typeId(), reset.buffer(), reset.offset(), reset.sizeof());
+    }
+
+    private int decodeBeforeHandshake(
+        TlsServer server,
+        long traceId,
+        long authorization,
+        long budgetId,
+        int reserved,
+        DirectBuffer buffer,
+        int offset,
+        int progress,
+        int limit)
+    {
+        try
+        {
+            server.tlsEngine.beginHandshake();
+            server.decoder = decodeHandshake;
+        }
+        catch (SSLException | RuntimeException ex)
+        {
+            server.tlsEngine = null;
+        }
+
+        if (server.tlsEngine == null)
+        {
+            server.cleanupNetwork(traceId);
+            server.decoder = decodeIgnoreAll;
+        }
+
+        return progress;
     }
 
     private int decodeHandshake(
@@ -881,7 +919,7 @@ public final class TlsServerFactory implements StreamFactory
 
             this.initialId = networkInitialId;
             this.replyId = supplyReplyId.applyAsLong(initialId);
-            this.decoder = decodeHandshake;
+            this.decoder = decodeBeforeHandshake;
             this.stream = NULL_STREAM;
             this.tlsEngine = tlsEngine;
             this.supplyAuthorization = supplyAuthorization;
@@ -939,21 +977,6 @@ public final class TlsServerFactory implements StreamFactory
 
             doNetworkWindow(traceId, 0L, handshakeBudgetMax, 0);
             doNetworkBegin(traceId);
-
-            try
-            {
-                tlsEngine.beginHandshake();
-            }
-            catch (SSLException | RuntimeException ex)
-            {
-                tlsEngine = null;
-            }
-
-            if (tlsEngine == null)
-            {
-                cleanupNetwork(traceId);
-                decoder = decodeIgnoreAll;
-            }
         }
 
         private void onNetworkData(
