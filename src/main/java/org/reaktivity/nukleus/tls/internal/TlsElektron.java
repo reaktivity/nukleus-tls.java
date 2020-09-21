@@ -20,7 +20,7 @@ import static org.reaktivity.nukleus.route.RouteKind.SERVER;
 
 import java.util.EnumMap;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.IntFunction;
 
 import org.reaktivity.nukleus.Elektron;
 import org.reaktivity.nukleus.route.RouteKind;
@@ -34,11 +34,11 @@ final class TlsElektron implements Elektron
 
     TlsElektron(
         TlsConfiguration config,
-        Function<String, TlsStoreInfo> lookupStoreInfo)
+        IntFunction<TlsStoreInfo> lookupStoreInfoByRouteId)
     {
         Map<RouteKind, StreamFactoryBuilder> streamFactoryBuilders = new EnumMap<>(RouteKind.class);
-        streamFactoryBuilders.put(SERVER, new TlsServerFactoryBuilder(config, lookupStoreInfo));
-        streamFactoryBuilders.put(CLIENT, new TlsClientFactoryBuilder(config, lookupStoreInfo));
+        streamFactoryBuilders.put(SERVER, new TlsServerFactoryBuilder(config, lookupStoreInfoByRouteId));
+        streamFactoryBuilders.put(CLIENT, new TlsClientFactoryBuilder(config, lookupStoreInfoByRouteId));
         this.streamFactoryBuilders = streamFactoryBuilders;
     }
 

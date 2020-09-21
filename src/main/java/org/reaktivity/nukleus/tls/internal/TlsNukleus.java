@@ -18,6 +18,7 @@ package org.reaktivity.nukleus.tls.internal;
 import static java.lang.System.getProperty;
 import static org.reaktivity.nukleus.route.RouteKind.CLIENT;
 import static org.reaktivity.nukleus.route.RouteKind.SERVER;
+import static org.reaktivity.reaktor.AddressId.localId;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -28,7 +29,6 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
@@ -92,7 +92,7 @@ public final class TlsNukleus implements Nukleus
     private final Map<RouteKind, MessagePredicate> routeHandlers;
     private final Int2ObjectHashMap<CommandHandler> commandHandlers;
 
-    private final Map<Long, String> storesByRouteId;
+    private final Int2ObjectHashMap<String> storesByLocalId;
 
     private final TlsStoreInfo[] storeInfos;
 
@@ -101,7 +101,7 @@ public final class TlsNukleus implements Nukleus
     {
         this.config = config;
 
-        this.storesByRouteId = new HashMap<>();
+        this.storesByLocalId = new Int2ObjectHashMap<>();
         this.storeInfos = new TlsStoreInfo[256];
 
         Map<RouteKind, MessagePredicate> routeHandlers = new EnumMap<>(RouteKind.class);
@@ -143,7 +143,7 @@ public final class TlsNukleus implements Nukleus
     @Override
     public TlsElektron supplyElektron()
     {
-        return new TlsElektron(config, this::findStore);
+        return new TlsElektron(config, localId -> findStore(storesByLocalId.get(localId)));
     }
 
     private boolean handleRoute(
@@ -174,7 +174,11 @@ public final class TlsNukleus implements Nukleus
         final String store = routeEx.store().asString();
         final long routeId = route.correlationId();
 
-        storesByRouteId.put(routeId, store);
+        if (store != null)
+        {
+            storesByLocalId.put(localId(routeId), store);
+        }
+
         TlsStoreInfo storeInfo = newStoreInfoIfNecessary(store);
         if (storeInfo != null)
         {
@@ -189,7 +193,7 @@ public final class TlsNukleus implements Nukleus
     {
         final long routeId = unroute.routeId();
 
-        final String store = storesByRouteId.remove(routeId);
+        final String store = storesByLocalId.remove(localId(routeId));
         TlsStoreInfo storeInfo = findStore(store);
         if (storeInfo != null)
         {

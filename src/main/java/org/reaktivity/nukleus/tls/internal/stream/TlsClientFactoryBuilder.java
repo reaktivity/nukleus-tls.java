@@ -16,6 +16,7 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 import java.util.function.LongUnaryOperator;
@@ -35,7 +36,7 @@ import org.reaktivity.nukleus.tls.internal.TlsStoreInfo;
 public final class TlsClientFactoryBuilder implements StreamFactoryBuilder
 {
     private final TlsConfiguration config;
-    private final Function<String, TlsStoreInfo> lookupStore;
+    private final IntFunction<TlsStoreInfo> lookupStore;
 
     private RouteManager router;
     private Signaler signaler;
@@ -49,7 +50,7 @@ public final class TlsClientFactoryBuilder implements StreamFactoryBuilder
 
     public TlsClientFactoryBuilder(
         TlsConfiguration config,
-        Function<String, TlsStoreInfo> lookupStore)
+        IntFunction<TlsStoreInfo> lookupStore)
     {
         this.config = config;
         this.lookupStore = lookupStore;
