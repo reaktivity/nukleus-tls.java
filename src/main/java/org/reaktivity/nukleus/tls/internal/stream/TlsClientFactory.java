@@ -20,12 +20,13 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
+import static org.reaktivity.reaktor.AddressId.remoteId;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
-import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.function.LongUnaryOperator;
 import java.util.function.ToIntFunction;
 
@@ -134,7 +135,7 @@ public final class TlsClientFactory implements StreamFactory
     private final int handshakeBudgetMax;
 
     private final Long2ObjectHashMap<TlsStream.TlsClient> correlations;
-    private final Function<String, TlsStoreInfo> lookupStore;
+    private final IntFunction<TlsStoreInfo> lookupStore;
 
     private final ByteBuffer inNetByteBuffer;
     private final MutableDirectBuffer inNetBuffer;
@@ -154,7 +155,7 @@ public final class TlsClientFactory implements StreamFactory
         LongUnaryOperator supplyInitialId,
         LongUnaryOperator supplyReplyId,
         ToIntFunction<String> supplyTypeId,
-        Function<String, TlsStoreInfo> lookupStore,
+        IntFunction<TlsStoreInfo> lookupStore,
         TlsCounters counters)
     {
         this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
@@ -239,7 +240,6 @@ public final class TlsClientFactory implements StreamFactory
         {
             final TlsRouteExFW tlsRouteExRO = TlsClientFactory.this.tlsRouteExRO.get();
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-            String store = routeEx.store().asString();
 
             String tlsHostname = tlsBeginEx != null ? tlsBeginEx.hostname().asString() : null;
             if (tlsHostname == null)
@@ -259,7 +259,7 @@ public final class TlsClientFactory implements StreamFactory
             final long applicationRouteId = begin.routeId();
             final long applicationAffinity = begin.affinity();
 
-            final TlsStoreInfo storeInfo = lookupStore.apply(store);
+            final TlsStoreInfo storeInfo = lookupStore.apply(remoteId(applicationRouteId));
             final SSLContext context = storeInfo != null ? storeInfo.context : null;
             if (context != null)
             {
