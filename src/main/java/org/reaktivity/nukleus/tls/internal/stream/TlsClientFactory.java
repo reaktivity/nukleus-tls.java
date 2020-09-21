@@ -20,6 +20,7 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
+import static org.reaktivity.reaktor.internal.router.RouteId.remoteId;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
@@ -259,7 +260,7 @@ public final class TlsClientFactory implements StreamFactory
             final long applicationRouteId = begin.routeId();
             final long applicationAffinity = begin.affinity();
 
-            final TlsStoreInfo storeInfo = lookupStore.apply(RouteId.remoteId(applicationRouteId));
+            final TlsStoreInfo storeInfo = lookupStore.apply(remoteId(applicationRouteId));
             final SSLContext context = storeInfo != null ? storeInfo.context : null;
             if (context != null)
             {

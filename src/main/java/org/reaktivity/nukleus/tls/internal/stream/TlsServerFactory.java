@@ -236,8 +236,8 @@ public final class TlsServerFactory implements StreamFactory
         final long routeId = begin.routeId();
         final long authorization = begin.authorization();
 
-        final MessagePredicate emptyFilter = (t, b, o, l) -> true;
-        final RouteFW route = router.resolve(routeId, authorization, emptyFilter, wrapRoute);
+        final MessagePredicate matchAny = (t, b, o, l) -> true;
+        final RouteFW route = router.resolve(routeId, authorization, matchAny, wrapRoute);
 
         MessageConsumer newStream = null;
 
@@ -257,49 +257,7 @@ public final class TlsServerFactory implements StreamFactory
                 tlsEngine.setWantClientAuth(tlsStoreInfo.supportsClientAuth);
 
                 tlsEngine.setHandshakeApplicationProtocolSelector((ex, ps) ->
-                {
-                    SSLSession session = tlsEngine.getHandshakeSession();
-                    byte[] tlsHostnameEncoded = null;
-                    if (session instanceof ExtendedSSLSession)
-                    {
-                        ExtendedSSLSession sessionEx = (ExtendedSSLSession) session;
-                        List<SNIServerName> serverNames = sessionEx.getRequestedServerNames();
-                        if (!serverNames.isEmpty())
-                        {
-                            SNIServerName serverName = serverNames.get(0);
-                            tlsHostnameEncoded = serverName.getEncoded();
-                        }
-                    }
-
-                    DirectBuffer tlsHostname = null;
-                    if (tlsHostnameEncoded != null)
-                    {
-                        tlsHostnameRO.wrap(tlsHostnameEncoded);
-                        tlsHostname = tlsHostnameRO;
-                    }
-
-                    final DirectBuffer tlsHostname0 = tlsHostname;
-                    final MessagePredicate filter = (t, b, i, l) ->
-                    {
-                        final TlsRouteExFW routeExFW = wrapRouteEx.apply(t, b, i, l);
-
-                        final String8FW hostname = routeExFW.hostname();
-
-                        return hostname != null && Objects.equals(tlsHostname0, hostname.value());
-                    };
-
-                    final RouteFW alpnRoute = router.resolve(routeId, authorization, filter, wrapRoute);
-
-                    String protocol = null;
-                    if (alpnRoute != null)
-                    {
-                        final TlsRouteExFW newRouteEx = alpnRoute.extension().get(tlsRouteExRO.get()::tryWrap);
-                        final String alpnProtocol = newRouteEx.protocol().asString();
-                        protocol = alpnProtocol == null ? "" : alpnProtocol;
-                    }
-
-                    return protocol;
-                });
+                    setAlpnSelector(routeId, authorization, tlsEngine));
 
                 final TlsServer server = new TlsServer(network, routeId, initialId, authorization,
                     tlsEngine, tlsStoreInfo::authorization);
@@ -309,6 +267,54 @@ public final class TlsServerFactory implements StreamFactory
         }
 
         return newStream;
+    }
+
+    private String setAlpnSelector(
+        long routeId,
+        long authorization,
+        SSLEngine tlsEngine)
+    {
+        SSLSession session = tlsEngine.getHandshakeSession();
+        byte[] tlsHostnameEncoded = null;
+        if (session instanceof ExtendedSSLSession)
+        {
+            ExtendedSSLSession sessionEx = (ExtendedSSLSession) session;
+            List<SNIServerName> serverNames = sessionEx.getRequestedServerNames();
+            if (!serverNames.isEmpty())
+            {
+                SNIServerName serverName = serverNames.get(0);
+                tlsHostnameEncoded = serverName.getEncoded();
+            }
+        }
+
+        DirectBuffer tlsHostname = null;
+        if (tlsHostnameEncoded != null)
+        {
+            tlsHostnameRO.wrap(tlsHostnameEncoded);
+            tlsHostname = tlsHostnameRO;
+        }
+
+        final DirectBuffer tlsHostname0 = tlsHostname;
+        final MessagePredicate filter = (t, b, i, l) ->
+        {
+            final TlsRouteExFW routeExFW = wrapRouteEx.apply(t, b, i, l);
+
+            final String8FW hostname = routeExFW.hostname();
+
+            return hostname != null && Objects.equals(tlsHostname0, hostname.value());
+        };
+
+        final RouteFW alpnRoute = router.resolve(routeId, authorization, filter, wrapRoute);
+
+        String protocol = null;
+        if (alpnRoute != null)
+        {
+            final TlsRouteExFW newRouteEx = alpnRoute.extension().get(tlsRouteExRO.get()::tryWrap);
+            final String alpnProtocol = newRouteEx.protocol().asString();
+            protocol = alpnProtocol == null ? "" : alpnProtocol;
+        }
+
+        return protocol;
     }
 
     private MessageConsumer newApplicationStream(
