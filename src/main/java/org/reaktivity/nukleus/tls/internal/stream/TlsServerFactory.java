@@ -1515,7 +1515,7 @@ public final class TlsServerFactory implements StreamFactory
         private void doEncodeWrap(
             long traceId,
             long budgetId,
-            Flyweight payload)
+            OctetsFW payload)
         {
             final DirectBuffer buffer = payload.buffer();
             final int offset = payload.offset();
