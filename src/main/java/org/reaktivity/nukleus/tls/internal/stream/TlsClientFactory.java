@@ -1618,6 +1618,12 @@ public final class TlsClientFactory implements StreamFactory
                 long traceId,
                 long budgetId)
             {
+                if (handshakeTimeoutFutureId != NO_CANCEL_ID)
+                {
+                    signaler.cancel(handshakeTimeoutFutureId);
+                    handshakeTimeoutFutureId = NO_CANCEL_ID;
+                }
+
                 assert stream == NULL_STREAM;
                 stream = Optional.of(TlsStream.this);
 
