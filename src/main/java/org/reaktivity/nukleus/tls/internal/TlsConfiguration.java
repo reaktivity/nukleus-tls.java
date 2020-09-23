@@ -20,8 +20,10 @@ import org.reaktivity.nukleus.Configuration;
 public class TlsConfiguration extends Configuration
 {
     public static final String TLS_HANDSHAKE_WINDOW_BYTES_NAME = "nukleus.tls.handshake.window.bytes";
+    public static final String TLS_HANDSHAKE_TIMEOUT_NAME = "nukleus.tls.handshake.timeout";
 
     public static final IntPropertyDef TLS_HANDSHAKE_WINDOW_BYTES;
+    public static final IntPropertyDef TLS_HANDSHAKE_TIMEOUT;
     public static final PropertyDef<String> TLS_KEY_MANAGER_ALGORITHM;
 
     private static final ConfigurationDef TLS_CONFIG;
@@ -30,6 +32,7 @@ public class TlsConfiguration extends Configuration
     {
         final ConfigurationDef config = new ConfigurationDef("nukleus.tls");
         TLS_HANDSHAKE_WINDOW_BYTES = config.property("handshake.window.bytes", 65536);
+        TLS_HANDSHAKE_TIMEOUT = config.property("handshake.timeout", 10);
         TLS_KEY_MANAGER_ALGORITHM = config.property("handshake.key.manager.algorithm", "PKIX");
         TLS_CONFIG = config;
     }
@@ -43,6 +46,11 @@ public class TlsConfiguration extends Configuration
     public int handshakeWindowBytes()
     {
         return TLS_HANDSHAKE_WINDOW_BYTES.getAsInt(this);
+    }
+
+    public int handshakeTimeout()
+    {
+        return TLS_HANDSHAKE_TIMEOUT.getAsInt(this);
     }
 
     public String keyManagerAlgorithm()

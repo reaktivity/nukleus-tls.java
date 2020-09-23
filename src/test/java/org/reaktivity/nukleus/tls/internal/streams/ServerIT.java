@@ -17,6 +17,7 @@ package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
+import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_TIMEOUT_NAME;
 import static org.reaktivity.reaktor.test.ReaktorRule.EXTERNAL_AFFINITY_MASK;
 
 import org.junit.Ignore;
@@ -30,6 +31,7 @@ import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.ReaktorConfiguration;
 import org.reaktivity.reaktor.test.ReaktorRule;
+import org.reaktivity.reaktor.test.annotation.Configure;
 
 public class ServerIT
 {
@@ -333,6 +335,16 @@ public class ServerIT
         "clientAccept \"nukleus://streams/target#0\"",
         "authorization  -2666130979403333631L" })           // "0xdb00000000000001L"
     public void serverWantClientAuth() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+        "${route}/server/controller",
+        "${client}/server.handshake.timeout/client"})
+    @Configure(name = TLS_HANDSHAKE_TIMEOUT_NAME, value = "1")
+    public void shouldTimeoutHandshake() throws Exception
     {
         k3po.finish();
     }
