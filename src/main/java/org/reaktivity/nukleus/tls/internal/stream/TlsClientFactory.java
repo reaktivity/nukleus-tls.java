@@ -15,9 +15,11 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
+import static java.lang.System.currentTimeMillis;
 import static java.util.Arrays.asList;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
 import static org.reaktivity.reaktor.AddressId.remoteId;
@@ -77,6 +79,7 @@ public final class TlsClientFactory implements StreamFactory
     private static final Consumer<OctetsFW.Builder> EMPTY_EXTENSION = ex -> {};
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
     private static final int HANDSHAKE_TASK_COMPLETE_SIGNAL = 1;
+    private static final int HANDSHAKE_TIMEOUT_SIGNAL = 2;
     private static final MutableDirectBuffer EMPTY_MUTABLE_DIRECT_BUFFER = new UnsafeBuffer(new byte[0]);
 
     private static final Optional<TlsStream> NULL_STREAM = ofNullable(null);
@@ -133,6 +136,7 @@ public final class TlsClientFactory implements StreamFactory
 
     private final int decodeBudgetMax;
     private final int handshakeBudgetMax;
+    private final int handshakeTimeout;
 
     private final Long2ObjectHashMap<TlsStream.TlsClient> correlations;
     private final IntFunction<TlsStoreInfo> lookupStore;
@@ -170,6 +174,7 @@ public final class TlsClientFactory implements StreamFactory
         this.correlations = new Long2ObjectHashMap<>();
         this.decodeBudgetMax = decodePool.slotCapacity();
         this.handshakeBudgetMax = Math.min(config.handshakeWindowBytes(), decodeBudgetMax);
+        this.handshakeTimeout = config.handshakeTimeout();
         this.initialPaddingAdjust = Math.max(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
@@ -685,7 +690,7 @@ public final class TlsClientFactory implements StreamFactory
         int limit)
     {
         final int length = limit - progress;
-        if (length != 0)
+        if (length >= 0)
         {
             inNetByteBuffer.clear();
             inNetBuffer.putBytes(0, buffer, progress, length);
@@ -1074,6 +1079,7 @@ public final class TlsClientFactory implements StreamFactory
             private int decodableRecordBytes;
 
             private long handshakeTaskFutureId = NO_CANCEL_ID;
+            private long handshakeTimeoutFutureId = NO_CANCEL_ID;
 
             private Optional<TlsStream> stream;
 
@@ -1295,6 +1301,9 @@ public final class TlsClientFactory implements StreamFactory
                 case HANDSHAKE_TASK_COMPLETE_SIGNAL:
                     onNetworkSignalHandshakeTaskComplete(signal);
                     break;
+                case HANDSHAKE_TIMEOUT_SIGNAL:
+                    onNetworkSignalHandshakeTimeout(signal);
+                    break;
                 }
             }
 
@@ -1324,6 +1333,18 @@ public final class TlsClientFactory implements StreamFactory
                 decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
             }
 
+            private void onNetworkSignalHandshakeTimeout(
+                SignalFW signal)
+            {
+                final long traceId = signal.traceId();
+                assert handshakeTimeoutFutureId != NO_CANCEL_ID;
+
+                handshakeTimeoutFutureId = NO_CANCEL_ID;
+
+                cleanupNetwork(traceId);
+                decoder = decodeIgnoreAll;
+            }
+
             private void doNetworkBegin(
                 long traceId,
                 long authorization,
@@ -1343,6 +1364,15 @@ public final class TlsClientFactory implements StreamFactory
                 catch (SSLException ex)
                 {
                     cleanupNetwork(traceId);
+                }
+
+                if (handshakeTimeoutFutureId == NO_CANCEL_ID)
+                {
+                    handshakeTimeoutFutureId = signaler.signalAt(
+                        currentTimeMillis() + SECONDS.toMillis(handshakeTimeout),
+                        routeId,
+                        initialId,
+                        HANDSHAKE_TIMEOUT_SIGNAL);
                 }
             }
 
