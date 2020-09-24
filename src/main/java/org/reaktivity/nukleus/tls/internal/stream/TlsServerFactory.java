@@ -15,7 +15,9 @@
  */
 package org.reaktivity.nukleus.tls.internal.stream;
 
+import static java.lang.System.currentTimeMillis;
 import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
 import static org.reaktivity.reaktor.AddressId.localId;
@@ -88,6 +90,7 @@ public final class TlsServerFactory implements StreamFactory
     private static final Consumer<OctetsFW.Builder> EMPTY_EXTENSION = ex -> {};
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
     private static final int HANDSHAKE_TASK_COMPLETE_SIGNAL = 1;
+    private static final int HANDSHAKE_TIMEOUT_SIGNAL = 2;
     private static final MutableDirectBuffer EMPTY_MUTABLE_DIRECT_BUFFER = new UnsafeBuffer(new byte[0]);
 
     static final Optional<TlsServer.TlsStream> NULL_STREAM = Optional.ofNullable(null);
@@ -151,6 +154,7 @@ public final class TlsServerFactory implements StreamFactory
 
     private final int decodeBudgetMax;
     private final int handshakeBudgetMax;
+    private final long handshakeTimeoutMillis;
 
     private final Long2ObjectHashMap<TlsServer.TlsStream> correlations;
     private final IntFunction<TlsStoreInfo> lookupStore;
@@ -191,6 +195,7 @@ public final class TlsServerFactory implements StreamFactory
         this.replyPaddingAdjust = Math.max(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
         this.decodeBudgetMax = decodePool.slotCapacity();
         this.handshakeBudgetMax = Math.min(config.handshakeWindowBytes(), decodeBudgetMax);
+        this.handshakeTimeoutMillis = SECONDS.toMillis(config.handshakeTimeout());
         this.correlations = new Long2ObjectHashMap<>();
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
@@ -728,7 +733,7 @@ public final class TlsServerFactory implements StreamFactory
         int limit)
     {
         final int length = limit - progress;
-        if (length != 0)
+        if (length > 0 || !server.stream.isPresent())
         {
             inNetByteBuffer.clear();
             inNetBuffer.putBytes(0, buffer, progress, length);
@@ -771,6 +776,7 @@ public final class TlsServerFactory implements StreamFactory
             }
             catch (SSLException | RuntimeException ex)
             {
+                server.doEncodeCloseOutbound(traceId, budgetId);
                 server.cleanupNetwork(traceId);
                 server.decoder = decodeIgnoreAll;
             }
@@ -890,6 +896,7 @@ public final class TlsServerFactory implements StreamFactory
         private SSLEngine tlsEngine;
 
         private long handshakeTaskFutureId = NO_CANCEL_ID;
+        private long handshakeTimeoutFutureId = NO_CANCEL_ID;
 
         private int decodeSlot = NO_SLOT;
         private int decodeSlotOffset;
@@ -983,6 +990,13 @@ public final class TlsServerFactory implements StreamFactory
 
             doNetworkWindow(traceId, 0L, handshakeBudgetMax, 0);
             doNetworkBegin(traceId);
+
+            assert handshakeTimeoutFutureId == NO_CANCEL_ID;
+            handshakeTimeoutFutureId = signaler.signalAt(
+                currentTimeMillis() + handshakeTimeoutMillis,
+                routeId,
+                replyId,
+                HANDSHAKE_TIMEOUT_SIGNAL);
         }
 
         private void onNetworkData(
@@ -1135,6 +1149,9 @@ public final class TlsServerFactory implements StreamFactory
             case HANDSHAKE_TASK_COMPLETE_SIGNAL:
                 onNetworkSignalHandshakeTaskComplete(signal);
                 break;
+            case HANDSHAKE_TIMEOUT_SIGNAL:
+                onNetworkSignalHandshakeTimeout(signal);
+                break;
             }
         }
 
@@ -1162,6 +1179,18 @@ public final class TlsServerFactory implements StreamFactory
             }
 
             decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
+        }
+
+        private void onNetworkSignalHandshakeTimeout(
+            SignalFW signal)
+        {
+            final long traceId = signal.traceId();
+            assert handshakeTimeoutFutureId != NO_CANCEL_ID;
+
+            handshakeTimeoutFutureId = NO_CANCEL_ID;
+
+            cleanupNetwork(traceId);
+            decoder = decodeIgnoreAll;
         }
 
         private void doNetworkBegin(
@@ -1414,6 +1443,10 @@ public final class TlsServerFactory implements StreamFactory
             long traceId,
             long budgetId)
         {
+            assert handshakeTimeoutFutureId != NO_CANCEL_ID;
+            signaler.cancel(handshakeTimeoutFutureId);
+            handshakeTimeoutFutureId = NO_CANCEL_ID;
+
             ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getSession();
             List<SNIServerName> serverNames = tlsSession.getRequestedServerNames();
             String alpn = tlsEngine.getApplicationProtocol();

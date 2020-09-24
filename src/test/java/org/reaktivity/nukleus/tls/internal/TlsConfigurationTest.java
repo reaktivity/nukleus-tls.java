@@ -16,6 +16,8 @@
 package org.reaktivity.nukleus.tls.internal;
 
 import static org.junit.Assert.assertEquals;
+import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_TIMEOUT;
+import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_TIMEOUT_NAME;
 import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_WINDOW_BYTES;
 import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_WINDOW_BYTES_NAME;
 
@@ -27,5 +29,6 @@ public class TlsConfigurationTest
     public void shouldVerifyConstants() throws Exception
     {
         assertEquals(TLS_HANDSHAKE_WINDOW_BYTES.name(), TLS_HANDSHAKE_WINDOW_BYTES_NAME);
+        assertEquals(TLS_HANDSHAKE_TIMEOUT.name(), TLS_HANDSHAKE_TIMEOUT_NAME);
     }
 }
