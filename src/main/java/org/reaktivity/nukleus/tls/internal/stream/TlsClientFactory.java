@@ -136,7 +136,7 @@ public final class TlsClientFactory implements StreamFactory
 
     private final int decodeBudgetMax;
     private final int handshakeBudgetMax;
-    private final int handshakeTimeout;
+    private final long handshakeTimeoutMillis;
 
     private final Long2ObjectHashMap<TlsStream.TlsClient> correlations;
     private final IntFunction<TlsStoreInfo> lookupStore;
@@ -174,7 +174,7 @@ public final class TlsClientFactory implements StreamFactory
         this.correlations = new Long2ObjectHashMap<>();
         this.decodeBudgetMax = decodePool.slotCapacity();
         this.handshakeBudgetMax = Math.min(config.handshakeWindowBytes(), decodeBudgetMax);
-        this.handshakeTimeout = config.handshakeTimeout();
+        this.handshakeTimeoutMillis = SECONDS.toMillis(config.handshakeTimeout());
         this.initialPaddingAdjust = Math.max(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
@@ -690,7 +690,7 @@ public final class TlsClientFactory implements StreamFactory
         int limit)
     {
         final int length = limit - progress;
-        if (length >= 0)
+        if (length != 0 || !client.stream.isPresent())
         {
             inNetByteBuffer.clear();
             inNetBuffer.putBytes(0, buffer, progress, length);
@@ -1369,7 +1369,7 @@ public final class TlsClientFactory implements StreamFactory
                 if (handshakeTimeoutFutureId == NO_CANCEL_ID)
                 {
                     handshakeTimeoutFutureId = signaler.signalAt(
-                        currentTimeMillis() + SECONDS.toMillis(handshakeTimeout),
+                        currentTimeMillis() + handshakeTimeoutMillis,
                         routeId,
                         initialId,
                         HANDSHAKE_TIMEOUT_SIGNAL);
@@ -1618,11 +1618,9 @@ public final class TlsClientFactory implements StreamFactory
                 long traceId,
                 long budgetId)
             {
-                if (handshakeTimeoutFutureId != NO_CANCEL_ID)
-                {
-                    signaler.cancel(handshakeTimeoutFutureId);
-                    handshakeTimeoutFutureId = NO_CANCEL_ID;
-                }
+                assert handshakeTimeoutFutureId != NO_CANCEL_ID;
+                signaler.cancel(handshakeTimeoutFutureId);
+                handshakeTimeoutFutureId = NO_CANCEL_ID;
 
                 assert stream == NULL_STREAM;
                 stream = Optional.of(TlsStream.this);

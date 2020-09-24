@@ -154,7 +154,7 @@ public final class TlsServerFactory implements StreamFactory
 
     private final int decodeBudgetMax;
     private final int handshakeBudgetMax;
-    private final int handshakeTimeout;
+    private final long handshakeTimeoutMillis;
 
     private final Long2ObjectHashMap<TlsServer.TlsStream> correlations;
     private final IntFunction<TlsStoreInfo> lookupStore;
@@ -195,7 +195,7 @@ public final class TlsServerFactory implements StreamFactory
         this.replyPaddingAdjust = Math.max(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
         this.decodeBudgetMax = decodePool.slotCapacity();
         this.handshakeBudgetMax = Math.min(config.handshakeWindowBytes(), decodeBudgetMax);
-        this.handshakeTimeout = config.handshakeTimeout();
+        this.handshakeTimeoutMillis = SECONDS.toMillis(config.handshakeTimeout());
         this.correlations = new Long2ObjectHashMap<>();
 
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
@@ -994,7 +994,7 @@ public final class TlsServerFactory implements StreamFactory
             if (handshakeTimeoutFutureId == NO_CANCEL_ID)
             {
                 handshakeTimeoutFutureId = signaler.signalAt(
-                    currentTimeMillis() + SECONDS.toMillis(handshakeTimeout),
+                    currentTimeMillis() + handshakeTimeoutMillis,
                     routeId,
                     replyId,
                     HANDSHAKE_TIMEOUT_SIGNAL);
@@ -1445,11 +1445,9 @@ public final class TlsServerFactory implements StreamFactory
             long traceId,
             long budgetId)
         {
-            if (handshakeTimeoutFutureId != NO_CANCEL_ID)
-            {
-                signaler.cancel(handshakeTimeoutFutureId);
-                handshakeTimeoutFutureId = NO_CANCEL_ID;
-            }
+            assert handshakeTimeoutFutureId != NO_CANCEL_ID;
+            signaler.cancel(handshakeTimeoutFutureId);
+            handshakeTimeoutFutureId = NO_CANCEL_ID;
 
             ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getSession();
             List<SNIServerName> serverNames = tlsSession.getRequestedServerNames();
