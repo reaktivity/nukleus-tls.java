@@ -991,14 +991,12 @@ public final class TlsServerFactory implements StreamFactory
             doNetworkWindow(traceId, 0L, handshakeBudgetMax, 0);
             doNetworkBegin(traceId);
 
-            if (handshakeTimeoutFutureId == NO_CANCEL_ID)
-            {
-                handshakeTimeoutFutureId = signaler.signalAt(
-                    currentTimeMillis() + handshakeTimeoutMillis,
-                    routeId,
-                    replyId,
-                    HANDSHAKE_TIMEOUT_SIGNAL);
-            }
+            assert handshakeTimeoutFutureId == NO_CANCEL_ID;
+            handshakeTimeoutFutureId = signaler.signalAt(
+                currentTimeMillis() + handshakeTimeoutMillis,
+                routeId,
+                replyId,
+                HANDSHAKE_TIMEOUT_SIGNAL);
         }
 
         private void onNetworkData(

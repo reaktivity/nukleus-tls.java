@@ -1366,14 +1366,13 @@ public final class TlsClientFactory implements StreamFactory
                     cleanupNetwork(traceId);
                 }
 
-                if (handshakeTimeoutFutureId == NO_CANCEL_ID)
-                {
-                    handshakeTimeoutFutureId = signaler.signalAt(
-                        currentTimeMillis() + handshakeTimeoutMillis,
-                        routeId,
-                        initialId,
-                        HANDSHAKE_TIMEOUT_SIGNAL);
-                }
+                assert handshakeTimeoutFutureId == NO_CANCEL_ID;
+
+                handshakeTimeoutFutureId = signaler.signalAt(
+                    currentTimeMillis() + handshakeTimeoutMillis,
+                    routeId,
+                    initialId,
+                    HANDSHAKE_TIMEOUT_SIGNAL);
             }
 
             private void doNetworkData(
