@@ -17,6 +17,7 @@ package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
+import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_TIMEOUT_NAME;
 import static org.reaktivity.reaktor.test.ReaktorRule.EXTERNAL_AFFINITY_MASK;
 
 import org.junit.Ignore;
@@ -29,6 +30,7 @@ import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
+import org.reaktivity.reaktor.test.annotation.Configure;
 
 public class ClientIT
 {
@@ -359,6 +361,19 @@ public class ClientIT
     @ScriptProperty({
             "serverAccept \"nukleus://streams/target#0\"" })
     public void shouldReceiveClientSentReadAbortBeforeCorrelated() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+        "${route}/client/controller",
+        "${client}/client.handshake.timeout/client",
+        "${server}/client.handshake.timeout/server" })
+    @ScriptProperty({
+        "serverAccept \"nukleus://streams/target#0\"" })
+    @Configure(name = TLS_HANDSHAKE_TIMEOUT_NAME, value = "1")
+    public void shouldTimeoutHandshake() throws Exception
     {
         k3po.finish();
     }
