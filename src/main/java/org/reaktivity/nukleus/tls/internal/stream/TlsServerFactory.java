@@ -1631,7 +1631,7 @@ public final class TlsServerFactory implements StreamFactory
         private void cancelHandshakeTimeout()
         {
             assert handshakeTimeoutFutureId != NO_CANCEL_ID;
-            assert  signaler.cancel(handshakeTimeoutFutureId);
+            signaler.cancel(handshakeTimeoutFutureId);
             handshakeTimeoutFutureId = NO_CANCEL_ID;
         }
 
