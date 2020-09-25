@@ -25,7 +25,6 @@ import static org.reaktivity.reaktor.AddressId.localId;
 import java.nio.ByteBuffer;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -65,14 +64,9 @@ import org.reaktivity.nukleus.tls.internal.TlsNukleus;
 import org.reaktivity.nukleus.tls.internal.TlsStoreInfo;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.String8FW;
-import org.reaktivity.nukleus.tls.internal.types.codec.TlsExtensionFW;
-import org.reaktivity.nukleus.tls.internal.types.codec.TlsNameType;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsRecordInfoFW;
-import org.reaktivity.nukleus.tls.internal.types.codec.TlsServerNameExtensionFW;
-import org.reaktivity.nukleus.tls.internal.types.codec.TlsServerNameFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedDataFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedInfoFW;
-import org.reaktivity.nukleus.tls.internal.types.codec.TlsVector16FW;
 import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
 import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.AbortFW;
@@ -118,10 +112,6 @@ public final class TlsServerFactory implements StreamFactory
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
 
     private final TlsRecordInfoFW tlsRecordInfoRO = new TlsRecordInfoFW();
-    private final TlsVector16FW tlsVector16RO = new TlsVector16FW();
-    private final TlsServerNameExtensionFW tlsServerNameExtensionRO = new TlsServerNameExtensionFW();
-    private final TlsServerNameFW tlsServerNameRO = new TlsServerNameFW();
-    private final String8FW tlsProtocolNameRO = new String8FW();
 
     private final TlsUnwrappedInfoFW.Builder tlsUnwrappedInfoRW = new TlsUnwrappedInfoFW.Builder();
     private final TlsUnwrappedDataFW tlsUnwrappedDataRO = new TlsUnwrappedDataFW();
@@ -158,7 +148,6 @@ public final class TlsServerFactory implements StreamFactory
 
     private final Long2ObjectHashMap<TlsServer.TlsStream> correlations;
     private final IntFunction<TlsStoreInfo> lookupStore;
-    private final TlsCounters counters;
 
     private final ByteBuffer inNetByteBuffer;
     private final MutableDirectBuffer inNetBuffer;
@@ -185,7 +174,6 @@ public final class TlsServerFactory implements StreamFactory
         this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
         this.signaler = requireNonNull(signaler);
         this.lookupStore = requireNonNull(lookupStore);
-        this.counters = requireNonNull(counters);
         this.router = requireNonNull(router);
         this.writeBuffer = requireNonNull(writeBuffer);
         this.decodePool = new CountingBufferPool(bufferPool, counters.serverDecodeAcquires, counters.serverDecodeReleases);
@@ -813,59 +801,6 @@ public final class TlsServerFactory implements StreamFactory
         int limit)
     {
         return limit;
-    }
-
-    private String decodeServerName(
-        TlsExtensionFW tlsExtension)
-    {
-        String serverName = null;
-
-        final TlsServerNameExtensionFW tlsServerNameExtension = tlsExtension.data().get(tlsServerNameExtensionRO::tryWrap);
-        if (tlsServerNameExtension != null)
-        {
-            final TlsVector16FW tlsServerNames = tlsServerNameExtension.serverNames();
-            final OctetsFW tlsServerNamesData = tlsServerNames.data();
-            final DirectBuffer dataBuffer = tlsServerNamesData.buffer();
-            final int dataLimit = tlsServerNamesData.limit();
-            for (int dataOffset = tlsServerNamesData.offset(); dataOffset < dataLimit; )
-            {
-                final TlsServerNameFW tlsServerName = tlsServerNameRO.tryWrap(dataBuffer, dataOffset, dataLimit);
-                if (tlsServerName != null && tlsServerName.kind() == TlsNameType.HOSTNAME.value())
-                {
-                    serverName = tlsServerName.hostname().asString();
-                    break;
-                }
-                dataOffset = tlsServerName.limit();
-            }
-        }
-
-        return serverName;
-    }
-
-    private List<String> decodeApplicationLayerProtocolNegotiation(
-        TlsExtensionFW tlsExtension)
-    {
-        final List<String> protocolNames = new ArrayList<>(3);
-
-        final TlsVector16FW tlsExtensionData = tlsExtension.data().get(tlsVector16RO::tryWrap);
-        if (tlsExtensionData != null)
-        {
-            final OctetsFW tlsAlpnData = tlsExtensionData.data();
-            final DirectBuffer dataBuffer = tlsAlpnData.buffer();
-            final int dataLimit = tlsAlpnData.limit();
-            for (int dataOffset = tlsAlpnData.offset(); dataOffset < dataLimit; )
-            {
-                final String8FW tlsProtocolName = tlsProtocolNameRO.tryWrap(dataBuffer, dataOffset, dataLimit);
-                final String protocolName = tlsProtocolName != null ? tlsProtocolName.asString() : null;
-                if (protocolName != null && !protocolName.isEmpty())
-                {
-                    protocolNames.add(protocolName);
-                }
-                dataOffset = tlsProtocolName.limit();
-            }
-        }
-
-        return protocolNames;
     }
 
     @FunctionalInterface
