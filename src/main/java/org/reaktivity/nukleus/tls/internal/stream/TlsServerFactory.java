@@ -1238,6 +1238,8 @@ public final class TlsServerFactory implements StreamFactory
             {
                 doNetworkEnd(traceId);
             }
+
+            cancelHandshakeTimeoutIfNecessary();
         }
 
         private void doNetworkAbortIfNecessary(
@@ -1250,6 +1252,8 @@ public final class TlsServerFactory implements StreamFactory
             }
 
             cleanupEncodeSlotIfNecessary();
+
+            cancelHandshakeTimeoutIfNecessary();
         }
 
         private void doNetworkResetIfNecessary(
@@ -1262,6 +1266,8 @@ public final class TlsServerFactory implements StreamFactory
             }
 
             cleanupDecodeSlotIfNecessary();
+
+            cancelHandshakeTimeoutIfNecessary();
         }
 
         private void doNetworkWindow(
@@ -1443,9 +1449,7 @@ public final class TlsServerFactory implements StreamFactory
             long traceId,
             long budgetId)
         {
-            assert handshakeTimeoutFutureId != NO_CANCEL_ID;
-            signaler.cancel(handshakeTimeoutFutureId);
-            handshakeTimeoutFutureId = NO_CANCEL_ID;
+            cancelHandshakeTimeout();
 
             ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getSession();
             List<SNIServerName> serverNames = tlsSession.getRequestedServerNames();
@@ -1614,6 +1618,21 @@ public final class TlsServerFactory implements StreamFactory
                 encodeSlotOffset = 0;
                 encodeSlotTraceId = 0;
             }
+        }
+
+        private void cancelHandshakeTimeoutIfNecessary()
+        {
+            if (handshakeTimeoutFutureId != NO_CANCEL_ID)
+            {
+                cancelHandshakeTimeout();
+            }
+        }
+
+        private void cancelHandshakeTimeout()
+        {
+            assert handshakeTimeoutFutureId != NO_CANCEL_ID;
+            signaler.cancel(handshakeTimeoutFutureId);
+            handshakeTimeoutFutureId = NO_CANCEL_ID;
         }
 
         final class TlsStream
