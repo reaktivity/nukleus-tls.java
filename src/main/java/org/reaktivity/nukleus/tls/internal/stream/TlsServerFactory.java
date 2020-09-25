@@ -1449,9 +1449,7 @@ public final class TlsServerFactory implements StreamFactory
             long traceId,
             long budgetId)
         {
-            assert handshakeTimeoutFutureId != NO_CANCEL_ID;
-            signaler.cancel(handshakeTimeoutFutureId);
-            handshakeTimeoutFutureId = NO_CANCEL_ID;
+            cancelHandshakeTimeout();
 
             ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getSession();
             List<SNIServerName> serverNames = tlsSession.getRequestedServerNames();
@@ -1626,9 +1624,15 @@ public final class TlsServerFactory implements StreamFactory
         {
             if (handshakeTimeoutFutureId != NO_CANCEL_ID)
             {
-                assert  signaler.cancel(handshakeTimeoutFutureId);
-                handshakeTimeoutFutureId = NO_CANCEL_ID;
+                cancelHandshakeTimeout();
             }
+        }
+
+        private void cancelHandshakeTimeout()
+        {
+            assert handshakeTimeoutFutureId != NO_CANCEL_ID;
+            assert  signaler.cancel(handshakeTimeoutFutureId);
+            handshakeTimeoutFutureId = NO_CANCEL_ID;
         }
 
         final class TlsStream
