@@ -1120,12 +1120,14 @@ public final class TlsServerFactory implements StreamFactory
             SignalFW signal)
         {
             final long traceId = signal.traceId();
-            assert handshakeTimeoutFutureId != NO_CANCEL_ID;
 
-            handshakeTimeoutFutureId = NO_CANCEL_ID;
+            if (handshakeTimeoutFutureId != NO_CANCEL_ID)
+            {
+                handshakeTimeoutFutureId = NO_CANCEL_ID;
 
-            cleanupNetwork(traceId);
-            decoder = decodeIgnoreAll;
+                cleanupNetwork(traceId);
+                decoder = decodeIgnoreAll;
+            }
         }
 
         private void doNetworkBegin(
