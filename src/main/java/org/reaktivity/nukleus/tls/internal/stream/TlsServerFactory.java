@@ -291,6 +291,7 @@ public final class TlsServerFactory implements StreamFactory
         final MessagePredicate filter = (t, b, i, l) ->
         {
             final TlsRouteExFW routeEx = wrapRouteEx.apply(t, b, i, l);
+
             final String8FW hostname = routeEx.hostname();
 
             return hostname.value() == null || Objects.equals(tlsHostname0, hostname.value());
