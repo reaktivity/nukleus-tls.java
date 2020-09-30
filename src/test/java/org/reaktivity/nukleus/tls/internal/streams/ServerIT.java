@@ -103,8 +103,6 @@ public class ServerIT
         k3po.finish();
     }
 
-
-
     @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
@@ -118,7 +116,7 @@ public class ServerIT
         k3po.finish();
     }
 
-        @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
+    @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
             "${route}/server.alpn/controller",
