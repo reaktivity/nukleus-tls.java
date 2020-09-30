@@ -290,11 +290,10 @@ public final class TlsServerFactory implements StreamFactory
         final DirectBuffer tlsHostname0 = tlsHostname;
         final MessagePredicate filter = (t, b, i, l) ->
         {
-            final TlsRouteExFW routeExFW = wrapRouteEx.apply(t, b, i, l);
+            final TlsRouteExFW routeEx = wrapRouteEx.apply(t, b, i, l);
+            final String8FW hostname = routeEx.hostname();
 
-            final String8FW hostname = routeExFW.hostname();
-
-            return hostname != null && Objects.equals(tlsHostname0, hostname.value());
+            return hostname.value() == null || Objects.equals(tlsHostname0, hostname.value());
         };
 
         final RouteFW alpnRoute = router.resolve(routeId, authorization, filter, wrapRoute);

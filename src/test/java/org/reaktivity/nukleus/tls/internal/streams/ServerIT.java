@@ -103,6 +103,8 @@ public class ServerIT
         k3po.finish();
     }
 
+
+
     @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
@@ -116,7 +118,7 @@ public class ServerIT
         k3po.finish();
     }
 
-    @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
+        @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
     @Specification({
             "${route}/server.alpn/controller",
@@ -136,6 +138,18 @@ public class ServerIT
     @ScriptProperty({
             "clientAccept \"nukleus://streams/target#0\"" })
     public void shouldNegotiateALPNWithAlpnAndDefaultRoutes() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
+        "${route}/server.alpn.no.hostname/controller",
+        "${client}/connection.established.with.alpn/client",
+        "${server}/connection.established.with.alpn/server" })
+    @ScriptProperty({
+        "clientAccept \"nukleus://streams/target#0\"" })
+    public void shouldNegotiateALPNWithAlpnAndNoHostname() throws Exception
     {
         k3po.finish();
     }
