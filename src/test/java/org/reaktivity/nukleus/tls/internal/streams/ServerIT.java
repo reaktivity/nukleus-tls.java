@@ -142,6 +142,18 @@ public class ServerIT
 
     @Test
     @Specification({
+        "${route}/server.alpn.no.hostname/controller",
+        "${client}/connection.established.with.alpn/client",
+        "${server}/connection.established.with.alpn/server" })
+    @ScriptProperty({
+        "clientAccept \"nukleus://streams/target#0\"" })
+    public void shouldNegotiateALPNWithAlpnAndNoHostname() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Specification({
             "${route}/server.alpn.default/controller",
             "${client}/connection.established/client",
             "${server}/connection.established/server" })
