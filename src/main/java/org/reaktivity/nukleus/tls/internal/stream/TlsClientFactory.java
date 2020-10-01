@@ -1336,13 +1336,15 @@ public final class TlsClientFactory implements StreamFactory
             private void onNetworkSignalHandshakeTimeout(
                 SignalFW signal)
             {
-                final long traceId = signal.traceId();
-                assert handshakeTimeoutFutureId != NO_CANCEL_ID;
+                if (handshakeTimeoutFutureId != NO_CANCEL_ID)
+                {
+                    handshakeTimeoutFutureId = NO_CANCEL_ID;
 
-                handshakeTimeoutFutureId = NO_CANCEL_ID;
+                    final long traceId = signal.traceId();
 
-                cleanupNetwork(traceId);
-                decoder = decodeIgnoreAll;
+                    cleanupNetwork(traceId);
+                    decoder = decodeIgnoreAll;
+                }
             }
 
             private void doNetworkBegin(
