@@ -25,98 +25,11 @@ scope protocol
             uint8 minor;
         }
 
-        enum TlsContentType (uint8)
-        {
-            CHANGE_CIPHER_SPEC (20),
-            ALERT (21),
-            HANDSHAKE (22),
-            APPLICATION_DATA (23)
-        }
-
         struct TlsRecordInfo
         {
             uint8 type;
             TlsProtocolVersion version;
             uint16 length;
-        }
-
-        enum TlsHandshakeType (uint8)
-        {
-            HELLO_REQUEST (0),
-            CLIENT_HELLO (1),
-            SERVER_HELLO (2),
-            CERTIFICATE (11),
-            SERVER_KEY_EXCHANGE (12),
-            CERTIFICATE_REQUEST (13),
-            SERVER_HELLO_DONE (14),
-            CERTIFICATE_VERIFY (15),
-            CLIENT_KEY_EXCHANGE (16),
-            FINISHED (20)
-        }
-
-        struct TlsHandshake
-        {
-            uint8 type;
-            uint24 length;
-            octets[length] body;
-        }
-
-        struct TlsRandom
-        {
-            uint32 epochSeconds;
-            octets[28] randomBytes;
-        }
-
-        struct TlsVector8
-        {
-            uint8 length;
-            octets[length] data;
-        }
-
-        struct TlsVector16
-        {
-            uint16 length;
-            octets[length] data;
-        }
-
-        struct TlsClientHello
-        {
-            TlsProtocolVersion clientVersion;
-            TlsRandom random;
-            TlsVector8 sessionId;
-            TlsVector16 suites;
-            TlsVector8 methods;
-            octets extensions;
-        }
-
-        enum TlsExtensionType (uint16)
-        {
-            SERVER_NAME (0),
-            SIGNATURE_ALGORITHMS (13),
-            APPLICATION_LAYER_PROTOCOL_NEGOTIATION (16)
-        }
-
-        struct TlsExtension
-        {
-            uint16 type;
-            uint16 length;
-            octets[length] data;
-        }
-
-        struct TlsServerNameExtension
-        {
-            TlsVector16 serverNames;
-        }
-
-        enum TlsNameType (uint8)
-        {
-            HOSTNAME (0)
-        }
-
-        union TlsServerName switch (uint8)
-        {
-            case 0:
-                string16 hostname;
         }
 
         struct TlsUnwrappedInfo
