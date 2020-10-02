@@ -743,9 +743,6 @@ public final class TlsServerFactory implements StreamFactory
                     break;
                 case OK:
                     final HandshakeStatus handshakeStatus = result.getHandshakeStatus();
-
-                    assert bytesProduced == 0 || handshakeStatus == HandshakeStatus.FINISHED;
-
                     if (handshakeStatus == HandshakeStatus.FINISHED)
                     {
                         server.onDecodeHandshakeFinished(traceId, budgetId);
@@ -753,6 +750,7 @@ public final class TlsServerFactory implements StreamFactory
 
                     if (bytesProduced > 0)
                     {
+                        assert handshakeStatus == HandshakeStatus.FINISHED;
                         final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRW
                             .wrap(buffer, progress, progress + bytesConsumed)
                             .build();
