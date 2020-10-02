@@ -715,7 +715,7 @@ public final class TlsServerFactory implements StreamFactory
         long authorization,
         long budgetId,
         int reserved,
-        DirectBuffer buffer,
+        MutableDirectBuffer buffer,
         int offset,
         int progress,
         int limit)
@@ -746,12 +746,25 @@ public final class TlsServerFactory implements StreamFactory
                     assert false;
                     break;
                 case OK:
-                    assert bytesProduced == 0;
+                    assert bytesProduced == 0 || result.getHandshakeStatus() == HandshakeStatus.FINISHED;
                     if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
                     {
                         server.onDecodeHandshakeFinished(traceId, budgetId);
+
                     }
-                    server.decoder = decodeHandshake;
+
+                    if (bytesProduced > 0)
+                    {
+                        tlsUnwrappedDataRW.wrap(buffer, progress, progress + bytesConsumed)
+                                          .payload(outAppBuffer, 0, bytesProduced)
+                                          .build();
+                        server.decoder = decodeNotHandshakingUnwrapped;
+                    }
+                    else
+                    {
+                        server.decoder = decodeHandshake;
+                    }
+
                     break;
                 case CLOSED:
                     assert bytesProduced == 0;
