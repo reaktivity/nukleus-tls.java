@@ -754,7 +754,8 @@ public final class TlsServerFactory implements StreamFactory
                     if (bytesProduced > 0)
                     {
                         final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRW
-                            .wrap(buffer, progress, progress + bytesConsumed).build();
+                            .wrap(buffer, progress, progress + bytesConsumed)
+                            .build();
                         final int tlsRecordDataOffset = tlsRecordInfo.limit();
                         final int tlsRecordDataLimit = tlsRecordDataOffset + tlsRecordInfo.length();
 
