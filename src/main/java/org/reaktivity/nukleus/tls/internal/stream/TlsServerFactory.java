@@ -113,6 +113,7 @@ public final class TlsServerFactory implements StreamFactory
 
     private final TlsRecordInfoFW tlsRecordInfoRO = new TlsRecordInfoFW();
 
+    private final TlsRecordInfoFW.Builder tlsRecordInfoRW = new TlsRecordInfoFW.Builder();
     private final TlsUnwrappedInfoFW.Builder tlsUnwrappedInfoRW = new TlsUnwrappedInfoFW.Builder();
     private final TlsUnwrappedDataFW tlsUnwrappedDataRO = new TlsUnwrappedDataFW();
     private final TlsUnwrappedDataFW.Builder tlsUnwrappedDataRW = new TlsUnwrappedDataFW.Builder();
@@ -471,11 +472,6 @@ public final class TlsServerFactory implements StreamFactory
         }
         catch (SSLException | RuntimeException ex)
         {
-            server.tlsEngine = null;
-        }
-
-        if (server.tlsEngine == null)
-        {
             server.cleanupNetwork(traceId);
             server.decoder = decodeIgnoreAll;
         }
@@ -753,12 +749,16 @@ public final class TlsServerFactory implements StreamFactory
                     if (handshakeStatus == HandshakeStatus.FINISHED)
                     {
                         server.onDecodeHandshakeFinished(traceId, budgetId);
-
                     }
 
                     if (bytesProduced > 0)
                     {
-                        tlsUnwrappedDataRW.wrap(buffer, progress, progress + bytesConsumed)
+                        final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRW
+                            .wrap(buffer, progress, progress + bytesConsumed).build();
+                        final int tlsRecordDataOffset = tlsRecordInfo.limit();
+                        final int tlsRecordDataLimit = tlsRecordDataOffset + tlsRecordInfo.length();
+
+                        tlsUnwrappedDataRW.wrap(buffer, tlsRecordDataOffset, tlsRecordDataLimit)
                                           .payload(outAppBuffer, 0, bytesProduced)
                                           .build();
                         server.decoder = decodeNotHandshakingUnwrapped;
@@ -844,7 +844,7 @@ public final class TlsServerFactory implements StreamFactory
         private long authorization;
         private long affinity;
 
-        private SSLEngine tlsEngine;
+        private final SSLEngine tlsEngine;
 
         private long handshakeTaskFutureId = NO_CANCEL_ID;
         private long handshakeTimeoutFutureId = NO_CANCEL_ID;
