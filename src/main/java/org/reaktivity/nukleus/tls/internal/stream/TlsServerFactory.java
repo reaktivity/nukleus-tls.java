@@ -746,8 +746,11 @@ public final class TlsServerFactory implements StreamFactory
                     assert false;
                     break;
                 case OK:
-                    assert bytesProduced == 0 || result.getHandshakeStatus() == HandshakeStatus.FINISHED;
-                    if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
+                    final HandshakeStatus handshakeStatus = result.getHandshakeStatus();
+
+                    assert bytesProduced == 0 || handshakeStatus == HandshakeStatus.FINISHED;
+
+                    if (handshakeStatus == HandshakeStatus.FINISHED)
                     {
                         server.onDecodeHandshakeFinished(traceId, budgetId);
 
