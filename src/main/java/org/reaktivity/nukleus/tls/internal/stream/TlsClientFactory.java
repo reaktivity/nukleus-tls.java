@@ -1252,6 +1252,8 @@ public final class TlsClientFactory implements StreamFactory
                 authorization = reset.authorization();
                 state = TlsState.closeInitial(state);
 
+                correlations.remove(replyId);
+
                 cleanupEncodeSlotIfNecessary();
 
                 closeInboundQuietly(tlsEngine);
