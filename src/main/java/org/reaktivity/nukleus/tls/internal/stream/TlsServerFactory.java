@@ -1191,6 +1191,7 @@ public final class TlsServerFactory implements StreamFactory
                 doNetworkEnd(traceId);
             }
 
+            cancelHandshakeTaskIfNecessary();
             cancelHandshakeTimeoutIfNecessary();
         }
 
@@ -1205,6 +1206,7 @@ public final class TlsServerFactory implements StreamFactory
 
             cleanupEncodeSlotIfNecessary();
 
+            cancelHandshakeTaskIfNecessary();
             cancelHandshakeTimeoutIfNecessary();
         }
 
@@ -1219,6 +1221,7 @@ public final class TlsServerFactory implements StreamFactory
 
             cleanupDecodeSlotIfNecessary();
 
+            cancelHandshakeTaskIfNecessary();
             cancelHandshakeTimeoutIfNecessary();
         }
 
@@ -1585,6 +1588,21 @@ public final class TlsServerFactory implements StreamFactory
             assert handshakeTimeoutFutureId != NO_CANCEL_ID;
             signaler.cancel(handshakeTimeoutFutureId);
             handshakeTimeoutFutureId = NO_CANCEL_ID;
+        }
+
+        private void cancelHandshakeTaskIfNecessary()
+        {
+            if (handshakeTaskFutureId != NO_CANCEL_ID)
+            {
+                cancelHandshakeTask();
+            }
+        }
+
+        private void cancelHandshakeTask()
+        {
+            assert handshakeTaskFutureId != NO_CANCEL_ID;
+            signaler.cancel(handshakeTaskFutureId);
+            handshakeTaskFutureId = NO_CANCEL_ID;
         }
 
         final class TlsStream
