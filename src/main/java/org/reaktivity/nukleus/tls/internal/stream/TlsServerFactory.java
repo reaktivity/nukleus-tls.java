@@ -73,6 +73,7 @@ import org.reaktivity.nukleus.tls.internal.types.stream.AbortFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.EndFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.FlushFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
@@ -94,6 +95,7 @@ public final class TlsServerFactory implements StreamFactory
 
     private final BeginFW beginRO = new BeginFW();
     private final DataFW dataRO = new DataFW();
+    private final FlushFW flushRO = new FlushFW();
     private final EndFW endRO = new EndFW();
     private final AbortFW abortRO = new AbortFW();
     private final SignalFW signalRO = new SignalFW();
@@ -142,7 +144,6 @@ public final class TlsServerFactory implements StreamFactory
     private final LongUnaryOperator supplyInitialId;
     private final LongUnaryOperator supplyReplyId;
     private final int replyPaddingAdjust;
-    private final int replyWindowMax;
 
     private final int decodeWindowMax;
     private final int handshakeWindowMax;
@@ -183,7 +184,6 @@ public final class TlsServerFactory implements StreamFactory
         this.supplyInitialId = requireNonNull(supplyInitialId);
         this.supplyReplyId = requireNonNull(supplyReplyId);
         this.replyPaddingAdjust = Math.max(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
-        this.replyWindowMax = bufferPool.slotCapacity();
         this.decodeWindowMax = decodePool.slotCapacity();
         this.handshakeWindowMax = Math.min(config.handshakeWindowBytes(), decodeWindowMax);
         this.handshakeTimeoutMillis = SECONDS.toMillis(config.handshakeTimeout());
@@ -336,6 +336,7 @@ public final class TlsServerFactory implements StreamFactory
         long streamId,
         long sequence,
         long acknowledge,
+        int maximum,
         long traceId,
         long authorization,
         long affinity,
@@ -346,6 +347,7 @@ public final class TlsServerFactory implements StreamFactory
                 .streamId(streamId)
                 .sequence(sequence)
                 .acknowledge(acknowledge)
+                .maximum(maximum)
                 .traceId(traceId)
                 .authorization(authorization)
                 .affinity(affinity)
@@ -361,6 +363,7 @@ public final class TlsServerFactory implements StreamFactory
         long streamId,
         long sequence,
         long acknowledge,
+        int maximum,
         long traceId,
         long authorization,
         long budgetId,
@@ -375,6 +378,7 @@ public final class TlsServerFactory implements StreamFactory
                 .streamId(streamId)
                 .sequence(sequence)
                 .acknowledge(acknowledge)
+                .maximum(maximum)
                 .traceId(traceId)
                 .authorization(authorization)
                 .budgetId(budgetId)
@@ -392,6 +396,7 @@ public final class TlsServerFactory implements StreamFactory
         long streamId,
         long sequence,
         long acknowledge,
+        int maximum,
         long traceId,
         long authorization,
         Consumer<OctetsFW.Builder> extension)
@@ -401,6 +406,7 @@ public final class TlsServerFactory implements StreamFactory
                 .streamId(streamId)
                 .sequence(sequence)
                 .acknowledge(acknowledge)
+                .maximum(maximum)
                 .traceId(traceId)
                 .authorization(authorization)
                 .extension(extension)
@@ -415,6 +421,7 @@ public final class TlsServerFactory implements StreamFactory
         long streamId,
         long sequence,
         long acknowledge,
+        int maximum,
         long traceId,
         long authorization,
         Consumer<OctetsFW.Builder> extension)
@@ -424,6 +431,7 @@ public final class TlsServerFactory implements StreamFactory
                 .streamId(streamId)
                 .sequence(sequence)
                 .acknowledge(acknowledge)
+                .maximum(maximum)
                 .traceId(traceId)
                 .authorization(authorization)
                 .extension(extension)
@@ -438,22 +446,22 @@ public final class TlsServerFactory implements StreamFactory
         long streamId,
         long sequence,
         long acknowledge,
+        int maximum,
         long traceId,
         long authorization,
         long budgetId,
-        int padding,
-        int maximum)
+        int padding)
     {
         final WindowFW window = windowRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                 .routeId(routeId)
                 .streamId(streamId)
                 .sequence(sequence)
                 .acknowledge(acknowledge)
+                .maximum(maximum)
                 .traceId(traceId)
                 .authorization(authorization)
                 .budgetId(budgetId)
                 .padding(padding)
-                .maximum(maximum)
                 .build();
 
         receiver.accept(window.typeId(), window.buffer(), window.offset(), window.sizeof());
@@ -465,6 +473,7 @@ public final class TlsServerFactory implements StreamFactory
         long streamId,
         long sequence,
         long acknowledge,
+        int maximum,
         long traceId,
         long authorization)
     {
@@ -473,6 +482,7 @@ public final class TlsServerFactory implements StreamFactory
                 .streamId(streamId)
                 .sequence(sequence)
                 .acknowledge(acknowledge)
+                .maximum(maximum)
                 .traceId(traceId)
                 .authorization(authorization)
                 .build();
@@ -908,9 +918,14 @@ public final class TlsServerFactory implements StreamFactory
             this.supplyAuthorization = supplyAuthorization;
         }
 
+        private int replyWindowPendingAck()
+        {
+            return (int)(replySeq - replyAck) + encodeSlotOffset;
+        }
+
         private int replyWindow()
         {
-            return replyWindowMax - (int)(replySeq - replyAck) - encodeSlotOffset;
+            return replyWindowMax - replyWindowPendingAck();
         }
 
         private void onNetwork(
@@ -936,6 +951,10 @@ public final class TlsServerFactory implements StreamFactory
             case AbortFW.TYPE_ID:
                 final AbortFW abort = abortRO.wrap(buffer, index, index + length);
                 onNetworkAbort(abort);
+                break;
+            case FlushFW.TYPE_ID:
+                final FlushFW flush = flushRO.wrap(buffer, index, index + length);
+                onNetworkFlush(flush);
                 break;
             case ResetFW.TYPE_ID:
                 final ResetFW reset = resetRO.wrap(buffer, index, index + length);
@@ -963,12 +982,14 @@ public final class TlsServerFactory implements StreamFactory
 
             assert acknowledge <= sequence;
             assert sequence >= initialSeq;
+            assert acknowledge >= initialAck;
 
+            state = TlsState.openInitial(state);
             initialSeq = sequence;
             initialAck = acknowledge;
-
             affinity = begin.affinity();
-            state = TlsState.openInitial(state);
+
+            assert initialAck <= initialSeq;
 
             doNetworkWindow(traceId, 0L, 0, handshakeWindowMax);
             doNetworkBegin(traceId);
@@ -994,9 +1015,11 @@ public final class TlsServerFactory implements StreamFactory
 
             assert acknowledge <= sequence;
             assert sequence >= initialSeq;
+            assert acknowledge <= initialAck;
 
             initialSeq = sequence + data.reserved();
-            initialAck = Math.max(initialAck, acknowledge);
+
+            assert initialAck <= initialSeq;
 
             if (initialSeq > initialAck + decodeWindowMax)
             {
@@ -1035,13 +1058,44 @@ public final class TlsServerFactory implements StreamFactory
             }
         }
 
+        private void onNetworkFlush(
+            FlushFW flush)
+        {
+            final long sequence = flush.sequence();
+            final long acknowledge = flush.acknowledge();
+            final long traceId = flush.traceId();
+
+            assert acknowledge <= sequence;
+            assert sequence >= initialSeq;
+            assert acknowledge <= initialAck;
+
+            initialSeq = sequence + flush.reserved();
+
+            assert initialAck <= initialSeq;
+
+            if (initialSeq > initialAck + decodeWindowMax)
+            {
+                cleanupNetwork(traceId);
+            }
+        }
+
         private void onNetworkEnd(
             EndFW end)
         {
+            final long sequence = end.sequence();
+            final long acknowledge = end.acknowledge();
             final long traceId = end.traceId();
             final long budgetId = decodeSlotBudgetId; // TODO
 
+            assert acknowledge <= sequence;
+            assert sequence >= initialSeq;
+            assert acknowledge <= initialAck;
+
             state = TlsState.closeInitial(state);
+            initialSeq = sequence;
+            initialAck = acknowledge;
+
+            assert initialAck <= initialSeq;
 
             if (decodeSlot == NO_SLOT || !stream.isPresent())
             {
@@ -1066,10 +1120,20 @@ public final class TlsServerFactory implements StreamFactory
         private void onNetworkAbort(
             AbortFW abort)
         {
+            final long sequence = abort.sequence();
+            final long acknowledge = abort.acknowledge();
             final long traceId = abort.traceId();
             final long budgetId = decodeSlotBudgetId; // TODO
 
+            assert acknowledge <= sequence;
+            assert sequence >= initialSeq;
+            assert acknowledge <= initialAck;
+
             state = TlsState.closeInitial(state);
+            initialSeq = sequence;
+            initialAck = acknowledge;
+
+            assert initialAck <= initialSeq;
 
             closeInboundQuietly(tlsEngine);
 
@@ -1084,9 +1148,18 @@ public final class TlsServerFactory implements StreamFactory
         private void onNetworkReset(
             ResetFW reset)
         {
+            final long sequence = reset.sequence();
+            final long acknowledge = reset.acknowledge();
             final long traceId = reset.traceId();
 
+            assert acknowledge <= sequence;
+            assert sequence <= replySeq;
+            assert acknowledge >= replyAck;
+
             state = TlsState.closeReply(state);
+            replyAck = acknowledge;
+
+            assert replyAck <= replySeq;
 
             cleanupEncodeSlotIfNecessary();
 
@@ -1109,15 +1182,17 @@ public final class TlsServerFactory implements StreamFactory
             final int padding = window.padding();
 
             assert acknowledge <= sequence;
+            assert sequence <= replySeq;
             assert acknowledge >= replyAck;
             assert maximum >= replyWindowMax;
 
             state = TlsState.openReply(state);
-
-            replySeq = Math.max(replySeq, sequence);
             replyAck = acknowledge;
             replyWindowMax = maximum;
+            replyBudgetId = budgetId;
             replyPadding = padding;
+
+            assert replyAck <= replySeq;
 
             if (encodeSlot != NO_SLOT)
             {
@@ -1189,7 +1264,8 @@ public final class TlsServerFactory implements StreamFactory
         private void doNetworkBegin(
             long traceId)
         {
-            doBegin(network, routeId, replyId, replySeq, replyAck, traceId, authorization, affinity, EMPTY_EXTENSION);
+            doBegin(network, routeId, replyId, replySeq, replyAck, replyWindowMax, traceId, authorization,
+                    affinity, EMPTY_EXTENSION);
             router.setThrottle(replyId, this::onNetwork);
             state = TlsState.openingReply(state);
         }
@@ -1220,7 +1296,7 @@ public final class TlsServerFactory implements StreamFactory
             long traceId)
         {
             cleanupEncodeSlotIfNecessary();
-            doEnd(network, routeId, replyId, replySeq, replyAck, traceId, authorization, EMPTY_EXTENSION);
+            doEnd(network, routeId, replyId, replySeq, replyAck, replyWindowMax, traceId, authorization, EMPTY_EXTENSION);
             state = TlsState.closeReply(state);
         }
 
@@ -1241,7 +1317,7 @@ public final class TlsServerFactory implements StreamFactory
         {
             if (!TlsState.replyClosed(state))
             {
-                doAbort(network, routeId, replyId, replySeq, replyAck, traceId, authorization, EMPTY_EXTENSION);
+                doAbort(network, routeId, replyId, replySeq, replyAck, replyWindowMax, traceId, authorization, EMPTY_EXTENSION);
                 state = TlsState.closeReply(state);
             }
 
@@ -1256,7 +1332,8 @@ public final class TlsServerFactory implements StreamFactory
         {
             if (!TlsState.initialClosed(state))
             {
-                doReset(network, routeId, initialId, initialSeq, initialAck, traceId, authorization);
+                final int initialWindowMax = stream.isPresent() ? decodeWindowMax : handshakeWindowMax;
+                doReset(network, routeId, initialId, initialSeq, initialAck, initialWindowMax, traceId, authorization);
                 state = TlsState.closeInitial(state);
             }
 
@@ -1272,20 +1349,24 @@ public final class TlsServerFactory implements StreamFactory
             int padding,
             int maximum)
         {
-            doWindow(network, routeId, initialId, initialSeq, initialAck, traceId, authorization, budgetId, padding, maximum);
+            doWindow(network, routeId, initialId, initialSeq, initialAck, maximum, traceId, authorization, budgetId, padding);
         }
 
         private void flushNetworkWindow(
             long traceId,
             long budgetId,
-            int initialBudgetMax,
             int initialPadding)
         {
-            int initialCredit = Math.min(initialBudgetMax, decodeWindowMax) - decodeSlotOffset - (int)(initialSeq - initialAck);
-            if (initialCredit > 0)
+            final int initialWindowMax = stream.isPresent() ? decodeWindowMax : handshakeWindowMax;
+            final int decodable = decodeWindowMax - initialWindowMax;
+
+            final long initialAckMax = Math.min(initialAck + decodable, initialSeq);
+            if (initialAckMax > initialAck)
             {
-                initialAck += initialCredit;
-                doNetworkWindow(traceId, budgetId, initialPadding, decodeWindowMax);
+                initialAck = initialAckMax;
+                assert initialAck <= initialSeq;
+
+                doNetworkWindow(traceId, budgetId, 0, initialWindowMax);
             }
 
             decodeNetworkIfNecessary(traceId);
@@ -1305,8 +1386,8 @@ public final class TlsServerFactory implements StreamFactory
             {
                 final int reserved = length + replyPadding;
 
-                doData(network, routeId, replyId, replySeq, replyAck, traceId, authorization, budgetId,
-                       reserved, buffer, offset, length, EMPTY_EXTENSION);
+                doData(network, routeId, replyId, replySeq, replyAck, replyWindowMax, traceId, authorization,
+                       budgetId, reserved, buffer, offset, length, EMPTY_EXTENSION);
 
                 replySeq += reserved;
 
@@ -1400,7 +1481,6 @@ public final class TlsServerFactory implements StreamFactory
             if (!tlsEngine.isInboundDone())
             {
                 final int initialWindowMax = stream.isPresent() ? decodeWindowMax : handshakeWindowMax;
-
                 final int decoded = reserved - decodeSlotReserved;
                 final int decodable = decodeWindowMax - initialWindowMax;
 
@@ -1680,11 +1760,6 @@ public final class TlsServerFactory implements StreamFactory
                 return initialWindowMax - (int)(initialSeq - initialAck);
             }
 
-            private int replyWindow()
-            {
-                return replyWindowMax - (int)(replySeq - replyAck);
-            }
-
             private void onApplication(
                 int msgTypeId,
                 DirectBuffer buffer,
@@ -1709,6 +1784,10 @@ public final class TlsServerFactory implements StreamFactory
                     final AbortFW abort = abortRO.wrap(buffer, index, index + length);
                     onApplicationAbort(abort);
                     break;
+                case FlushFW.TYPE_ID:
+                    final FlushFW flush = flushRO.wrap(buffer, index, index + length);
+                    onApplicationFlush(flush);
+                    break;
                 case WindowFW.TYPE_ID:
                     final WindowFW window = windowRO.wrap(buffer, index, index + length);
                     onApplicationWindow(window);
@@ -1725,7 +1804,18 @@ public final class TlsServerFactory implements StreamFactory
             private void onApplicationBegin(
                 BeginFW begin)
             {
+                final long sequence = begin.sequence();
+                final long acknowledge = begin.acknowledge();
                 final long traceId = begin.traceId();
+
+                assert acknowledge <= sequence;
+                assert sequence >= replySeq;
+                assert acknowledge <= replyAck;
+
+                replySeq = sequence;
+                replyAck = acknowledge;
+
+                assert replyAck <= replySeq;
 
                 state = TlsState.openingReply(state);
 
@@ -1741,9 +1831,11 @@ public final class TlsServerFactory implements StreamFactory
 
                 assert acknowledge <= sequence;
                 assert sequence >= replySeq;
+                assert acknowledge <= replyAck;
 
                 replySeq = sequence + data.reserved();
-                replyAck = Math.max(replyAck, acknowledge);
+
+                assert replyAck <= replySeq;
 
                 if (replySeq > replyAck + replyWindowMax)
                 {
@@ -1759,11 +1851,43 @@ public final class TlsServerFactory implements StreamFactory
                 }
             }
 
+            private void onApplicationFlush(
+                FlushFW flush)
+            {
+                final long sequence = flush.sequence();
+                final long acknowledge = flush.acknowledge();
+                final long traceId = flush.traceId();
+
+                assert acknowledge <= sequence;
+                assert sequence >= replySeq;
+                assert acknowledge <= replyAck;
+
+                replySeq = sequence;
+
+                assert replyAck <= replySeq;
+
+                if (replySeq > replyAck + replyWindowMax)
+                {
+                    cleanupApplication(traceId);
+                    doNetworkAbortIfNecessary(traceId);
+                }
+            }
+
             private void onApplicationEnd(
                 EndFW end)
             {
+                final long sequence = end.sequence();
+                final long acknowledge = end.acknowledge();
                 final long traceId = end.traceId();
                 final long budgetId = 0L; // TODO
+
+                assert acknowledge <= sequence;
+                assert sequence >= replySeq;
+                assert acknowledge <= replyAck;
+
+                replySeq = sequence;
+
+                assert replyAck <= replySeq;
 
                 state = TlsState.closeReply(state);
                 stream = nullIfClosed(state, stream);
@@ -1774,7 +1898,17 @@ public final class TlsServerFactory implements StreamFactory
             private void onApplicationAbort(
                 AbortFW abort)
             {
+                final long sequence = abort.sequence();
+                final long acknowledge = abort.acknowledge();
                 final long traceId = abort.traceId();
+
+                assert acknowledge <= sequence;
+                assert sequence >= replySeq;
+                assert acknowledge <= replyAck;
+
+                replySeq = sequence;
+
+                assert replyAck <= replySeq;
 
                 state = TlsState.closeReply(state);
                 stream = nullIfClosed(state, stream);
@@ -1796,23 +1930,35 @@ public final class TlsServerFactory implements StreamFactory
                 final int padding = window.padding();
 
                 assert acknowledge <= sequence;
-                assert acknowledge >= replyAck;
+                assert sequence <= initialSeq;
+                assert acknowledge >= initialAck;
                 assert maximum >= initialWindowMax;
 
-                initialSeq = Math.max(initialSeq, sequence);
                 initialAck = acknowledge;
                 initialWindowMax = maximum;
                 initialPadding = padding;
 
+                assert initialAck <= initialSeq;
+
                 state = TlsState.openInitial(state);
 
-                flushNetworkWindow(traceId, budgetId, initialWindow(), initialPadding);
+                flushNetworkWindow(traceId, budgetId, initialPadding);
             }
 
             private void onApplicationReset(
                 ResetFW reset)
             {
+                final long sequence = reset.sequence();
+                final long acknowledge = reset.acknowledge();
                 final long traceId = reset.traceId();
+
+                assert acknowledge <= sequence;
+                assert sequence <= initialSeq;
+                assert acknowledge >= initialAck;
+
+                initialAck = acknowledge;
+
+                assert initialAck <= initialSeq;
 
                 state = TlsState.closeInitial(state);
                 stream = nullIfClosed(state, stream);
@@ -1828,11 +1974,15 @@ public final class TlsServerFactory implements StreamFactory
                 String hostname,
                 String protocol)
             {
+                initialSeq = TlsServer.this.initialSeq;
+                initialAck = initialSeq;
+
                 stream = Optional.of(this);
                 state = TlsState.openingInitial(state);
 
                 router.setThrottle(initialId, this::onApplication);
-                doBegin(application, routeId, initialId, initialSeq, initialAck, traceId, authorization, affinity,
+                doBegin(application, routeId, initialId, initialSeq, initialAck, initialWindowMax,
+                    traceId, authorization, affinity,
                     ex -> ex.set((b, o, l) -> tlsBeginExRW.wrap(b, o, l)
                                                           .typeId(tlsTypeId)
                                                           .hostname(hostname)
@@ -1851,8 +2001,8 @@ public final class TlsServerFactory implements StreamFactory
             {
                 assert reserved >= length + initialPadding : String.format("%d >= %d", reserved, length + initialPadding);
 
-                doData(application, routeId, initialId, initialSeq, initialAck, traceId, authorization, budgetId,
-                        reserved, buffer, offset, length, EMPTY_EXTENSION);
+                doData(application, routeId, initialId, initialSeq, initialAck, initialWindowMax, traceId, authorization,
+                        budgetId, reserved, buffer, offset, length, EMPTY_EXTENSION);
 
                 initialSeq += reserved;
                 assert initialSeq <= initialAck + initialWindowMax;
@@ -1863,7 +2013,8 @@ public final class TlsServerFactory implements StreamFactory
             {
                 state = TlsState.closeInitial(state);
                 stream = nullIfClosed(state, stream);
-                doEnd(application, routeId, initialId, initialSeq, initialAck, traceId, authorization, EMPTY_EXTENSION);
+                doEnd(application, routeId, initialId, initialSeq, initialAck, initialWindowMax,
+                        traceId, authorization, EMPTY_EXTENSION);
             }
 
             private void doApplicationAbort(
@@ -1871,7 +2022,8 @@ public final class TlsServerFactory implements StreamFactory
             {
                 state = TlsState.closeInitial(state);
                 stream = nullIfClosed(state, stream);
-                doAbort(application, routeId, initialId, initialSeq, initialAck, traceId, authorization, EMPTY_EXTENSION);
+                doAbort(application, routeId, initialId, initialSeq, initialAck, initialWindowMax,
+                        traceId, authorization, EMPTY_EXTENSION);
             }
 
             private void doApplicationReset(
@@ -1881,7 +2033,7 @@ public final class TlsServerFactory implements StreamFactory
                 stream = nullIfClosed(state, stream);
 
                 correlations.remove(replyId);
-                doReset(application, routeId, replyId, replySeq, replyAck, traceId, authorization);
+                doReset(application, routeId, replyId, replySeq, replyAck, replyWindowMax, traceId, authorization);
             }
 
             private void doApplicationAbortIfNecessary(
@@ -1908,17 +2060,18 @@ public final class TlsServerFactory implements StreamFactory
                 state = TlsState.openReply(state);
 
                 final int replyPadding = TlsServer.this.replyPadding + replyPaddingAdjust;
-                doWindow(application, routeId, replyId, replySeq, replyAck, traceId, authorization,
-                         replyBudgetId, replyPadding, TlsServerFactory.this.replyWindowMax);
+                doWindow(application, routeId, replyId, replySeq, replyAck, replyWindowMax, traceId,
+                         authorization, replyBudgetId, replyPadding);
             }
 
             private void flushApplicationWindow(
                 long traceId)
             {
-                final int replyCredit = TlsServer.this.replyWindow() - replyWindow();
-                if (replyCredit > 0 && TlsState.replyOpened(state))
+                int replyAckMax = (int)(replySeq - TlsServer.this.replyWindowPendingAck());
+                if (replyAckMax > replyAck)
                 {
-                    replyAck += replyCredit;
+                    replyAck = replyAckMax;
+                    assert replyAck <= replySeq;
 
                     doApplicationWindow(traceId);
                 }
