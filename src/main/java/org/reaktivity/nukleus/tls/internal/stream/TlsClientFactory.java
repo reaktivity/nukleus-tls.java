@@ -1416,6 +1416,9 @@ public final class TlsClientFactory implements StreamFactory
                 {
                     doNetworkEnd(traceId);
                 }
+
+                cancelHandshakeTaskIfNecessary();
+                cancelHandshakeTimeoutIfNecessary();
             }
 
             private void doNetworkAbortIfNecessary(
@@ -1428,6 +1431,9 @@ public final class TlsClientFactory implements StreamFactory
                 }
 
                 cleanupEncodeSlotIfNecessary();
+
+                cancelHandshakeTaskIfNecessary();
+                cancelHandshakeTimeoutIfNecessary();
             }
 
             private void doNetworkResetIfNecessary(
@@ -1440,6 +1446,9 @@ public final class TlsClientFactory implements StreamFactory
                 }
 
                 cleanupDecodeSlotIfNecessary();
+
+                cancelHandshakeTaskIfNecessary();
+                cancelHandshakeTimeoutIfNecessary();
             }
 
             private void doNetworkWindow(
@@ -1757,6 +1766,24 @@ public final class TlsClientFactory implements StreamFactory
                     encodeSlot = NO_SLOT;
                     encodeSlotOffset = 0;
                     encodeSlotTraceId = 0;
+                }
+            }
+
+            private void cancelHandshakeTimeoutIfNecessary()
+            {
+                if (handshakeTimeoutFutureId != NO_CANCEL_ID)
+                {
+                    signaler.cancel(handshakeTimeoutFutureId);
+                    handshakeTimeoutFutureId = NO_CANCEL_ID;
+                }
+            }
+
+            private void cancelHandshakeTaskIfNecessary()
+            {
+                if (handshakeTaskFutureId != NO_CANCEL_ID)
+                {
+                    signaler.cancel(handshakeTaskFutureId);
+                    handshakeTaskFutureId = NO_CANCEL_ID;
                 }
             }
         }
