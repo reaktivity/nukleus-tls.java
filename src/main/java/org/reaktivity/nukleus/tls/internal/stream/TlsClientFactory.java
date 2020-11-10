@@ -1211,6 +1211,9 @@ public final class TlsClientFactory implements StreamFactory
 
                     cleanupDecodeSlotIfNecessary();
 
+                    cancelHandshakeTaskIfNecessary();
+                    cancelHandshakeTimeoutIfNecessary();
+
                     // TODO: support half-closed in-bound plus close-on-flush out-bound
                     doApplicationAbortIfNecessary(traceId);
                     doApplicationResetIfNecessary(traceId);
@@ -1238,6 +1241,9 @@ public final class TlsClientFactory implements StreamFactory
 
                 cleanupDecodeSlotIfNecessary();
 
+                cancelHandshakeTaskIfNecessary();
+                cancelHandshakeTimeoutIfNecessary();
+
                 doApplicationAbortIfNecessary(traceId);
                 doApplicationResetIfNecessary(traceId);
 
@@ -1255,6 +1261,8 @@ public final class TlsClientFactory implements StreamFactory
                 correlations.remove(replyId);
 
                 cleanupEncodeSlotIfNecessary();
+
+                cancelHandshakeTaskIfNecessary();
 
                 closeInboundQuietly(tlsEngine);
 
@@ -1405,6 +1413,7 @@ public final class TlsClientFactory implements StreamFactory
                 long traceId)
             {
                 cleanupEncodeSlotIfNecessary();
+
                 doEnd(network, routeId, initialId, traceId, authorization, EMPTY_EXTENSION);
                 state = TlsState.closeInitial(state);
             }
@@ -1418,7 +1427,6 @@ public final class TlsClientFactory implements StreamFactory
                 }
 
                 cancelHandshakeTaskIfNecessary();
-                cancelHandshakeTimeoutIfNecessary();
             }
 
             private void doNetworkAbortIfNecessary(
@@ -1433,7 +1441,6 @@ public final class TlsClientFactory implements StreamFactory
                 cleanupEncodeSlotIfNecessary();
 
                 cancelHandshakeTaskIfNecessary();
-                cancelHandshakeTimeoutIfNecessary();
             }
 
             private void doNetworkResetIfNecessary(
@@ -1630,9 +1637,7 @@ public final class TlsClientFactory implements StreamFactory
                 long traceId,
                 long budgetId)
             {
-                assert handshakeTimeoutFutureId != NO_CANCEL_ID;
-                signaler.cancel(handshakeTimeoutFutureId);
-                handshakeTimeoutFutureId = NO_CANCEL_ID;
+                cancelHandshakeTimeout();
 
                 assert stream == NULL_STREAM;
                 stream = Optional.of(TlsStream.this);
@@ -1773,18 +1778,30 @@ public final class TlsClientFactory implements StreamFactory
             {
                 if (handshakeTimeoutFutureId != NO_CANCEL_ID)
                 {
-                    signaler.cancel(handshakeTimeoutFutureId);
-                    handshakeTimeoutFutureId = NO_CANCEL_ID;
+                    cancelHandshakeTimeout();
                 }
+            }
+
+            public void cancelHandshakeTimeout()
+            {
+                assert handshakeTimeoutFutureId != NO_CANCEL_ID;
+                signaler.cancel(handshakeTimeoutFutureId);
+                handshakeTimeoutFutureId = NO_CANCEL_ID;
             }
 
             private void cancelHandshakeTaskIfNecessary()
             {
                 if (handshakeTaskFutureId != NO_CANCEL_ID)
                 {
-                    signaler.cancel(handshakeTaskFutureId);
-                    handshakeTaskFutureId = NO_CANCEL_ID;
+                    cancelHandshakeTask();
                 }
+            }
+
+            public void cancelHandshakeTask()
+            {
+                assert handshakeTaskFutureId != NO_CANCEL_ID;
+                signaler.cancel(handshakeTaskFutureId);
+                handshakeTaskFutureId = NO_CANCEL_ID;
             }
         }
     }
