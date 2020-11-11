@@ -1416,6 +1416,9 @@ public final class TlsClientFactory implements StreamFactory
 
                     cleanupDecodeSlotIfNecessary();
 
+                    cancelHandshakeTaskIfNecessary();
+                    cancelHandshakeTimeoutIfNecessary();
+
                     // TODO: support half-closed in-bound plus close-on-flush out-bound
                     doApplicationAbortIfNecessary(traceId);
                     doApplicationResetIfNecessary(traceId);
@@ -1453,6 +1456,9 @@ public final class TlsClientFactory implements StreamFactory
 
                 cleanupDecodeSlotIfNecessary();
 
+                cancelHandshakeTaskIfNecessary();
+                cancelHandshakeTimeoutIfNecessary();
+
                 doApplicationAbortIfNecessary(traceId);
                 doApplicationResetIfNecessary(traceId);
 
@@ -1478,6 +1484,8 @@ public final class TlsClientFactory implements StreamFactory
                 correlations.remove(replyId);
 
                 cleanupEncodeSlotIfNecessary();
+
+                cancelHandshakeTaskIfNecessary();
 
                 closeInboundQuietly(tlsEngine);
 
@@ -1651,7 +1659,6 @@ public final class TlsClientFactory implements StreamFactory
                 cleanupEncodeSlotIfNecessary();
 
                 cancelHandshakeTaskIfNecessary();
-                cancelHandshakeTimeoutIfNecessary();
             }
 
             private void doNetworkAbortIfNecessary(
@@ -1665,7 +1672,6 @@ public final class TlsClientFactory implements StreamFactory
                 cleanupEncodeSlotIfNecessary();
 
                 cancelHandshakeTaskIfNecessary();
-                cancelHandshakeTimeoutIfNecessary();
             }
 
             private void doNetworkAbort(
@@ -1881,7 +1887,7 @@ public final class TlsClientFactory implements StreamFactory
                 long traceId,
                 long budgetId)
             {
-                cancelHandshakeTimeoutIfNecessary();
+                cancelHandshakeTimeout();
 
                 assert stream == NULL_STREAM;
                 stream = Optional.of(TlsStream.this);

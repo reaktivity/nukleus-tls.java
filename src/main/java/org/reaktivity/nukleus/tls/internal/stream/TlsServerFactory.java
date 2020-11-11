@@ -1103,6 +1103,9 @@ public final class TlsServerFactory implements StreamFactory
 
                 cleanupDecodeSlotIfNecessary();
 
+                cancelHandshakeTaskIfNecessary();
+                cancelHandshakeTimeoutIfNecessary();
+
                 // TODO: support half-closed in-bound plus close-on-flush out-bound
                 stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
                 stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
@@ -1139,6 +1142,9 @@ public final class TlsServerFactory implements StreamFactory
 
             cleanupDecodeSlotIfNecessary();
 
+            cancelHandshakeTaskIfNecessary();
+            cancelHandshakeTimeoutIfNecessary();
+
             stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
             stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
 
@@ -1162,6 +1168,8 @@ public final class TlsServerFactory implements StreamFactory
             assert replyAck <= replySeq;
 
             cleanupEncodeSlotIfNecessary();
+
+            cancelHandshakeTaskIfNecessary();
 
             closeInboundQuietly(tlsEngine);
 
@@ -1296,6 +1304,7 @@ public final class TlsServerFactory implements StreamFactory
             long traceId)
         {
             cleanupEncodeSlotIfNecessary();
+
             doEnd(network, routeId, replyId, replySeq, replyAck, replyMax, traceId, authorization, EMPTY_EXTENSION);
             state = TlsState.closeReply(state);
         }
@@ -1309,7 +1318,6 @@ public final class TlsServerFactory implements StreamFactory
             }
 
             cancelHandshakeTaskIfNecessary();
-            cancelHandshakeTimeoutIfNecessary();
         }
 
         private void doNetworkAbortIfNecessary(
@@ -1324,7 +1332,6 @@ public final class TlsServerFactory implements StreamFactory
             cleanupEncodeSlotIfNecessary();
 
             cancelHandshakeTaskIfNecessary();
-            cancelHandshakeTimeoutIfNecessary();
         }
 
         private void doNetworkResetIfNecessary(
