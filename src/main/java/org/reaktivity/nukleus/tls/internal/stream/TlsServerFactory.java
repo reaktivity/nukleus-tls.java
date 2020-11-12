@@ -1015,8 +1015,7 @@ public final class TlsServerFactory implements StreamFactory
 
                 if (!stream.isPresent())
                 {
-                    doEncodeCloseOutbound(traceId, budgetId);
-                    doNetworkEndIfNecessary(traceId);
+                    doEncodeCloseOutboundIfNecessary(traceId, budgetId);
                 }
 
                 decoder = decodeIgnoreAll;
@@ -1303,7 +1302,7 @@ public final class TlsServerFactory implements StreamFactory
 
                 if (TlsState.replyClosing(state))
                 {
-                    doNetworkEndIfNecessary(traceId);
+                    doEncodeCloseOutbound(traceId, budgetId);
                 }
             }
         }
@@ -1354,8 +1353,7 @@ public final class TlsServerFactory implements StreamFactory
 
                     if (!stream.isPresent())
                     {
-                        doEncodeCloseOutbound(traceId, budgetId);
-                        doNetworkEndIfNecessary(traceId);
+                        doEncodeCloseOutboundIfNecessary(traceId, budgetId);
                     }
 
                     decoder = decodeIgnoreAll;
@@ -1443,6 +1441,10 @@ public final class TlsServerFactory implements StreamFactory
 
                 stream.doApplicationBegin(traceId, tlsHostname, tlsProtocol);
             }
+            else
+            {
+                tlsEngine.closeOutbound();
+            }
         }
 
         private void onDecodeUnwrapped(
@@ -1521,12 +1523,26 @@ public final class TlsServerFactory implements StreamFactory
             }
         }
 
-        private void doEncodeCloseOutbound(
+        private void doEncodeCloseOutboundIfNecessary(
             long traceId,
             long budgetId)
         {
-            tlsEngine.closeOutbound();
             state = TlsState.closingReply(state);
+
+            if (encodeSlot == NO_SLOT)
+            {
+                doEncodeCloseOutbound(traceId, budgetId);
+            }
+        }
+
+        public void doEncodeCloseOutbound(
+            long traceId,
+            long budgetId)
+        {
+            assert TlsState.replyClosing(state);
+            assert encodeSlot == NO_SLOT;
+
+            tlsEngine.closeOutbound();
 
             doEncodeWrapIfNecessary(traceId, budgetId);
 
@@ -1706,7 +1722,7 @@ public final class TlsServerFactory implements StreamFactory
                 state = TlsState.closeReply(state);
                 stream = nullIfClosed(state, stream);
 
-                doEncodeCloseOutbound(traceId, budgetId);
+                doEncodeCloseOutboundIfNecessary(traceId, budgetId);
             }
 
             private void onApplicationAbort(
