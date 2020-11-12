@@ -1524,8 +1524,8 @@ public final class TlsServerFactory implements StreamFactory
             long traceId,
             long budgetId)
         {
-            state = TlsState.closingReply(state);
             tlsEngine.closeOutbound();
+            state = TlsState.closingReply(state);
 
             doEncodeWrapIfNecessary(traceId, budgetId);
         }
