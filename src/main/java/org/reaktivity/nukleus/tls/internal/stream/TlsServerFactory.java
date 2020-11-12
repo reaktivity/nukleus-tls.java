@@ -1498,8 +1498,8 @@ public final class TlsServerFactory implements StreamFactory
                         break;
                     case CLOSED:
                         assert bytesProduced > 0;
-                        state = TlsState.closingReply(state);
                         stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
+                        state = TlsState.closingReply(state);
                         break loop;
                     case OK:
                         assert bytesProduced > 0;
