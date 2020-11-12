@@ -1443,10 +1443,6 @@ public final class TlsServerFactory implements StreamFactory
 
                 stream.doApplicationBegin(traceId, tlsHostname, tlsProtocol);
             }
-            else
-            {
-                //tlsEngine.closeOutbound();
-            }
         }
 
         private void onDecodeUnwrapped(
