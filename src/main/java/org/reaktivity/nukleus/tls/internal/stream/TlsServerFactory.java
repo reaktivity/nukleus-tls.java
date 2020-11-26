@@ -564,7 +564,6 @@ public final class TlsServerFactory implements StreamFactory
                         case OK:
                             if (bytesProduced == 0)
                             {
-                                assert result.getHandshakeStatus() != HandshakeStatus.FINISHED;
                                 server.decoder = decodeHandshake;
                                 progress += bytesConsumed;
                             }
@@ -748,9 +747,8 @@ public final class TlsServerFactory implements StreamFactory
                         server.onDecodeHandshakeFinished(traceId, budgetId);
                     }
 
-                    if (bytesProduced > 0)
+                    if (bytesProduced > 0 && handshakeStatus == HandshakeStatus.FINISHED)
                     {
-                        assert handshakeStatus == HandshakeStatus.FINISHED;
                         final TlsRecordInfoFW tlsRecordInfo = tlsRecordInfoRW
                             .wrap(buffer, progress, progress + bytesConsumed)
                             .build();
