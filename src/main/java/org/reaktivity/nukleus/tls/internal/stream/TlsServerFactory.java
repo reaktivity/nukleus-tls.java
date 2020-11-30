@@ -806,7 +806,7 @@ public final class TlsServerFactory implements StreamFactory
             }
             catch (SSLException | RuntimeException ex)
             {
-                server.doEncodeCloseOutbound(traceId, budgetId);
+                server.doEncodeWrapIfNecessary(traceId, budgetId);
                 server.cleanupNetwork(traceId);
                 server.decoder = decodeIgnoreAll;
             }
@@ -912,7 +912,7 @@ public final class TlsServerFactory implements StreamFactory
             this.authorization = authorization;
             this.decoder = decodeBeforeHandshake;
             this.stream = NULL_STREAM;
-            this.tlsEngine = tlsEngine;
+            this.tlsEngine = requireNonNull(tlsEngine);
             this.supplyAuthorization = supplyAuthorization;
         }
 
@@ -1097,18 +1097,18 @@ public final class TlsServerFactory implements StreamFactory
 
             if (decodeSlot == NO_SLOT || !stream.isPresent())
             {
-                closeInboundQuietly(tlsEngine);
-
                 cleanupDecodeSlotIfNecessary();
 
                 cancelHandshakeTaskIfNecessary();
                 cancelHandshakeTimeoutIfNecessary();
 
-                // TODO: support half-closed in-bound plus close-on-flush out-bound
                 stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
-                stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
 
-                doEncodeCloseOutbound(traceId, budgetId);
+                if (!stream.isPresent())
+                {
+                    doEncodeCloseOutboundIfNecessary(traceId, budgetId);
+                    doNetworkEndIfNecessary(traceId);
+                }
 
                 decoder = decodeIgnoreAll;
             }
@@ -1124,7 +1124,6 @@ public final class TlsServerFactory implements StreamFactory
             final long sequence = abort.sequence();
             final long acknowledge = abort.acknowledge();
             final long traceId = abort.traceId();
-            final long budgetId = decodeSlotBudgetId; // TODO
 
             assert acknowledge <= sequence;
             assert sequence >= initialSeq;
@@ -1136,8 +1135,6 @@ public final class TlsServerFactory implements StreamFactory
 
             assert initialAck <= initialSeq;
 
-            closeInboundQuietly(tlsEngine);
-
             cleanupDecodeSlotIfNecessary();
 
             cancelHandshakeTaskIfNecessary();
@@ -1146,7 +1143,7 @@ public final class TlsServerFactory implements StreamFactory
             stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
             stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
 
-            doEncodeCloseOutbound(traceId, budgetId);
+            doNetworkAbortIfNecessary(traceId);
         }
 
         private void onNetworkReset(
@@ -1168,8 +1165,6 @@ public final class TlsServerFactory implements StreamFactory
             cleanupEncodeSlotIfNecessary();
 
             cancelHandshakeTaskIfNecessary();
-
-            closeInboundQuietly(tlsEngine);
 
             stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
             stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
@@ -1471,13 +1466,13 @@ public final class TlsServerFactory implements StreamFactory
 
                 if (TlsState.initialClosed(state))
                 {
-                    closeInboundQuietly(tlsEngine);
-
-                    // TODO: support half-closed in-bound plus close-on-flush out-bound
                     stream.ifPresent(s -> s.doApplicationAbortIfNecessary(traceId));
-                    stream.ifPresent(s -> s.doApplicationResetIfNecessary(traceId));
 
-                    doEncodeCloseOutbound(traceId, budgetId);
+                    if (!stream.isPresent())
+                    {
+                        doEncodeCloseOutboundIfNecessary(traceId, budgetId);
+                        doNetworkEndIfNecessary(traceId);
+                    }
 
                     decoder = decodeIgnoreAll;
                 }
@@ -1644,27 +1639,21 @@ public final class TlsServerFactory implements StreamFactory
             }
         }
 
-        private void doEncodeCloseOutbound(
+        private void doEncodeCloseOutboundIfNecessary(
             long traceId,
             long budgetId)
         {
-            if (tlsEngine != null)
-            {
-                tlsEngine.closeOutbound();
-            }
+            tlsEngine.closeOutbound();
             state = TlsState.closingReply(state);
 
             doEncodeWrapIfNecessary(traceId, budgetId);
-
-            doNetworkEndIfNecessary(traceId);
         }
 
         private void doEncodeWrapIfNecessary(
             long traceId,
             long budgetId)
         {
-            if (tlsEngine != null &&
-                tlsEngine.getHandshakeStatus() == HandshakeStatus.NEED_WRAP)
+            if (tlsEngine.getHandshakeStatus() == HandshakeStatus.NEED_WRAP)
             {
                 doEncodeWrap(traceId, budgetId, EMPTY_OCTETS);
             }
@@ -1897,7 +1886,7 @@ public final class TlsServerFactory implements StreamFactory
                 state = TlsState.closeReply(state);
                 stream = nullIfClosed(state, stream);
 
-                doEncodeCloseOutbound(traceId, budgetId);
+                doEncodeCloseOutboundIfNecessary(traceId, budgetId);
             }
 
             private void onApplicationAbort(
@@ -2113,22 +2102,6 @@ public final class TlsServerFactory implements StreamFactory
             }
 
             return authorization;
-        }
-    }
-
-    private static void closeInboundQuietly(
-        SSLEngine tlsEngine)
-    {
-        try
-        {
-            if (tlsEngine != null)
-            {
-                tlsEngine.closeInbound();
-            }
-        }
-        catch (SSLException | RuntimeException ex)
-        {
-            // ignore
         }
     }
 
