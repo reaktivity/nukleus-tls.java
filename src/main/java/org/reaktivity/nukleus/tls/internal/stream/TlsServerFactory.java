@@ -1478,7 +1478,7 @@ public final class TlsServerFactory implements StreamFactory
                         state = TlsState.closingReply(state);
                         break loop;
                     case OK:
-                        assert bytesProduced > 0;
+                        assert bytesProduced >= 0;
                         if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
                         {
                             onDecodeHandshakeFinished(traceId, budgetId);

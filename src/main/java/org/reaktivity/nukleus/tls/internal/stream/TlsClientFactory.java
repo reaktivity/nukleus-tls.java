@@ -1203,7 +1203,6 @@ public final class TlsClientFactory implements StreamFactory
                 AbortFW abort)
             {
                 final long traceId = abort.traceId();
-                final long budgetId = decodeSlotBudgetId; // TODO
 
                 authorization = abort.authorization();
                 state = TlsState.closeReply(state);
@@ -1218,7 +1217,7 @@ public final class TlsClientFactory implements StreamFactory
                 doAppAbort(traceId);
                 doAppReset(traceId);
 
-                doEncodeCloseOutbound(traceId, budgetId);
+                doNetAbort(traceId);
             }
 
             private void onNetReset(
@@ -1669,7 +1668,7 @@ public final class TlsClientFactory implements StreamFactory
                             state = TlsState.closingReply(state);
                             break loop;
                         case OK:
-                            assert bytesProduced > 0;
+                            assert bytesProduced >= 0;
                             if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
                             {
                                 onDecodeHandshakeFinished(traceId, budgetId);
