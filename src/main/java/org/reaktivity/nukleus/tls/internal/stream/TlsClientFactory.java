@@ -1466,6 +1466,7 @@ public final class TlsClientFactory implements StreamFactory
                 final long sequence = abort.sequence();
                 final long acknowledge = abort.acknowledge();
                 final long traceId = abort.traceId();
+                final long authorization = abort.authorization();
 
                 assert acknowledge <= sequence;
                 assert sequence >= replySeq;
