@@ -195,7 +195,6 @@ public class ServerIT
         k3po.finish();
     }
 
-    @Ignore("JDK 11")
     @Test
     @Specification({
         "${route}/server/controller",
