@@ -795,7 +795,7 @@ public final class TlsClientFactory implements StreamFactory
         int limit)
     {
         client.doEncodeWrap(traceId, budgetId, EMPTY_OCTETS);
-        client.decoder = decodeHandshake;
+        client.decoder = client.tlsEngine.isInboundDone() ? decodeIgnoreAll : decodeHandshake;
         return progress;
     }
 
@@ -1186,6 +1186,7 @@ public final class TlsClientFactory implements StreamFactory
         {
             assert TlsState.initialOpened(state);
 
+            // TODO: consider encodePool capacity
             int initialAckMax = (int)(initialSeq - client.initialPendingAck());
             if (initialAckMax > initialAck)
             {
@@ -1437,18 +1438,19 @@ public final class TlsClientFactory implements StreamFactory
 
                 if (decodeSlot == NO_SLOT || !stream.isPresent())
                 {
-                    closeInboundQuietly(tlsEngine);
-
                     cleanupDecodeSlot();
 
                     cancelHandshakeTask();
                     cancelHandshakeTimeout();
 
-                    // TODO: support half-closed in-bound plus close-on-flush out-bound
                     doAppAbort(traceId);
-                    doAppReset(traceId);
 
-                    doEncodeCloseOutbound(traceId, budgetId);
+                    if (!stream.isPresent())
+                    {
+                        doAppReset(traceId);
+                        doEncodeCloseOutbound(traceId, budgetId);
+                        doNetEnd(traceId);
+                    }
 
                     decoder = decodeIgnoreAll;
                 }
@@ -1464,8 +1466,6 @@ public final class TlsClientFactory implements StreamFactory
                 final long sequence = abort.sequence();
                 final long acknowledge = abort.acknowledge();
                 final long traceId = abort.traceId();
-                final long authorization = abort.authorization();
-                final long budgetId = decodeSlotBudgetId; // TODO
 
                 assert acknowledge <= sequence;
                 assert sequence >= replySeq;
@@ -1477,8 +1477,6 @@ public final class TlsClientFactory implements StreamFactory
 
                 assert replyAck <= replySeq;
 
-                closeInboundQuietly(tlsEngine);
-
                 cleanupDecodeSlot();
 
                 cancelHandshakeTask();
@@ -1487,7 +1485,7 @@ public final class TlsClientFactory implements StreamFactory
                 doAppAbort(traceId);
                 doAppReset(traceId);
 
-                doEncodeCloseOutbound(traceId, budgetId);
+                doNetAbort(traceId);
             }
 
             private void onNetReset(
@@ -1511,8 +1509,6 @@ public final class TlsClientFactory implements StreamFactory
                 cleanupEncodeSlot();
 
                 cancelHandshakeTask();
-
-                closeInboundQuietly(tlsEngine);
 
                 doAppReset(traceId);
                 doAppAbort(traceId);
@@ -1843,13 +1839,13 @@ public final class TlsClientFactory implements StreamFactory
 
                     if (TlsState.replyClosed(state))
                     {
-                        closeInboundQuietly(tlsEngine);
+                        stream.ifPresent(s -> s.doAppAbort(traceId));
 
-                        // TODO: support half-closed in-bound plus close-on-flush out-bound
-                        doAppAbort(traceId);
-                        doAppReset(traceId);
-
-                        doEncodeCloseOutbound(traceId, budgetId);
+                        if (!stream.isPresent())
+                        {
+                            doEncodeCloseOutbound(traceId, budgetId);
+                            doNetEnd(traceId);
+                        }
 
                         decoder = decodeIgnoreAll;
                     }
@@ -1968,7 +1964,7 @@ public final class TlsClientFactory implements StreamFactory
                             state = TlsState.closingReply(state);
                             break loop;
                         case OK:
-                            assert bytesProduced > 0;
+                            assert bytesProduced > 0 || tlsEngine.isInboundDone();
                             if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
                             {
                                 onDecodeHandshakeFinished(traceId, budgetId);
@@ -1991,11 +1987,9 @@ public final class TlsClientFactory implements StreamFactory
                 long budgetId)
             {
                 tlsEngine.closeOutbound();
-                state = TlsState.closingReply(state);
+                state = TlsState.closingInitial(state);
 
                 doEncodeWrapIfNecessary(traceId, budgetId);
-
-                doNetEnd(traceId);
             }
 
             private void doEncodeWrapIfNecessary(
@@ -2056,19 +2050,6 @@ public final class TlsClientFactory implements StreamFactory
                     handshakeTaskFutureId = NO_CANCEL_ID;
                 }
             }
-        }
-    }
-
-    private static void closeInboundQuietly(
-        SSLEngine tlsEngine)
-    {
-        try
-        {
-            tlsEngine.closeInbound();
-        }
-        catch (SSLException ex)
-        {
-            // ignore
         }
     }
 
