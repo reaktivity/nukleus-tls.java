@@ -138,7 +138,7 @@ public final class TlsClientFactory implements StreamFactory
     private final int handshakeBudgetMax;
     private final long handshakeTimeoutMillis;
 
-    private final Long2ObjectHashMap<TlsStream.TlsClient> correlations;
+    private final Long2ObjectHashMap<MessageConsumer> correlations;
     private final IntFunction<TlsStoreInfo> lookupStore;
 
     private final ByteBuffer inNetByteBuffer;
@@ -202,17 +202,17 @@ public final class TlsClientFactory implements StreamFactory
 
         if ((streamId & 0x0000_0000_0000_0001L) != 0L)
         {
-            newStream = newApplicationStream(begin, sender);
+            newStream = newClientStream(begin, sender);
         }
         else
         {
-            newStream = newNetworkStream(begin, sender);
+            newStream = correlations.remove(streamId);
         }
 
         return newStream;
     }
 
-    private MessageConsumer newApplicationStream(
+    private MessageConsumer newClientStream(
         final BeginFW begin,
         final MessageConsumer application)
     {
@@ -290,25 +290,8 @@ public final class TlsClientFactory implements StreamFactory
                     applicationAffinity,
                     tlsEngine,
                     tlsHostname,
-                    networkRouteId)::onApplication;
+                    networkRouteId)::onAppMessage;
             }
-        }
-
-        return newStream;
-    }
-
-    private MessageConsumer newNetworkStream(
-        final BeginFW begin,
-        final MessageConsumer network)
-    {
-        final long streamId = begin.streamId();
-
-        MessageConsumer newStream = null;
-
-        final TlsStream.TlsClient stream = correlations.remove(streamId);
-        if (stream != null)
-        {
-            newStream = stream::onNetwork;
         }
 
         return newStream;
@@ -566,7 +549,7 @@ public final class TlsClientFactory implements StreamFactory
                     }
                     catch (SSLException ex)
                     {
-                        client.cleanupNetwork(traceId);
+                        client.cleanupNet(traceId);
                         client.decoder = decodeIgnoreAll;
                     }
                 }
@@ -733,7 +716,7 @@ public final class TlsClientFactory implements StreamFactory
             }
             catch (SSLException ex)
             {
-                client.cleanupNetwork(traceId);
+                client.cleanupNet(traceId);
                 client.decoder = decodeIgnoreAll;
             }
         }
@@ -788,12 +771,12 @@ public final class TlsClientFactory implements StreamFactory
 
     private final class TlsStream
     {
-        private final MessageConsumer application;
+        private final MessageConsumer app;
         private final long routeId;
         private final long initialId;
         private final long replyId;
         private final long affinity;
-        private final TlsClient client;
+        private final TlsClient net;
 
         private int initialBudget;
         private int replyBudget;
@@ -810,15 +793,15 @@ public final class TlsClientFactory implements StreamFactory
             String tlsHostname,
             long tlsRouteId)
         {
-            this.application = application;
+            this.app = application;
             this.routeId = routeId;
             this.initialId = initialId;
             this.replyId = supplyReplyId.applyAsLong(initialId);
             this.affinity = affinity;
-            this.client = new TlsClient(tlsEngine, tlsHostname, tlsRouteId);
+            this.net = new TlsClient(tlsEngine, tlsHostname, tlsRouteId);
         }
 
-        private void onApplication(
+        private void onAppMessage(
             int msgTypeId,
             DirectBuffer buffer,
             int index,
@@ -828,34 +811,34 @@ public final class TlsClientFactory implements StreamFactory
             {
             case BeginFW.TYPE_ID:
                 final BeginFW begin = beginRO.wrap(buffer, index, index + length);
-                onApplicationBegin(begin);
+                onAppBegin(begin);
                 break;
             case DataFW.TYPE_ID:
                 final DataFW data = dataRO.wrap(buffer, index, index + length);
-                onApplicationData(data);
+                onAppData(data);
                 break;
             case EndFW.TYPE_ID:
                 final EndFW end = endRO.wrap(buffer, index, index + length);
-                onApplicationEnd(end);
+                onAppEnd(end);
                 break;
             case AbortFW.TYPE_ID:
                 final AbortFW abort = abortRO.wrap(buffer, index, index + length);
-                onApplicationAbort(abort);
+                onAppAbort(abort);
                 break;
             case WindowFW.TYPE_ID:
                 final WindowFW window = windowRO.wrap(buffer, index, index + length);
-                onApplicationWindow(window);
+                onAppWindow(window);
                 break;
             case ResetFW.TYPE_ID:
                 final ResetFW reset = resetRO.wrap(buffer, index, index + length);
-                onApplicationReset(reset);
+                onAppReset(reset);
                 break;
             default:
                 break;
             }
         }
 
-        private void onApplicationBegin(
+        private void onAppBegin(
             BeginFW begin)
         {
             state = TlsState.openInitial(state);
@@ -864,10 +847,10 @@ public final class TlsClientFactory implements StreamFactory
             final long authorization = begin.authorization();
             final OctetsFW extension = begin.extension();
 
-            client.doNetworkBegin(traceId, authorization, affinity, extension);
+            net.doNetBegin(traceId, authorization, affinity, extension);
         }
 
-        private void onApplicationData(
+        private void onAppData(
             DataFW data)
         {
             final long traceId = data.traceId();
@@ -876,45 +859,45 @@ public final class TlsClientFactory implements StreamFactory
 
             if (initialBudget < 0)
             {
-                cleanupApplication(traceId);
-                client.doNetworkAbortIfNecessary(traceId);
+                cleanupApp(traceId);
+                net.doNetAbort(traceId);
             }
             else if (data.length() > 0)
             {
                 final long budgetId = data.budgetId();
                 final OctetsFW payload = data.payload();
 
-                client.doEncodeWrap(traceId, budgetId, payload);
+                net.doEncodeWrap(traceId, budgetId, payload);
             }
         }
 
-        private void onApplicationEnd(
+        private void onAppEnd(
             EndFW end)
         {
             final long traceId = end.traceId();
             final long budgetId = 0L; // TODO
 
             state = TlsState.closeInitial(state);
-            client.stream = nullIfClosed(state, client.stream);
+            net.stream = nullIfClosed(state, net.stream);
 
-            client.doEncodeCloseOutbound(traceId, budgetId);
+            net.doEncodeCloseOutbound(traceId, budgetId);
         }
 
-        private void onApplicationAbort(
+        private void onAppAbort(
             AbortFW abort)
         {
             final long traceId = abort.traceId();
 
             state = TlsState.closeInitial(state);
-            client.stream = nullIfClosed(state, client.stream);
+            net.stream = nullIfClosed(state, net.stream);
 
-            client.doNetworkAbortIfNecessary(traceId);
+            net.doNetAbort(traceId);
 
-            doApplicationAbortIfNecessary(traceId);
-            client.doNetworkResetIfNecessary(traceId);
+            doAppAbort(traceId);
+            net.doNetReset(traceId);
         }
 
-        private void onApplicationWindow(
+        private void onAppWindow(
             WindowFW window)
         {
             final long traceId = window.traceId();
@@ -925,24 +908,24 @@ public final class TlsClientFactory implements StreamFactory
 
             state = TlsState.openReply(state);
 
-            client.flushNetworkWindow(traceId, budgetId, replyBudget, replyPadding);
+            net.flushNetWindow(traceId, budgetId, replyBudget, replyPadding);
         }
 
-        private void onApplicationReset(
+        private void onAppReset(
             ResetFW reset)
         {
             final long traceId = reset.traceId();
 
             state = TlsState.closeInitial(state);
-            client.stream = nullIfClosed(state, client.stream);
+            net.stream = nullIfClosed(state, net.stream);
 
-            client.doNetworkResetIfNecessary(traceId);
+            net.doNetReset(traceId);
 
-            doApplicationResetIfNecessary(traceId);
-            client.doNetworkAbortIfNecessary(traceId);
+            doAppReset(traceId);
+            net.doNetAbort(traceId);
         }
 
-        private void doApplicationBegin(
+        private void doAppBegin(
             long traceId,
             long authorization,
             String hostname,
@@ -950,8 +933,8 @@ public final class TlsClientFactory implements StreamFactory
         {
             state = TlsState.openingReply(state);
 
-            router.setThrottle(replyId, this::onApplication);
-            doBegin(application, routeId, replyId, traceId, authorization, affinity,
+            router.setThrottle(replyId, this::onAppMessage);
+            doBegin(app, routeId, replyId, traceId, authorization, affinity,
                 ex -> ex.set((b, o, l) -> tlsBeginExRW.wrap(b, o, l)
                                                       .typeId(tlsTypeId)
                                                       .hostname(hostname)
@@ -960,7 +943,7 @@ public final class TlsClientFactory implements StreamFactory
                                                       .sizeof()));
         }
 
-        private void doApplicationData(
+        private void doAppData(
             long traceId,
             long budgetId,
             int reserved,
@@ -974,78 +957,66 @@ public final class TlsClientFactory implements StreamFactory
 
             if (replyBudget < 0)
             {
-                client.doNetworkResetIfNecessary(traceId);
-                cleanupApplication(traceId);
+                net.doNetReset(traceId);
+                cleanupApp(traceId);
             }
             else
             {
-                doData(application, routeId, replyId, traceId, client.authorization, budgetId,
+                doData(app, routeId, replyId, traceId, net.authorization, budgetId,
                        reserved, buffer, offset, length, EMPTY_EXTENSION);
             }
         }
 
-        private void doApplicationEnd(
+        private void doAppEnd(
             long traceId)
         {
             state = TlsState.closeReply(state);
-            client.stream = nullIfClosed(state, client.stream);
-            doEnd(application, routeId, replyId, traceId, client.authorization, EMPTY_EXTENSION);
+            net.stream = nullIfClosed(state, net.stream);
+            doEnd(app, routeId, replyId, traceId, net.authorization, EMPTY_EXTENSION);
         }
 
-        private void doApplicationAbort(
-            long traceId)
-        {
-            state = TlsState.closeReply(state);
-            client.stream = nullIfClosed(state, client.stream);
-            doAbort(application, routeId, replyId, traceId, client.authorization, EMPTY_EXTENSION);
-        }
-
-        private void doApplicationReset(
-            long traceId)
-        {
-            state = TlsState.closeInitial(state);
-            client.stream = nullIfClosed(state, client.stream);
-
-            doReset(application, routeId, initialId, traceId, client.authorization);
-        }
-
-        private void doApplicationAbortIfNecessary(
+        private void doAppAbort(
             long traceId)
         {
             if (TlsState.replyOpening(state) && !TlsState.replyClosed(state))
             {
-                doApplicationAbort(traceId);
+                state = TlsState.closeReply(state);
+                net.stream = nullIfClosed(state, net.stream);
+                doAbort(app, routeId, replyId, traceId, net.authorization, EMPTY_EXTENSION);
             }
         }
 
-        private void doApplicationResetIfNecessary(
+        private void doAppReset(
             long traceId)
         {
             if (TlsState.initialOpening(state) && !TlsState.initialClosed(state))
             {
-                doApplicationReset(traceId);
+                state = TlsState.closeInitial(state);
+                net.stream = nullIfClosed(state, net.stream);
+
+                doReset(app, routeId, initialId, traceId, net.authorization);
             }
         }
 
-        private void flushApplicationWindow(
+        private void flushAppWindow(
             long traceId,
             long budgetId)
         {
-            int initialCredit = client.initialBudget - client.encodeSlotOffset - initialBudget;
+            int initialCredit = net.initialBudget - net.encodeSlotOffset - initialBudget;
             if (initialCredit > 0 && TlsState.initialOpened(state))
             {
-                final int initialPadding = client.initialPadding + initialPaddingAdjust;
+                final int initialPadding = net.initialPadding + initialPaddingAdjust;
                 initialBudget += initialCredit;
-                doWindow(application, routeId, initialId, traceId, client.authorization,
+                doWindow(app, routeId, initialId, traceId, net.authorization,
                          budgetId, initialCredit, initialPadding);
             }
         }
 
-        private void cleanupApplication(
+        private void cleanupApp(
             long traceId)
         {
-            doApplicationAbortIfNecessary(traceId);
-            doApplicationResetIfNecessary(traceId);
+            doAppAbort(traceId);
+            doAppReset(traceId);
         }
 
         private final class TlsClient
@@ -1098,7 +1069,7 @@ public final class TlsClientFactory implements StreamFactory
                 this.stream = NULL_STREAM;
             }
 
-            private void onNetwork(
+            private void onNetMessage(
                 int msgTypeId,
                 DirectBuffer buffer,
                 int index,
@@ -1108,38 +1079,38 @@ public final class TlsClientFactory implements StreamFactory
                 {
                 case BeginFW.TYPE_ID:
                     final BeginFW begin = beginRO.wrap(buffer, index, index + length);
-                    onNetworkBegin(begin);
+                    onNetBegin(begin);
                     break;
                 case DataFW.TYPE_ID:
                     final DataFW data = dataRO.wrap(buffer, index, index + length);
-                    onNetworkData(data);
+                    onNetData(data);
                     break;
                 case EndFW.TYPE_ID:
                     final EndFW end = endRO.wrap(buffer, index, index + length);
-                    onNetworkEnd(end);
+                    onNetEnd(end);
                     break;
                 case AbortFW.TYPE_ID:
                     final AbortFW abort = abortRO.wrap(buffer, index, index + length);
-                    onNetworkAbort(abort);
+                    onNetAbort(abort);
                     break;
                 case ResetFW.TYPE_ID:
                     final ResetFW reset = resetRO.wrap(buffer, index, index + length);
-                    onNetworkReset(reset);
+                    onNetReset(reset);
                     break;
                 case WindowFW.TYPE_ID:
                     final WindowFW window = windowRO.wrap(buffer, index, index + length);
-                    onNetworkWindow(window);
+                    onNetWindow(window);
                     break;
                 case SignalFW.TYPE_ID:
                     final SignalFW signal = signalRO.wrap(buffer, index, index + length);
-                    onNetworkSignal(signal);
+                    onNetSignal(signal);
                     break;
                 default:
                     break;
                 }
             }
 
-            private void onNetworkBegin(
+            private void onNetBegin(
                 BeginFW begin)
             {
                 final long traceId = begin.traceId();
@@ -1147,10 +1118,10 @@ public final class TlsClientFactory implements StreamFactory
                 authorization = begin.authorization();
                 state = TlsState.openReply(state);
 
-                doNetworkWindow(traceId, 0L, handshakeBudgetMax, 0);
+                doNetWindow(traceId, 0L, handshakeBudgetMax, 0);
             }
 
-            private void onNetworkData(
+            private void onNetData(
                 DataFW data)
             {
                 final long traceId = data.traceId();
@@ -1161,7 +1132,7 @@ public final class TlsClientFactory implements StreamFactory
 
                 if (replyBudget < 0)
                 {
-                    cleanupNetwork(traceId);
+                    cleanupNet(traceId);
                 }
                 else
                 {
@@ -1172,7 +1143,7 @@ public final class TlsClientFactory implements StreamFactory
 
                     if (decodeSlot == NO_SLOT)
                     {
-                        cleanupNetwork(traceId);
+                        cleanupNet(traceId);
                     }
                     else
                     {
@@ -1191,12 +1162,12 @@ public final class TlsClientFactory implements StreamFactory
                         limit = decodeSlotOffset;
                         reserved = decodeSlotReserved;
 
-                        decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
+                        decodeNet(traceId, authorization, budgetId, reserved, buffer, offset, limit);
                     }
                 }
             }
 
-            private void onNetworkEnd(
+            private void onNetEnd(
                 EndFW end)
             {
                 final long traceId = end.traceId();
@@ -1209,14 +1180,14 @@ public final class TlsClientFactory implements StreamFactory
                 {
                     closeInboundQuietly(tlsEngine);
 
-                    cleanupDecodeSlotIfNecessary();
+                    cleanupDecodeSlot();
 
-                    cancelHandshakeTaskIfNecessary();
-                    cancelHandshakeTimeoutIfNecessary();
+                    cancelHandshakeTask();
+                    cancelHandshakeTimeout();
 
                     // TODO: support half-closed in-bound plus close-on-flush out-bound
-                    doApplicationAbortIfNecessary(traceId);
-                    doApplicationResetIfNecessary(traceId);
+                    doAppAbort(traceId);
+                    doAppReset(traceId);
 
                     doEncodeCloseOutbound(traceId, budgetId);
 
@@ -1224,11 +1195,11 @@ public final class TlsClientFactory implements StreamFactory
                 }
                 else
                 {
-                    decodeNetworkIfNecessary(traceId);
+                    decodeNet(traceId);
                 }
             }
 
-            private void onNetworkAbort(
+            private void onNetAbort(
                 AbortFW abort)
             {
                 final long traceId = abort.traceId();
@@ -1239,18 +1210,18 @@ public final class TlsClientFactory implements StreamFactory
 
                 closeInboundQuietly(tlsEngine);
 
-                cleanupDecodeSlotIfNecessary();
+                cleanupDecodeSlot();
 
-                cancelHandshakeTaskIfNecessary();
-                cancelHandshakeTimeoutIfNecessary();
+                cancelHandshakeTask();
+                cancelHandshakeTimeout();
 
-                doApplicationAbortIfNecessary(traceId);
-                doApplicationResetIfNecessary(traceId);
+                doAppAbort(traceId);
+                doAppReset(traceId);
 
                 doEncodeCloseOutbound(traceId, budgetId);
             }
 
-            private void onNetworkReset(
+            private void onNetReset(
                 ResetFW reset)
             {
                 final long traceId = reset.traceId();
@@ -1260,19 +1231,19 @@ public final class TlsClientFactory implements StreamFactory
 
                 correlations.remove(replyId);
 
-                cleanupEncodeSlotIfNecessary();
+                cleanupEncodeSlot();
 
-                cancelHandshakeTaskIfNecessary();
+                cancelHandshakeTask();
 
                 closeInboundQuietly(tlsEngine);
 
-                doApplicationResetIfNecessary(traceId);
-                doApplicationAbortIfNecessary(traceId);
+                doAppReset(traceId);
+                doAppAbort(traceId);
 
-                doNetworkResetIfNecessary(traceId);
+                doNetReset(traceId);
             }
 
-            private void onNetworkWindow(
+            private void onNetWindow(
                 WindowFW window)
             {
                 final long traceId = window.traceId();
@@ -1292,32 +1263,32 @@ public final class TlsClientFactory implements StreamFactory
                     final MutableDirectBuffer buffer = encodePool.buffer(encodeSlot);
                     final int limit = encodeSlotOffset;
 
-                    encodeNetwork(encodeSlotTraceId, authorization, budgetId, buffer, 0, limit);
+                    encodeNet(encodeSlotTraceId, authorization, budgetId, buffer, 0, limit);
                 }
 
                 doEncodeWrapIfNecessary(traceId, budgetId);
 
                 if (encodeSlot == NO_SLOT)
                 {
-                    stream.ifPresent(s -> s.flushApplicationWindow(traceId, budgetId));
+                    stream.ifPresent(s -> s.flushAppWindow(traceId, budgetId));
                 }
             }
 
-            private void onNetworkSignal(
+            private void onNetSignal(
                 SignalFW signal)
             {
                 switch (signal.signalId())
                 {
                 case HANDSHAKE_TASK_COMPLETE_SIGNAL:
-                    onNetworkSignalHandshakeTaskComplete(signal);
+                    onNetSignalHandshakeTaskComplete(signal);
                     break;
                 case HANDSHAKE_TIMEOUT_SIGNAL:
-                    onNetworkSignalHandshakeTimeout(signal);
+                    onNetSignalHandshakeTimeout(signal);
                     break;
                 }
             }
 
-            private void onNetworkSignalHandshakeTaskComplete(
+            private void onNetSignalHandshakeTaskComplete(
                 SignalFW signal)
             {
                 assert handshakeTaskFutureId != NO_CANCEL_ID;
@@ -1340,10 +1311,10 @@ public final class TlsClientFactory implements StreamFactory
                     limit = decodeSlotOffset;
                 }
 
-                decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
+                decodeNet(traceId, authorization, budgetId, reserved, buffer, offset, limit);
             }
 
-            private void onNetworkSignalHandshakeTimeout(
+            private void onNetSignalHandshakeTimeout(
                 SignalFW signal)
             {
                 if (handshakeTimeoutFutureId != NO_CANCEL_ID)
@@ -1352,21 +1323,21 @@ public final class TlsClientFactory implements StreamFactory
 
                     final long traceId = signal.traceId();
 
-                    cleanupNetwork(traceId);
+                    cleanupNet(traceId);
                     decoder = decodeIgnoreAll;
                 }
             }
 
-            private void doNetworkBegin(
+            private void doNetBegin(
                 long traceId,
                 long authorization,
                 long affinity,
                 OctetsFW extension)
             {
                 state = TlsState.openingInitial(state);
-                correlations.put(replyId, this);
+                correlations.put(replyId, this::onNetMessage);
 
-                router.setThrottle(initialId, this::onNetwork);
+                router.setThrottle(initialId, this::onNetMessage);
                 doBegin(network, routeId, initialId, traceId, authorization, affinity, ex -> ex.set(extension));
 
                 try
@@ -1375,7 +1346,7 @@ public final class TlsClientFactory implements StreamFactory
                 }
                 catch (SSLException ex)
                 {
-                    cleanupNetwork(traceId);
+                    cleanupNet(traceId);
                 }
 
                 assert handshakeTimeoutFutureId == NO_CANCEL_ID;
@@ -1387,7 +1358,7 @@ public final class TlsClientFactory implements StreamFactory
                     HANDSHAKE_TIMEOUT_SIGNAL);
             }
 
-            private void doNetworkData(
+            private void doNetData(
                 long traceId,
                 long budgetId,
                 DirectBuffer buffer,
@@ -1406,30 +1377,24 @@ public final class TlsClientFactory implements StreamFactory
                     limit = encodeSlotOffset;
                 }
 
-                encodeNetwork(traceId, authorization, budgetId, buffer, offset, limit);
+                encodeNet(traceId, authorization, budgetId, buffer, offset, limit);
             }
 
-            private void doNetworkEnd(
-                long traceId)
-            {
-                cleanupEncodeSlotIfNecessary();
-
-                doEnd(network, routeId, initialId, traceId, authorization, EMPTY_EXTENSION);
-                state = TlsState.closeInitial(state);
-            }
-
-            private void doNetworkEndIfNecessary(
+            private void doNetEnd(
                 long traceId)
             {
                 if (TlsState.initialOpening(state) && !TlsState.initialClosed(state))
                 {
-                    doNetworkEnd(traceId);
+                    cleanupEncodeSlot();
+
+                    doEnd(network, routeId, initialId, traceId, authorization, EMPTY_EXTENSION);
+                    state = TlsState.closeInitial(state);
                 }
 
-                cancelHandshakeTaskIfNecessary();
+                cancelHandshakeTask();
             }
 
-            private void doNetworkAbortIfNecessary(
+            private void doNetAbort(
                 long traceId)
             {
                 if (!TlsState.initialClosed(state))
@@ -1438,12 +1403,12 @@ public final class TlsClientFactory implements StreamFactory
                     state = TlsState.closeInitial(state);
                 }
 
-                cleanupEncodeSlotIfNecessary();
+                cleanupEncodeSlot();
 
-                cancelHandshakeTaskIfNecessary();
+                cancelHandshakeTask();
             }
 
-            private void doNetworkResetIfNecessary(
+            private void doNetReset(
                 long traceId)
             {
                 if (!TlsState.replyClosed(state))
@@ -1452,13 +1417,13 @@ public final class TlsClientFactory implements StreamFactory
                     state = TlsState.closeReply(state);
                 }
 
-                cleanupDecodeSlotIfNecessary();
+                cleanupDecodeSlot();
 
-                cancelHandshakeTaskIfNecessary();
-                cancelHandshakeTimeoutIfNecessary();
+                cancelHandshakeTask();
+                cancelHandshakeTimeout();
             }
 
-            private void doNetworkWindow(
+            private void doNetWindow(
                 long traceId,
                 long budgetId,
                 int credit,
@@ -1471,7 +1436,7 @@ public final class TlsClientFactory implements StreamFactory
                 doWindow(network, routeId, replyId, traceId, authorization, budgetId, credit, padding);
             }
 
-            private void flushNetworkWindow(
+            private void flushNetWindow(
                 long traceId,
                 long budgetId,
                 int replyBudgetMax,
@@ -1480,13 +1445,13 @@ public final class TlsClientFactory implements StreamFactory
                 int replyCredit = Math.min(replyBudgetMax, decodeBudgetMax) - replyBudget - decodeSlotOffset;
                 if (replyCredit > 0)
                 {
-                    doNetworkWindow(traceId, budgetId, replyCredit, replyPadding);
+                    doNetWindow(traceId, budgetId, replyCredit, replyPadding);
                 }
 
-                decodeNetworkIfNecessary(traceId);
+                decodeNet(traceId);
             }
 
-            private void encodeNetwork(
+            private void encodeNet(
                 long traceId,
                 long authorization,
                 long budgetId,
@@ -1519,7 +1484,7 @@ public final class TlsClientFactory implements StreamFactory
 
                     if (encodeSlot == NO_SLOT)
                     {
-                        cleanupNetwork(traceId);
+                        cleanupNet(traceId);
                     }
                     else
                     {
@@ -1530,16 +1495,16 @@ public final class TlsClientFactory implements StreamFactory
                 }
                 else
                 {
-                    cleanupEncodeSlotIfNecessary();
+                    cleanupEncodeSlot();
 
                     if (TlsState.initialClosing(state))
                     {
-                        doNetworkEndIfNecessary(traceId);
+                        doNetEnd(traceId);
                     }
                 }
             }
 
-            private void decodeNetwork(
+            private void decodeNet(
                 long traceId,
                 long authorization,
                 long budgetId,
@@ -1565,7 +1530,7 @@ public final class TlsClientFactory implements StreamFactory
 
                     if (decodeSlot == NO_SLOT)
                     {
-                        cleanupNetwork(traceId);
+                        cleanupNet(traceId);
                     }
                     else
                     {
@@ -1577,15 +1542,15 @@ public final class TlsClientFactory implements StreamFactory
                 }
                 else
                 {
-                    cleanupDecodeSlotIfNecessary();
+                    cleanupDecodeSlot();
 
                     if (TlsState.replyClosed(state))
                     {
                         closeInboundQuietly(tlsEngine);
 
                         // TODO: support half-closed in-bound plus close-on-flush out-bound
-                        doApplicationAbortIfNecessary(traceId);
-                        doApplicationResetIfNecessary(traceId);
+                        doAppAbort(traceId);
+                        doAppReset(traceId);
 
                         doEncodeCloseOutbound(traceId, budgetId);
 
@@ -1600,12 +1565,12 @@ public final class TlsClientFactory implements StreamFactory
                     final int credit = stream.isPresent() ? decodeCreditMax : Math.min(handshakeBudgetMax, decodeCreditMax);
                     if (credit > 0)
                     {
-                        doNetworkWindow(traceId, budgetId, credit, 0);
+                        doNetWindow(traceId, budgetId, credit, 0);
                     }
                 }
             }
 
-            private void decodeNetworkIfNecessary(
+            private void decodeNet(
                 long traceId)
             {
                 if (decodeSlot != NO_SLOT)
@@ -1617,7 +1582,7 @@ public final class TlsClientFactory implements StreamFactory
                     final int offset = 0;
                     final int limit = decodeSlotOffset;
 
-                    decodeNetwork(traceId, authorization, budgetId, reserved, buffer, offset, limit);
+                    decodeNet(traceId, authorization, budgetId, reserved, buffer, offset, limit);
                 }
             }
 
@@ -1637,6 +1602,7 @@ public final class TlsClientFactory implements StreamFactory
                 long traceId,
                 long budgetId)
             {
+                assert handshakeTimeoutFutureId != NO_CANCEL_ID;
                 cancelHandshakeTimeout();
 
                 assert stream == NULL_STREAM;
@@ -1644,10 +1610,10 @@ public final class TlsClientFactory implements StreamFactory
 
                 final String protocol = tlsEngine.getApplicationProtocol();
 
-                doApplicationBegin(traceId, budgetId, tlsHostname, protocol);
+                doAppBegin(traceId, budgetId, tlsHostname, protocol);
 
                 TlsStream.this.state = TlsState.openInitial(TlsStream.this.state);
-                flushApplicationWindow(traceId, budgetId);
+                flushAppWindow(traceId, budgetId);
             }
 
             private void onDecodeUnwrapped(
@@ -1659,14 +1625,14 @@ public final class TlsClientFactory implements StreamFactory
                 int offset,
                 int length)
             {
-                stream.ifPresent(s -> s.doApplicationData(traceId, budgetId, reserved, buffer, offset, length));
+                stream.ifPresent(s -> s.doAppData(traceId, budgetId, reserved, buffer, offset, length));
             }
 
             private void onDecodeInboundClosed(
                 long traceId)
             {
                 assert tlsEngine.isInboundDone();
-                stream.ifPresent(s -> s.doApplicationEnd(traceId));
+                stream.ifPresent(s -> s.doAppEnd(traceId));
             }
 
             private void doEncodeWrap(
@@ -1699,7 +1665,7 @@ public final class TlsClientFactory implements StreamFactory
                             break;
                         case CLOSED:
                             assert bytesProduced > 0;
-                            doApplicationResetIfNecessary(traceId);
+                            doAppReset(traceId);
                             state = TlsState.closingReply(state);
                             break loop;
                         case OK:
@@ -1713,11 +1679,11 @@ public final class TlsClientFactory implements StreamFactory
                     } while (inAppByteBuffer.hasRemaining());
 
                     final int outNetBytesProduced = outNetByteBuffer.position();
-                    doNetworkData(traceId, budgetId, outNetBuffer, 0, outNetBytesProduced);
+                    doNetData(traceId, budgetId, outNetBuffer, 0, outNetBytesProduced);
                 }
                 catch (SSLException ex)
                 {
-                    cleanupNetwork(traceId);
+                    cleanupNet(traceId);
                 }
             }
 
@@ -1730,7 +1696,7 @@ public final class TlsClientFactory implements StreamFactory
 
                 doEncodeWrapIfNecessary(traceId, budgetId);
 
-                doNetworkEndIfNecessary(traceId);
+                doNetEnd(traceId);
             }
 
             private void doEncodeWrapIfNecessary(
@@ -1743,16 +1709,16 @@ public final class TlsClientFactory implements StreamFactory
                 }
             }
 
-            private void cleanupNetwork(
+            private void cleanupNet(
                 long traceId)
             {
-                doNetworkResetIfNecessary(traceId);
-                doNetworkAbortIfNecessary(traceId);
+                doNetReset(traceId);
+                doNetAbort(traceId);
 
-                cleanupApplication(traceId);
+                cleanupApp(traceId);
             }
 
-            private void cleanupDecodeSlotIfNecessary()
+            private void cleanupDecodeSlot()
             {
                 if (decodeSlot != NO_SLOT)
                 {
@@ -1763,7 +1729,7 @@ public final class TlsClientFactory implements StreamFactory
                 }
             }
 
-            private void cleanupEncodeSlotIfNecessary()
+            private void cleanupEncodeSlot()
             {
                 if (encodeSlot != NO_SLOT)
                 {
@@ -1774,34 +1740,22 @@ public final class TlsClientFactory implements StreamFactory
                 }
             }
 
-            private void cancelHandshakeTimeoutIfNecessary()
+            private void cancelHandshakeTimeout()
             {
                 if (handshakeTimeoutFutureId != NO_CANCEL_ID)
                 {
-                    cancelHandshakeTimeout();
+                    signaler.cancel(handshakeTimeoutFutureId);
+                    handshakeTimeoutFutureId = NO_CANCEL_ID;
                 }
             }
 
-            public void cancelHandshakeTimeout()
-            {
-                assert handshakeTimeoutFutureId != NO_CANCEL_ID;
-                signaler.cancel(handshakeTimeoutFutureId);
-                handshakeTimeoutFutureId = NO_CANCEL_ID;
-            }
-
-            private void cancelHandshakeTaskIfNecessary()
+            private void cancelHandshakeTask()
             {
                 if (handshakeTaskFutureId != NO_CANCEL_ID)
                 {
-                    cancelHandshakeTask();
+                    signaler.cancel(handshakeTaskFutureId);
+                    handshakeTaskFutureId = NO_CANCEL_ID;
                 }
-            }
-
-            public void cancelHandshakeTask()
-            {
-                assert handshakeTaskFutureId != NO_CANCEL_ID;
-                signaler.cancel(handshakeTaskFutureId);
-                handshakeTaskFutureId = NO_CANCEL_ID;
             }
         }
     }
