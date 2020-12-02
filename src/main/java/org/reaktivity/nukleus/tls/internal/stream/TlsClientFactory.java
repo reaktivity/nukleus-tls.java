@@ -736,7 +736,7 @@ public final class TlsClientFactory implements StreamFactory
         int limit)
     {
         client.doEncodeWrap(traceId, budgetId, EMPTY_OCTETS);
-        client.decoder = decodeHandshake;
+        client.decoder = client.tlsEngine.isInboundDone() ? decodeIgnoreAll : decodeHandshake;
         return progress;
     }
 
@@ -1666,7 +1666,7 @@ public final class TlsClientFactory implements StreamFactory
                             state = TlsState.closingReply(state);
                             break loop;
                         case OK:
-                            assert bytesProduced > 0;
+                            assert bytesProduced > 0 || tlsEngine.isInboundDone();
                             if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
                             {
                                 onDecodeHandshakeFinished(traceId, budgetId);
