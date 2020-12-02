@@ -1789,7 +1789,8 @@ public final class TlsServerFactory implements StreamFactory
             private void flushAppWindow(
                 long traceId)
             {
-                int replyCredit = TlsServer.this.replyBudget - TlsServer.this.encodeSlotOffset - replyBudget;
+                int replyBudgetMax = Math.min(TlsServer.this.replyBudget, encodePool.slotCapacity());
+                int replyCredit = replyBudgetMax - TlsServer.this.encodeSlotOffset - replyBudget;
                 if (replyCredit > 0 && TlsState.replyOpened(state))
                 {
                     final int replyPadding = TlsServer.this.replyPadding + replyPaddingAdjust;

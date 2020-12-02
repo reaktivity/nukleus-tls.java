@@ -186,7 +186,6 @@ public class ClientIT
         k3po.finish();
     }
 
-    @Ignore("JDK 14")
     @Test
     @Specification({
         "${route}/client/controller",

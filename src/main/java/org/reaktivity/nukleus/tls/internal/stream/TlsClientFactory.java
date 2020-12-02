@@ -1002,7 +1002,8 @@ public final class TlsClientFactory implements StreamFactory
             long traceId,
             long budgetId)
         {
-            int initialCredit = net.initialBudget - net.encodeSlotOffset - initialBudget;
+            int initialBudgetMax = Math.min(net.initialBudget, encodePool.slotCapacity());
+            int initialCredit = initialBudgetMax - net.encodeSlotOffset - initialBudget;
             if (initialCredit > 0 && TlsState.initialOpened(state))
             {
                 final int initialPadding = net.initialPadding + initialPaddingAdjust;
