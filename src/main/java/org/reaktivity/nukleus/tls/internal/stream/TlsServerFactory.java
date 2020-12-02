@@ -1372,8 +1372,12 @@ public final class TlsServerFactory implements StreamFactory
             if (handshakeTaskFutureId == NO_CANCEL_ID)
             {
                 final Runnable task = tlsEngine.getDelegatedTask();
-                assert task != null;
-                handshakeTaskFutureId = signaler.signalTask(task, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
+                assert task != null || tlsEngine.getHandshakeStatus() != HandshakeStatus.NEED_TASK;
+
+                if (task != null)
+                {
+                    handshakeTaskFutureId = signaler.signalTask(task, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
+                }
             }
         }
 
