@@ -20,7 +20,6 @@ import static java.util.Arrays.asList;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static javax.net.ssl.SSLEngineResult.HandshakeStatus.NEED_TASK;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
 import static org.reaktivity.reaktor.AddressId.remoteId;
@@ -1594,7 +1593,7 @@ public final class TlsClientFactory implements StreamFactory
                 if (handshakeTaskFutureId == NO_CANCEL_ID)
                 {
                     final Runnable task = tlsEngine.getDelegatedTask();
-                    assert task != null || tlsEngine.getHandshakeStatus() != NEED_TASK;
+                    assert task != null || tlsEngine.getHandshakeStatus() != HandshakeStatus.NEED_TASK;
 
                     if (task != null)
                     {
