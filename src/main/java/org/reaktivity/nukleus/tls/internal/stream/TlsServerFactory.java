@@ -781,7 +781,7 @@ public final class TlsServerFactory implements StreamFactory
         int limit)
     {
         server.doEncodeWrap(traceId, budgetId, EMPTY_OCTETS);
-        server.decoder = decodeHandshake;
+        server.decoder = server.tlsEngine.isInboundDone() ? decodeIgnoreAll : decodeHandshake;
         return progress;
     }
 
@@ -1478,7 +1478,7 @@ public final class TlsServerFactory implements StreamFactory
                         state = TlsState.closingReply(state);
                         break loop;
                     case OK:
-                        assert bytesProduced > 0;
+                        assert bytesProduced > 0 || tlsEngine.isInboundDone();
                         if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
                         {
                             onDecodeHandshakeFinished(traceId, budgetId);
@@ -1789,7 +1789,8 @@ public final class TlsServerFactory implements StreamFactory
             private void flushAppWindow(
                 long traceId)
             {
-                int replyCredit = TlsServer.this.replyBudget - TlsServer.this.encodeSlotOffset - replyBudget;
+                int replyBudgetMax = Math.min(TlsServer.this.replyBudget, encodePool.slotCapacity());
+                int replyCredit = replyBudgetMax - TlsServer.this.encodeSlotOffset - replyBudget;
                 if (replyCredit > 0 && TlsState.replyOpened(state))
                 {
                     final int replyPadding = TlsServer.this.replyPadding + replyPaddingAdjust;
