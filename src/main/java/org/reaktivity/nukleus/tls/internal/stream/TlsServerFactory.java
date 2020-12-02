@@ -104,6 +104,7 @@ public final class TlsServerFactory implements StreamFactory
     private final DataFW.Builder dataRW = new DataFW.Builder();
     private final EndFW.Builder endRW = new EndFW.Builder();
     private final AbortFW.Builder abortRW = new AbortFW.Builder();
+    private final FlushFW.Builder flushRW = new FlushFW.Builder();
 
     private final TlsBeginExFW.Builder tlsBeginExRW = new TlsBeginExFW.Builder();
 
@@ -421,6 +422,35 @@ public final class TlsServerFactory implements StreamFactory
                 .build();
 
         receiver.accept(abort.typeId(), abort.buffer(), abort.offset(), abort.sizeof());
+    }
+
+    private void doFlush(
+        MessageConsumer receiver,
+        long routeId,
+        long streamId,
+        long sequence,
+        long acknowledge,
+        int maximum,
+        long traceId,
+        long authorization,
+        long budgetId,
+        int reserved,
+        OctetsFW extension)
+    {
+        final FlushFW flush = flushRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+                .routeId(routeId)
+                .streamId(streamId)
+                .sequence(sequence)
+                .acknowledge(acknowledge)
+                .maximum(maximum)
+                .traceId(traceId)
+                .authorization(authorization)
+                .budgetId(budgetId)
+                .reserved(reserved)
+                .extension(extension)
+                .build();
+
+        receiver.accept(flush.typeId(), flush.buffer(), flush.offset(), flush.sizeof());
     }
 
     private void doWindow(
@@ -1045,6 +1075,9 @@ public final class TlsServerFactory implements StreamFactory
             final long sequence = flush.sequence();
             final long acknowledge = flush.acknowledge();
             final long traceId = flush.traceId();
+            final long budgetId = flush.budgetId();
+            final int reserved = flush.reserved();
+            final OctetsFW extension = flush.extension();
 
             assert acknowledge <= sequence;
             assert sequence >= initialSeq;
@@ -1057,6 +1090,10 @@ public final class TlsServerFactory implements StreamFactory
             if (initialSeq > initialAck + decodeMax)
             {
                 cleanupNet(traceId);
+            }
+            else
+            {
+                stream.ifPresent(s -> s.doAppFlush(traceId, budgetId, reserved, extension));
             }
         }
 
@@ -1302,6 +1339,16 @@ public final class TlsServerFactory implements StreamFactory
             cleanupEncodeSlot();
 
             cancelHandshakeTask();
+        }
+
+        private void doNetFlush(
+            long traceId,
+            long budgetId,
+            int reserved,
+            OctetsFW extension)
+        {
+            doFlush(net, routeId, replyId, replySeq, replyAck, replyMax,
+                    traceId, authorization, budgetId, reserved, extension);
         }
 
         private void doNetReset(
@@ -1817,6 +1864,9 @@ public final class TlsServerFactory implements StreamFactory
                 final long sequence = flush.sequence();
                 final long acknowledge = flush.acknowledge();
                 final long traceId = flush.traceId();
+                final long budgetId = flush.budgetId();
+                final int reserved = flush.reserved();
+                final OctetsFW extension = flush.extension();
 
                 assert acknowledge <= sequence;
                 assert sequence >= replySeq;
@@ -1830,6 +1880,10 @@ public final class TlsServerFactory implements StreamFactory
                 {
                     cleanupApp(traceId);
                     doNetAbort(traceId);
+                }
+                else
+                {
+                    doNetFlush(traceId, budgetId, reserved, extension);
                 }
             }
 
@@ -1987,6 +2041,16 @@ public final class TlsServerFactory implements StreamFactory
                     doAbort(app, routeId, initialId, initialSeq, initialAck, initialMax,
                             traceId, authorization, EMPTY_EXTENSION);
                 }
+            }
+
+            private void doAppFlush(
+                long traceId,
+                long budgetId,
+                int reserved,
+                OctetsFW extension)
+            {
+                doFlush(app, routeId, initialId, initialSeq, initialAck, initialMax,
+                        traceId, authorization, budgetId, reserved, extension);
             }
 
             private void doAppReset(
