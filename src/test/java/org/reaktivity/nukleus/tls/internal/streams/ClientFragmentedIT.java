@@ -35,8 +35,8 @@ public class ClientFragmentedIT
 {
     private final K3poRule k3po = new K3poRule()
             .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
-            .addScriptRoot("client", "org/reaktivity/specification/nukleus/tls/streams")
-            .addScriptRoot("server", "org/reaktivity/specification/tls");
+            .addScriptRoot("client", "org/reaktivity/specification/nukleus/tls/streams/application")
+            .addScriptRoot("server", "org/reaktivity/specification/nukleus/tls/streams/network");
 
     private final TestRule timeout = new DisableOnDebug(new Timeout(10, SECONDS));
 
@@ -46,7 +46,7 @@ public class ClientFragmentedIT
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(8192)
             .nukleus("tls"::equals)
-            .affinityMask("target#0", EXTERNAL_AFFINITY_MASK)
+            .affinityMask("net#0", EXTERNAL_AFFINITY_MASK)
             .clean();
 
     @Rule
@@ -57,8 +57,6 @@ public class ClientFragmentedIT
         "${route}/client/controller",
         "${client}/connection.established/client",
         "${server}/connection.established/server" })
-    @ScriptProperty({
-        "serverAccept \"nukleus://streams/target#0\"" })
     @Configure(name = TLS_HANDSHAKE_WINDOW_BYTES_NAME, value = "8")
     public void shouldEstablishConnectionWithLimitedHandshakeWindow() throws Exception
     {
@@ -71,7 +69,6 @@ public class ClientFragmentedIT
         "${client}/echo.payload.length.100k/client",
         "${server}/echo.payload.length.100k/server"})
     @ScriptProperty({
-        "serverAccept \"nukleus://streams/target#0\"",
         "clientWindow 8192" })
     public void shouldEchoPayloadLength100kWithLimitedPayloadWindow() throws Exception
     {

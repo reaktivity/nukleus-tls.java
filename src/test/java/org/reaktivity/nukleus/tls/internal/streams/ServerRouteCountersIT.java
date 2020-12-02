@@ -16,9 +16,9 @@
 package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
-import static org.junit.Assert.assertThat;
 import static org.junit.rules.RuleChain.outerRule;
 import static org.reaktivity.reaktor.test.ReaktorRule.EXTERNAL_AFFINITY_MASK;
 
@@ -27,7 +27,6 @@ import org.junit.Test;
 import org.junit.rules.DisableOnDebug;
 import org.junit.rules.TestRule;
 import org.junit.rules.Timeout;
-import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
@@ -38,8 +37,8 @@ public class ServerRouteCountersIT
 
     private final K3poRule k3po = new K3poRule()
             .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
-            .addScriptRoot("client", "org/reaktivity/specification/tls")
-            .addScriptRoot("server", "org/reaktivity/specification/nukleus/tls/streams");
+            .addScriptRoot("client", "org/reaktivity/specification/nukleus/tls/streams/network")
+            .addScriptRoot("server", "org/reaktivity/specification/nukleus/tls/streams/application");
 
     private final TestRule timeout = new DisableOnDebug(new Timeout(10, SECONDS));
 
@@ -50,7 +49,7 @@ public class ServerRouteCountersIT
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(8192)
             .nukleus("tls"::equals)
-            .affinityMask("target#0", EXTERNAL_AFFINITY_MASK)
+            .affinityMask("app#0", EXTERNAL_AFFINITY_MASK)
             .clean();
 
     @Rule
@@ -61,15 +60,13 @@ public class ServerRouteCountersIT
         "${route}/server/controller",
         "${client}/echo.payload.length.10k/client",
         "${server}/echo.payload.length.10k/server"})
-    @ScriptProperty({
-        "clientAccept \"nukleus://streams/target#0\"" })
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();
 
-        assertThat(reaktor.bytesWritten("tls", SERVER_ROUTE_ID), equalTo(10240L));
-        assertThat(reaktor.bytesRead("tls", SERVER_ROUTE_ID), equalTo(10240L));
-        assertThat(reaktor.framesWritten("tls", SERVER_ROUTE_ID), greaterThanOrEqualTo(1L));
-        assertThat(reaktor.framesRead("tls", SERVER_ROUTE_ID), greaterThanOrEqualTo(1L));
+        assertThat(reaktor.bytesWritten("net", SERVER_ROUTE_ID), equalTo(10240L));
+        assertThat(reaktor.bytesRead("net", SERVER_ROUTE_ID), equalTo(10240L));
+        assertThat(reaktor.framesWritten("net", SERVER_ROUTE_ID), greaterThanOrEqualTo(1L));
+        assertThat(reaktor.framesRead("net", SERVER_ROUTE_ID), greaterThanOrEqualTo(1L));
     }
 }
