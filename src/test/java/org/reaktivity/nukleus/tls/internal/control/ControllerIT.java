@@ -68,7 +68,7 @@ public class ControllerIT
         extension.addProperty("hostname", "localhost");
 
         reaktor.controller(TlsController.class)
-               .route(SERVER, "tls#0", "target#0", gson.toJson(extension))
+               .route(SERVER, "net#0", "app#0", gson.toJson(extension))
                .get();
 
         k3po.finish();
@@ -87,7 +87,7 @@ public class ControllerIT
         extension.addProperty("hostname", "localhost");
 
         reaktor.controller(TlsController.class)
-                  .route(CLIENT, "tls#0", "target#0", gson.toJson(extension))
+                  .route(CLIENT, "app#0", "net#0", gson.toJson(extension))
                   .get();
 
         k3po.finish();
@@ -107,7 +107,7 @@ public class ControllerIT
         extension.addProperty("hostname", "localhost");
 
         long routeId = reaktor.controller(TlsController.class)
-                  .route(SERVER, "tls#0", "target#0", gson.toJson(extension))
+                  .route(SERVER, "net#0", "app#0", gson.toJson(extension))
                   .get();
 
         k3po.notifyBarrier("ROUTED_SERVER");
@@ -133,7 +133,7 @@ public class ControllerIT
         extension.addProperty("hostname", "localhost");
 
         long routeId = reaktor.controller(TlsController.class)
-                  .route(CLIENT, "tls#0", "target#0", gson.toJson(extension))
+                  .route(CLIENT, "app#0", "net#0", gson.toJson(extension))
                   .get();
 
         k3po.notifyBarrier("ROUTED_CLIENT");

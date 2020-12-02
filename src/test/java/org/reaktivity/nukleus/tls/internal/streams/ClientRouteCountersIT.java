@@ -27,7 +27,6 @@ import org.junit.Test;
 import org.junit.rules.DisableOnDebug;
 import org.junit.rules.TestRule;
 import org.junit.rules.Timeout;
-import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
@@ -38,8 +37,8 @@ public class ClientRouteCountersIT
 
     private final K3poRule k3po = new K3poRule()
             .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
-            .addScriptRoot("client", "org/reaktivity/specification/nukleus/tls/streams")
-            .addScriptRoot("server", "org/reaktivity/specification/tls");
+            .addScriptRoot("client", "org/reaktivity/specification/nukleus/tls/streams/application")
+            .addScriptRoot("server", "org/reaktivity/specification/nukleus/tls/streams/network");
 
     private final TestRule timeout = new DisableOnDebug(new Timeout(10, SECONDS));
 
@@ -50,7 +49,7 @@ public class ClientRouteCountersIT
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(8192)
             .nukleus("tls"::equals)
-            .affinityMask("target#0", EXTERNAL_AFFINITY_MASK)
+            .affinityMask("net#0", EXTERNAL_AFFINITY_MASK)
             .clean();
 
     @Rule
@@ -61,15 +60,13 @@ public class ClientRouteCountersIT
         "${route}/client/controller",
         "${client}/echo.payload.length.10k/client",
         "${server}/echo.payload.length.10k/server"})
-    @ScriptProperty({
-        "serverAccept \"nukleus://streams/target#0\"" })
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();
 
-        assertThat(reaktor.bytesWritten("tls", CLIENT_ROUTE_ID), greaterThan(10240L));
-        assertThat(reaktor.bytesRead("tls", CLIENT_ROUTE_ID), greaterThan(10240L));
-        assertThat(reaktor.framesWritten("tls", CLIENT_ROUTE_ID), greaterThanOrEqualTo(3L));
-        assertThat(reaktor.framesRead("tls", CLIENT_ROUTE_ID), greaterThanOrEqualTo(3L));
+        assertThat(reaktor.bytesWritten("app", CLIENT_ROUTE_ID), greaterThan(10240L));
+        assertThat(reaktor.bytesRead("app", CLIENT_ROUTE_ID), greaterThan(10240L));
+        assertThat(reaktor.framesWritten("app", CLIENT_ROUTE_ID), greaterThanOrEqualTo(3L));
+        assertThat(reaktor.framesRead("app", CLIENT_ROUTE_ID), greaterThanOrEqualTo(3L));
     }
 }
