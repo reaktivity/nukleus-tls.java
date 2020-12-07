@@ -22,6 +22,8 @@ import static java.util.Optional.ofNullable;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
 import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
+import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.ALPN;
+import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.AUTHORITY;
 import static org.reaktivity.reaktor.AddressId.remoteId;
 
 import java.nio.ByteBuffer;
@@ -56,8 +58,12 @@ import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
 import org.reaktivity.nukleus.tls.internal.TlsNukleus;
 import org.reaktivity.nukleus.tls.internal.TlsStoreInfo;
+import org.reaktivity.nukleus.tls.internal.types.Array32FW;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW.Builder;
+import org.reaktivity.nukleus.tls.internal.types.ProxyInfoFW;
+import org.reaktivity.nukleus.tls.internal.types.String16FW;
+import org.reaktivity.nukleus.tls.internal.types.String8FW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsRecordInfoFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedDataFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedInfoFW;
@@ -68,9 +74,9 @@ import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.EndFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ExtensionFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.ProxyBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
-import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
 
 public final class TlsClientFactory implements StreamFactory
@@ -107,8 +113,8 @@ public final class TlsClientFactory implements StreamFactory
     private final TlsUnwrappedDataFW tlsUnwrappedDataRO = new TlsUnwrappedDataFW();
     private final TlsUnwrappedDataFW.Builder tlsUnwrappedDataRW = new TlsUnwrappedDataFW.Builder();
 
-    private final TlsBeginExFW tlsBeginExRO = new TlsBeginExFW();
-    private final TlsBeginExFW.Builder tlsBeginExRW = new TlsBeginExFW.Builder();
+    private final ProxyBeginExFW proxyBeginExRO = new ProxyBeginExFW();
+    private final ProxyBeginExFW.Builder tlsBeginExRW = new ProxyBeginExFW.Builder();
 
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
     private final ResetFW.Builder resetRW = new ResetFW.Builder();
@@ -124,7 +130,7 @@ public final class TlsClientFactory implements StreamFactory
 
     private final MessageFunction<RouteFW> wrapRoute = (t, b, i, l) -> routeRO.get().wrap(b, i, i + l);
 
-    private final int tlsTypeId;
+    private final int proxyTypeId;
     private final Signaler signaler;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -162,7 +168,7 @@ public final class TlsClientFactory implements StreamFactory
         IntFunction<TlsStoreInfo> lookupStore,
         TlsCounters counters)
     {
-        this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
+        this.proxyTypeId = supplyTypeId.applyAsInt("proxy");
         this.signaler = requireNonNull(signaler);
         this.lookupStore = requireNonNull(lookupStore);
         this.router = requireNonNull(router);
@@ -220,21 +226,24 @@ public final class TlsClientFactory implements StreamFactory
         final long authorization = begin.authorization();
         final OctetsFW extension = begin.extension();
         final ExtensionFW beginEx = extensionRO.tryWrap(extension.buffer(), extension.offset(), extension.limit());
-        final TlsBeginExFW tlsBeginEx = beginEx != null && beginEx.typeId() == tlsTypeId ?
-                tlsBeginExRO.tryWrap(extension.buffer(), extension.offset(), extension.limit()) : null;
+        final ProxyBeginExFW proxyBeginEx = beginEx != null && beginEx.typeId() == proxyTypeId ?
+                proxyBeginExRO.tryWrap(extension.buffer(), extension.offset(), extension.limit()) : null;
 
         final MessagePredicate filter = (t, b, i, l) ->
         {
-            final RouteFW route = wrapRoute.apply(t, b, i, l);
-            final TlsRouteExFW tlsRouteExRO = TlsClientFactory.this.tlsRouteExRO.get();
-            final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-            final String hostname = routeEx.hostname().asString();
-            final String protocol = routeEx.protocol().asString();
-            final String tlsHostname = tlsBeginEx != null ? tlsBeginEx.hostname().asString() : null;
-            final String tlsProtocol = tlsBeginEx != null ? tlsBeginEx.protocol().asString() : null;
+            RouteFW route = wrapRoute.apply(t, b, i, l);
+            TlsRouteExFW tlsRouteExRO = TlsClientFactory.this.tlsRouteExRO.get();
+            TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+            String16FW hostname = routeEx.hostname();
+            String8FW protocol = routeEx.protocol();
+            Array32FW<ProxyInfoFW> infos = proxyBeginEx != null ? proxyBeginEx.infos() : null;
+            ProxyInfoFW tlsAuthorityInfo = infos != null ? infos.matchFirst(a -> a.kind() == AUTHORITY) : null;
+            ProxyInfoFW tlsAlpnInfo = infos != null ? infos.matchFirst(a -> a.kind() == ALPN) : null;
+            String16FW tlsHostname = tlsAuthorityInfo != null ? tlsAuthorityInfo.authority() : null;
+            String8FW tlsProtocol = tlsAlpnInfo != null ? tlsAlpnInfo.alpn() : null;
 
             return (tlsHostname == null || Objects.equals(tlsHostname, hostname)) &&
-                    (protocol == null || Objects.equals(tlsProtocol, protocol));
+                    (protocol.length() == -1 || Objects.equals(tlsProtocol, protocol));
         };
 
         final RouteFW route = router.resolve(routeId, authorization, filter, wrapRoute);
@@ -245,14 +254,17 @@ public final class TlsClientFactory implements StreamFactory
         {
             final TlsRouteExFW tlsRouteExRO = TlsClientFactory.this.tlsRouteExRO.get();
             final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
+            Array32FW<ProxyInfoFW> infos = proxyBeginEx != null ? proxyBeginEx.infos() : null;
+            ProxyInfoFW tlsAuthorityInfo = infos != null ? infos.matchFirst(a -> a.kind() == AUTHORITY) : null;
+            ProxyInfoFW tlsAlpnInfo = infos != null ? infos.matchFirst(a -> a.kind() == ALPN) : null;
 
-            String tlsHostname = tlsBeginEx != null ? tlsBeginEx.hostname().asString() : null;
+            String tlsHostname = tlsAuthorityInfo != null ? tlsAuthorityInfo.authority().asString() : null;
             if (tlsHostname == null)
             {
                 tlsHostname = routeEx.hostname().asString();
             }
 
-            String tlsProtocol = tlsBeginEx != null ? tlsBeginEx.protocol().asString() : null;
+            String tlsProtocol = tlsAlpnInfo != null ? tlsAlpnInfo.alpn().asString() : null;
             if (tlsProtocol == null)
             {
                 tlsProtocol = routeEx.protocol().asString();
@@ -936,9 +948,20 @@ public final class TlsClientFactory implements StreamFactory
             router.setThrottle(replyId, this::onAppMessage);
             doBegin(app, routeId, replyId, traceId, authorization, affinity,
                 ex -> ex.set((b, o, l) -> tlsBeginExRW.wrap(b, o, l)
-                                                      .typeId(tlsTypeId)
-                                                      .hostname(hostname)
-                                                      .protocol(protocol)
+                                                      .typeId(proxyTypeId)
+                                                      .address(a -> a.none(n -> {}))
+                                                      .infos(is ->
+                                                      {
+                                                          if (protocol != null)
+                                                          {
+                                                              is.item(i -> i.alpn(protocol));
+                                                          }
+
+                                                          if (hostname != null)
+                                                          {
+                                                              is.item(i -> i.authority(hostname));
+                                                          }
+                                                      })
                                                       .build()
                                                       .sizeof()));
         }

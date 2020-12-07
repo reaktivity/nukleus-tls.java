@@ -120,7 +120,7 @@ public class ClientIT
         "${route}/client/controller",
         "${client}/connection.established.with.alpn/client",
         "${server}/connection.established/server" })
-    public void shouldNegotiateWithNoALPNAsNoProtocolRouteExists() throws Exception
+    public void shouldNegotiateWithNoAlpnAsNoProtocolRouteExists() throws Exception
     {
         k3po.finish();
     }
@@ -141,7 +141,7 @@ public class ClientIT
         "${route}/client.alpn.default/controller",
         "${client}/connection.established.with.alpn/client",
         "${server}/connection.established/server" })
-    public void shouldSucceedNoALPNDefaultRoute() throws Exception
+    public void shouldSucceedNoAlpnDefaultRoute() throws Exception
     {
         k3po.finish();
     }
