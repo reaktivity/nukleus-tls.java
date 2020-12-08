@@ -60,10 +60,9 @@ import org.reaktivity.nukleus.route.RouteManager;
 import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
-import org.reaktivity.nukleus.tls.internal.TlsNukleus;
 import org.reaktivity.nukleus.tls.internal.TlsStoreInfo;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
-import org.reaktivity.nukleus.tls.internal.types.String8FW;
+import org.reaktivity.nukleus.tls.internal.types.String16FW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsRecordInfoFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedDataFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedInfoFW;
@@ -74,9 +73,9 @@ import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.EndFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.FlushFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.ProxyBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
-import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
 
 public final class TlsServerFactory implements StreamFactory
@@ -106,7 +105,7 @@ public final class TlsServerFactory implements StreamFactory
     private final AbortFW.Builder abortRW = new AbortFW.Builder();
     private final FlushFW.Builder flushRW = new FlushFW.Builder();
 
-    private final TlsBeginExFW.Builder tlsBeginExRW = new TlsBeginExFW.Builder();
+    private final ProxyBeginExFW.Builder tlsBeginExRW = new ProxyBeginExFW.Builder();
 
     private final WindowFW windowRO = new WindowFW();
     private final ResetFW resetRO = new ResetFW();
@@ -136,7 +135,7 @@ public final class TlsServerFactory implements StreamFactory
     private final MessageFunction<TlsRouteExFW> wrapRouteEx = (t, b, i, l) -> wrapRoute.apply(t, b, i, l).extension()
                                                                                        .get(tlsRouteExRO.get()::tryWrap);
 
-    private final int tlsTypeId;
+    private final int proxyTypeId;
     private final Signaler signaler;
     private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
@@ -175,7 +174,7 @@ public final class TlsServerFactory implements StreamFactory
         IntFunction<TlsStoreInfo> lookupStore,
         TlsCounters counters)
     {
-        this.tlsTypeId = supplyTypeId.applyAsInt(TlsNukleus.NAME);
+        this.proxyTypeId = supplyTypeId.applyAsInt("proxy");
         this.signaler = requireNonNull(signaler);
         this.lookupStore = requireNonNull(lookupStore);
         this.router = requireNonNull(router);
@@ -296,7 +295,7 @@ public final class TlsServerFactory implements StreamFactory
         {
             final TlsRouteExFW routeEx = wrapRouteEx.apply(t, b, i, l);
 
-            final String8FW hostname = routeEx.hostname();
+            final String16FW hostname = routeEx.hostname();
 
             return hostname.value() == null || Objects.equals(tlsHostname0, hostname.value());
         };
@@ -1541,8 +1540,12 @@ public final class TlsServerFactory implements StreamFactory
             if (handshakeTaskFutureId == NO_CANCEL_ID)
             {
                 final Runnable task = tlsEngine.getDelegatedTask();
-                assert task != null;
-                handshakeTaskFutureId = signaler.signalTask(task, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
+                assert task != null || tlsEngine.getHandshakeStatus() != HandshakeStatus.NEED_TASK;
+
+                if (task != null)
+                {
+                    handshakeTaskFutureId = signaler.signalTask(task, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
+                }
             }
         }
 
@@ -1998,9 +2001,20 @@ public final class TlsServerFactory implements StreamFactory
                 doBegin(app, routeId, initialId, initialSeq, initialAck, initialMax,
                     traceId, authorization, affinity,
                     ex -> ex.set((b, o, l) -> tlsBeginExRW.wrap(b, o, l)
-                                                          .typeId(tlsTypeId)
-                                                          .hostname(hostname)
-                                                          .protocol(protocol)
+                                                          .typeId(proxyTypeId)
+                                                          .address(a -> a.none(n -> {}))
+                                                          .infos(is ->
+                                                          {
+                                                              if (protocol != null)
+                                                              {
+                                                                  is.item(i -> i.alpn(protocol));
+                                                              }
+
+                                                              if (hostname != null)
+                                                              {
+                                                                  is.item(i -> i.authority(hostname));
+                                                              }
+                                                          })
                                                           .build()
                                                           .sizeof()));
             }

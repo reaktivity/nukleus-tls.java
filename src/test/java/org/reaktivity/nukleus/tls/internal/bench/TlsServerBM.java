@@ -17,6 +17,7 @@ package org.reaktivity.nukleus.tls.internal.bench;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.reaktivity.nukleus.route.RouteKind.SERVER;
 import static org.reaktivity.reaktor.ReaktorConfiguration.REAKTOR_DIRECTORY;
 import static org.reaktivity.reaktor.ReaktorConfiguration.REAKTOR_STREAMS_BUFFER_CAPACITY;
 
@@ -53,7 +54,7 @@ import org.reaktivity.nukleus.tls.internal.TlsController;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
 import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
-import org.reaktivity.nukleus.tls.internal.types.stream.TlsBeginExFW;
+import org.reaktivity.nukleus.tls.internal.types.stream.ProxyBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
 import org.reaktivity.reaktor.Reaktor;
 
@@ -91,7 +92,7 @@ public class TlsServerBM
     private final DataFW.Builder dataRW = new DataFW.Builder();
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
 
-    private final TlsBeginExFW.Builder tlsBeginExRW = new TlsBeginExFW.Builder();
+    private final ProxyBeginExFW.Builder tlsBeginExRW = new ProxyBeginExFW.Builder();
 
     private Source source;
     private Target target;
@@ -106,7 +107,7 @@ public class TlsServerBM
 
         final Random random = new Random();
         this.targetRef = random.nextLong();
-        this.routeId = controller.routeServer("tls#0", "target#0", null, null, null).get();
+        this.routeId = controller.route(SERVER, "tls#0", "target#0", null).get();
 
         final long sourceId = random.nextLong();
 
@@ -213,7 +214,8 @@ public class TlsServerBM
         {
             return (buffer, offset, limit) ->
                 tlsBeginExRW.wrap(buffer, offset, limit)
-                            .hostname(hostname)
+                            .address(a -> a.none(n -> {}))
+                            .infosItem(i -> i.authority(hostname))
                             .build()
                             .sizeof();
         }
