@@ -80,7 +80,7 @@ public class ServerIT
         "${route}/server.alpn/controller",
         "${client}/connection.established.with.alpn/client",
         "${server}/connection.established.with.alpn/server" })
-    public void shouldNegotiateWithALPN() throws Exception
+    public void shouldNegotiateWithAlpn() throws Exception
     {
         k3po.finish();
     }
