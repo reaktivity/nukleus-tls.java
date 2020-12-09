@@ -99,13 +99,15 @@ public final class TlsServerFactory implements StreamFactory
     private final AbortFW abortRO = new AbortFW();
     private final SignalFW signalRO = new SignalFW();
 
+    private final ProxyBeginExFW beginExRO = new ProxyBeginExFW();
+
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
     private final DataFW.Builder dataRW = new DataFW.Builder();
     private final EndFW.Builder endRW = new EndFW.Builder();
     private final AbortFW.Builder abortRW = new AbortFW.Builder();
     private final FlushFW.Builder flushRW = new FlushFW.Builder();
 
-    private final ProxyBeginExFW.Builder tlsBeginExRW = new ProxyBeginExFW.Builder();
+    private final ProxyBeginExFW.Builder beginExRW = new ProxyBeginExFW.Builder();
 
     private final WindowFW windowRO = new WindowFW();
     private final ResetFW resetRO = new ResetFW();
@@ -879,6 +881,8 @@ public final class TlsServerFactory implements StreamFactory
         private final long replyId;
         private long affinity;
 
+        private ProxyBeginExFW extension;
+
         private final SSLEngine tlsEngine;
 
         private long handshakeTaskFutureId = NO_CANCEL_ID;
@@ -989,6 +993,15 @@ public final class TlsServerFactory implements StreamFactory
             final long sequence = begin.sequence();
             final long acknowledge = begin.acknowledge();
             final long traceId = begin.traceId();
+            final ProxyBeginExFW beginEx = begin.extension().get(beginExRO::tryWrap);
+
+            if (beginEx != null && beginEx.typeId() == proxyTypeId)
+            {
+                // TODO: use decodeSlot instead of allocation
+                MutableDirectBuffer bufferEx = new UnsafeBuffer(new byte[beginEx.sizeof()]);
+                bufferEx.putBytes(0, beginEx.buffer(), beginEx.offset(), beginEx.sizeof());
+                extension = new ProxyBeginExFW().wrap(bufferEx, 0, bufferEx.capacity());
+            }
 
             assert acknowledge <= sequence;
             assert sequence >= initialSeq;
@@ -2000,11 +2013,46 @@ public final class TlsServerFactory implements StreamFactory
                 router.setThrottle(initialId, this::onAppMessage);
                 doBegin(app, routeId, initialId, initialSeq, initialAck, initialMax,
                     traceId, authorization, affinity,
-                    ex -> ex.set((b, o, l) -> tlsBeginExRW.wrap(b, o, l)
+                    ex -> ex.set((b, o, l) -> beginExRW.wrap(b, o, l)
                                                           .typeId(proxyTypeId)
-                                                          .address(a -> a.none(n -> {}))
+                                                          .address(a ->
+                                                          {
+                                                              if (extension != null)
+                                                              {
+                                                                  a.set(extension.address());
+                                                              }
+                                                              else
+                                                              {
+                                                                  a.none(n -> {});
+                                                              }
+                                                          })
                                                           .infos(is ->
                                                           {
+                                                              if (extension != null)
+                                                              {
+                                                                  extension.infos().forEach(i ->
+                                                                  {
+                                                                      switch (i.kind())
+                                                                      {
+                                                                      case ALPN:
+                                                                          if (protocol == null)
+                                                                          {
+                                                                              is.item(it -> it.set(i));
+                                                                          }
+                                                                          break;
+                                                                      case AUTHORITY:
+                                                                          if (hostname == null)
+                                                                          {
+                                                                              is.item(it -> it.set(i));
+                                                                          }
+                                                                          break;
+                                                                      default:
+                                                                          is.item(it -> it.set(i));
+                                                                          break;
+                                                                      }
+                                                                  });
+                                                              }
+
                                                               if (protocol != null)
                                                               {
                                                                   is.item(i -> i.alpn(protocol));
@@ -2017,6 +2065,7 @@ public final class TlsServerFactory implements StreamFactory
                                                           })
                                                           .build()
                                                           .sizeof()));
+                extension = null;
             }
 
             private void doAppData(
