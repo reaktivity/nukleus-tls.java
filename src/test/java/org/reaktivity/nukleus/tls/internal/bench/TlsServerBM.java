@@ -52,7 +52,6 @@ import org.reaktivity.nukleus.function.MessageConsumer;
 import org.reaktivity.nukleus.function.MessagePredicate;
 import org.reaktivity.nukleus.tls.internal.TlsController;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
-import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ProxyBeginExFW;
@@ -181,6 +180,8 @@ public class TlsServerBM
             this.begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
                     .routeId(routeId)
                     .streamId(sourceId)
+                    .sequence(0L)
+                    .acknowledge(0L)
                     .extension(e -> e.set(visitTlsBeginEx("example.com")))
                     .build();
 
@@ -224,9 +225,13 @@ public class TlsServerBM
     {
         private final ToIntFunction<MessageConsumer> streams;
         private final MessagePredicate throttle;
+        private final int windowMax;
+        private final int windowPad;
 
         private MutableDirectBuffer writeBuffer;
         private MessageConsumer readHandler;
+        private long sequence;
+        private long acknowledge;
 
         private Target(
             ToIntFunction<MessageConsumer> streams,
@@ -234,6 +239,8 @@ public class TlsServerBM
         {
             this.streams = streams;
             this.throttle = throttle;
+            this.windowMax = 8192;
+            this.windowPad = 0;
         }
 
         private void reinit()
@@ -255,7 +262,12 @@ public class TlsServerBM
         {
             final BeginFW begin = beginRO.wrap(buffer, index, index + length);
             final long streamId = begin.streamId();
-            doWindow(streamId, 8192, 0);
+            final long sequence = begin.sequence();
+
+            this.sequence = sequence;
+            this.acknowledge = sequence;
+
+            doWindow(streamId);
 
             this.readHandler = this::afterBegin;
         }
@@ -268,21 +280,25 @@ public class TlsServerBM
         {
             final DataFW data = dataRO.wrap(buffer, index, index + length);
             final long streamId = data.streamId();
-            final OctetsFW payload = data.payload();
+            final long sequence = data.sequence();
+            final int reserved = data.reserved();
 
-            final int update = payload.sizeof();
-            doWindow(streamId, update, 0);
+            this.sequence = sequence + reserved;
+            this.acknowledge = sequence + reserved;
+
+            doWindow(streamId);
         }
 
         private boolean doWindow(
-            final long streamId,
-            final int credit,
-            final int padding)
+            final long streamId)
         {
             final WindowFW window = windowRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+                    .routeId(routeId)
                     .streamId(streamId)
-                    .credit(credit)
-                    .padding(padding)
+                    .sequence(sequence)
+                    .acknowledge(acknowledge)
+                    .padding(windowPad)
+                    .maximum(windowMax)
                     .build();
 
             return throttle.test(window.typeId(), window.buffer(), window.offset(), window.sizeof());
