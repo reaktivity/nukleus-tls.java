@@ -18,17 +18,13 @@ module org.reaktivity.nukleus.tls
     requires org.reaktivity.reaktor;
 
     provides org.reaktivity.reaktor.nukleus.NukleusFactorySpi
-        with org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi;
+        with org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi,
+             org.reaktivity.nukleus.tls.internal.vault.FileSystemNukleusFactorySpi;
 
     provides org.reaktivity.reaktor.config.OptionsAdapterSpi
-        with org.reaktivity.nukleus.tls.internal.config.TlsOptionsAdapter;
+        with org.reaktivity.nukleus.tls.internal.config.TlsOptionsAdapter,
+             org.reaktivity.nukleus.tls.internal.vault.config.FileSystemOptionsAdapter;
 
     provides org.reaktivity.reaktor.config.ConditionAdapterSpi
         with org.reaktivity.nukleus.tls.internal.config.TlsConditionAdapter;
-
-    provides org.reaktivity.reaktor.nukleus.NukleusFactorySpi
-    with org.reaktivity.nukleus.tls.internal.vault.FileSystemNukleusFactorySpi;
-
-    provides org.reaktivity.reaktor.config.OptionsAdapterSpi
-        with org.reaktivity.nukleus.tls.internal.vault.config.FileSystemOptionsAdapter;
 }
