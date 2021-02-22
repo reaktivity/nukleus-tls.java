@@ -13,32 +13,25 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  */
-package org.reaktivity.nukleus.tls.internal;
+package org.reaktivity.nukleus.tls.internal.vault;
 
-import org.reaktivity.nukleus.Configuration;
-import org.reaktivity.nukleus.ControllerBuilder;
-import org.reaktivity.nukleus.ControllerFactorySpi;
+import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
+import org.reaktivity.reaktor.nukleus.Configuration;
+import org.reaktivity.reaktor.nukleus.Nukleus;
+import org.reaktivity.reaktor.nukleus.NukleusFactorySpi;
 
-public final class TlsControllerFactorySpi implements ControllerFactorySpi<TlsController>
+public final class FileSystemNukleusFactorySpi implements NukleusFactorySpi
 {
     @Override
     public String name()
     {
-        return "tls";
+        return FileSystemNukleus.NAME;
     }
 
     @Override
-    public Class<TlsController> kind()
+    public Nukleus create(
+        Configuration config)
     {
-        return TlsController.class;
-    }
-
-    @Override
-    public TlsController create(
-        Configuration config,
-        ControllerBuilder<TlsController> builder)
-    {
-        return builder.setFactory(TlsController::new)
-                      .build();
+        return new FileSystemNukleus(new TlsConfiguration(config));
     }
 }

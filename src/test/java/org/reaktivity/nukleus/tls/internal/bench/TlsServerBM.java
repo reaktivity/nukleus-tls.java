@@ -17,7 +17,6 @@ package org.reaktivity.nukleus.tls.internal.bench;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.reaktivity.nukleus.route.RouteKind.SERVER;
 import static org.reaktivity.reaktor.ReaktorConfiguration.REAKTOR_DIRECTORY;
 import static org.reaktivity.reaktor.ReaktorConfiguration.REAKTOR_STREAMS_BUFFER_CAPACITY;
 
@@ -47,16 +46,15 @@ import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
-import org.reaktivity.nukleus.Configuration;
-import org.reaktivity.nukleus.function.MessageConsumer;
-import org.reaktivity.nukleus.function.MessagePredicate;
-import org.reaktivity.nukleus.tls.internal.TlsController;
 import org.reaktivity.nukleus.tls.internal.types.Flyweight;
 import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ProxyBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
 import org.reaktivity.reaktor.Reaktor;
+import org.reaktivity.reaktor.nukleus.Configuration;
+import org.reaktivity.reaktor.nukleus.function.MessageConsumer;
+import org.reaktivity.reaktor.nukleus.function.MessagePredicate;
 
 @State(Scope.Benchmark)
 @BenchmarkMode(Mode.Throughput)
@@ -78,8 +76,6 @@ public class TlsServerBM
 
         reaktor = Reaktor.builder()
                 .config(configuration)
-                .nukleus("tls"::equals)
-                .controller("tls"::equals)
                 .errorHandler(ex -> ex.printStackTrace(System.err))
                 .build();
 
@@ -103,11 +99,11 @@ public class TlsServerBM
     @Setup(Level.Trial)
     public void reinit() throws Exception
     {
-        final TlsController controller = reaktor.controller(TlsController.class);
+        //final TlsController controller = reaktor.controller(TlsController.class);
 
         final Random random = new Random();
         this.targetRef = random.nextLong();
-        this.routeId = controller.route(SERVER, "tls#0", "target#0", null).get();
+        //this.routeId = controller.route(SERVER, "tls#0", "target#0", null).get();
 
         final long sourceId = random.nextLong();
 
@@ -120,9 +116,9 @@ public class TlsServerBM
     @TearDown(Level.Trial)
     public void reset() throws Exception
     {
-        final TlsController controller = reaktor.controller(TlsController.class);
+        //final TlsController controller = reaktor.controller(TlsController.class);
 
-        controller.unroute(routeId).get();
+        //controller.unroute(routeId).get();
 
         this.source = null;
         this.target = null;

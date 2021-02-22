@@ -16,59 +16,41 @@
 package org.reaktivity.nukleus.tls.internal.stream;
 
 import static java.lang.System.currentTimeMillis;
-import static java.util.Arrays.asList;
-import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.reaktivity.nukleus.buffer.BufferPool.NO_SLOT;
-import static org.reaktivity.nukleus.concurrent.Signaler.NO_CANCEL_ID;
-import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.ALPN;
-import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.AUTHORITY;
-import static org.reaktivity.reaktor.AddressId.remoteId;
+import static javax.net.ssl.StandardConstants.SNI_HOST_NAME;
+import static org.reaktivity.reaktor.nukleus.buffer.BufferPool.NO_SLOT;
+import static org.reaktivity.reaktor.nukleus.concurrent.Signaler.NO_CANCEL_ID;
 
 import java.nio.ByteBuffer;
-import java.util.Objects;
+import java.security.SecureRandom;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
-import java.util.function.IntFunction;
+import java.util.function.LongFunction;
 import java.util.function.LongUnaryOperator;
-import java.util.function.ToIntFunction;
 
+import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SNIHostName;
-import javax.net.ssl.SSLContext;
+import javax.net.ssl.SNIServerName;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLException;
-import javax.net.ssl.SSLParameters;
 
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.concurrent.UnsafeBuffer;
-import org.reaktivity.nukleus.buffer.BufferPool;
-import org.reaktivity.nukleus.buffer.CountingBufferPool;
-import org.reaktivity.nukleus.concurrent.Signaler;
-import org.reaktivity.nukleus.function.MessageConsumer;
-import org.reaktivity.nukleus.function.MessageFunction;
-import org.reaktivity.nukleus.function.MessagePredicate;
-import org.reaktivity.nukleus.route.RouteManager;
-import org.reaktivity.nukleus.stream.StreamFactory;
 import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.nukleus.tls.internal.TlsCounters;
-import org.reaktivity.nukleus.tls.internal.TlsNukleus;
-import org.reaktivity.nukleus.tls.internal.TlsStoreInfo;
-import org.reaktivity.nukleus.tls.internal.types.Array32FW;
+import org.reaktivity.nukleus.tls.internal.config.TlsBinding;
+import org.reaktivity.nukleus.tls.internal.config.TlsRoute;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW;
 import org.reaktivity.nukleus.tls.internal.types.OctetsFW.Builder;
-import org.reaktivity.nukleus.tls.internal.types.ProxyInfoFW;
-import org.reaktivity.nukleus.tls.internal.types.String16FW;
-import org.reaktivity.nukleus.tls.internal.types.String8FW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsRecordInfoFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedDataFW;
 import org.reaktivity.nukleus.tls.internal.types.codec.TlsUnwrappedInfoFW;
-import org.reaktivity.nukleus.tls.internal.types.control.RouteFW;
-import org.reaktivity.nukleus.tls.internal.types.control.TlsRouteExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.AbortFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.BeginFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.DataFW;
@@ -79,8 +61,16 @@ import org.reaktivity.nukleus.tls.internal.types.stream.ProxyBeginExFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ResetFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.SignalFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.WindowFW;
+import org.reaktivity.reaktor.config.Binding;
+import org.reaktivity.reaktor.nukleus.ElektronContext;
+import org.reaktivity.reaktor.nukleus.buffer.BufferPool;
+import org.reaktivity.reaktor.nukleus.buffer.CountingBufferPool;
+import org.reaktivity.reaktor.nukleus.concurrent.Signaler;
+import org.reaktivity.reaktor.nukleus.function.MessageConsumer;
+import org.reaktivity.reaktor.nukleus.stream.StreamFactory;
+import org.reaktivity.reaktor.nukleus.vault.BindingVault;
 
-public final class TlsClientFactory implements StreamFactory
+public final class TlsClientFactory implements TlsStreamFactory
 {
     private static final OctetsFW EMPTY_OCTETS = new OctetsFW().wrap(new UnsafeBuffer(new byte[0]), 0, 0);
     private static final Consumer<OctetsFW.Builder> EMPTY_EXTENSION = ex -> {};
@@ -91,16 +81,12 @@ public final class TlsClientFactory implements StreamFactory
 
     private static final Optional<TlsStream> NULL_STREAM = ofNullable(null);
 
-    private final ThreadLocal<RouteFW> routeRO = ThreadLocal.withInitial(RouteFW::new);
-    private final ThreadLocal<TlsRouteExFW> tlsRouteExRO = ThreadLocal.withInitial(TlsRouteExFW::new);
-
     private final BeginFW beginRO = new BeginFW();
     private final DataFW dataRO = new DataFW();
     private final EndFW endRO = new EndFW();
     private final AbortFW abortRO = new AbortFW();
     private final FlushFW flushRO = new FlushFW();
     private final SignalFW signalRO = new SignalFW();
-    private final ExtensionFW extensionRO = new ExtensionFW();
 
     private final BeginFW.Builder beginRW = new BeginFW.Builder();
     private final DataFW.Builder dataRW = new DataFW.Builder();
@@ -116,7 +102,8 @@ public final class TlsClientFactory implements StreamFactory
     private final TlsUnwrappedDataFW tlsUnwrappedDataRO = new TlsUnwrappedDataFW();
     private final TlsUnwrappedDataFW.Builder tlsUnwrappedDataRW = new TlsUnwrappedDataFW.Builder();
 
-    private final ProxyBeginExFW proxyBeginExRO = new ProxyBeginExFW();
+    private final ExtensionFW extensionRO = new ExtensionFW();
+    private final ProxyBeginExFW beginExRO = new ProxyBeginExFW();
     private final ProxyBeginExFW.Builder tlsBeginExRW = new ProxyBeginExFW.Builder();
 
     private final WindowFW.Builder windowRW = new WindowFW.Builder();
@@ -131,24 +118,22 @@ public final class TlsClientFactory implements StreamFactory
     private final TlsClientDecoder decodeNotHandshakingUnwrapped = this::decodeNotHandshakingUnwrapped;
     private final TlsClientDecoder decodeIgnoreAll = this::decodeIgnoreAll;
 
-    private final MessageFunction<RouteFW> wrapRoute = (t, b, i, l) -> routeRO.get().wrap(b, i, i + l);
-
     private final int proxyTypeId;
     private final Signaler signaler;
-    private final RouteManager router;
     private final MutableDirectBuffer writeBuffer;
+    private final StreamFactory streamFactory;
     private final BufferPool decodePool;
     private final BufferPool encodePool;
+    private final String keyManagerAlgorithm;
+    private final LongFunction<BindingVault> supplyVault;
     private final LongUnaryOperator supplyInitialId;
     private final LongUnaryOperator supplyReplyId;
     private final int initialPadAdjust;
+    private final Long2ObjectHashMap<TlsBinding> bindings;
 
     private final int decodeMax;
     private final int handshakeMax;
     private final long handshakeTimeoutMillis;
-
-    private final Long2ObjectHashMap<MessageConsumer> correlations;
-    private final IntFunction<TlsStoreInfo> lookupStore;
 
     private final ByteBuffer inNetByteBuffer;
     private final MutableDirectBuffer inNetBuffer;
@@ -159,33 +144,32 @@ public final class TlsClientFactory implements StreamFactory
     private final ByteBuffer outAppByteBuffer;
     private final DirectBuffer outAppBuffer;
 
+    private final SecureRandom random;
+
     public TlsClientFactory(
         TlsConfiguration config,
-        Signaler signaler,
-        RouteManager router,
-        MutableDirectBuffer writeBuffer,
-        BufferPool bufferPool,
-        LongUnaryOperator supplyInitialId,
-        LongUnaryOperator supplyReplyId,
-        ToIntFunction<String> supplyTypeId,
-        IntFunction<TlsStoreInfo> lookupStore,
+        ElektronContext context,
         TlsCounters counters)
     {
-        this.proxyTypeId = supplyTypeId.applyAsInt("proxy");
-        this.signaler = requireNonNull(signaler);
-        this.lookupStore = requireNonNull(lookupStore);
-        this.router = requireNonNull(router);
-        this.writeBuffer = requireNonNull(writeBuffer);
+        this.proxyTypeId = context.supplyTypeId("proxy");
+        this.signaler = context.signaler();
+        this.writeBuffer = context.writeBuffer();
+        this.streamFactory = context.streamFactory();
+
+        BufferPool bufferPool = context.bufferPool();
         this.decodePool = new CountingBufferPool(bufferPool, counters.clientDecodeAcquires, counters.clientDecodeReleases);
         this.encodePool = new CountingBufferPool(bufferPool, counters.clientEncodeAcquires, counters.clientEncodeReleases);
-        this.supplyInitialId = requireNonNull(supplyInitialId);
-        this.supplyReplyId = requireNonNull(supplyReplyId);
-        this.correlations = new Long2ObjectHashMap<>();
+
+        this.keyManagerAlgorithm = config.keyManagerAlgorithm();
+        this.supplyVault = context::supplyVault;
+        this.supplyInitialId = context::supplyInitialId;
+        this.supplyReplyId = context::supplyReplyId;
         this.decodeMax = decodePool.slotCapacity();
         this.handshakeMax = Math.min(config.handshakeWindowBytes(), decodeMax);
         this.handshakeTimeoutMillis = SECONDS.toMillis(config.handshakeTimeout());
         this.initialPadAdjust = Math.max(bufferPool.slotCapacity() >> 14, 1) * MAXIMUM_HEADER_SIZE;
 
+        this.bindings = new Long2ObjectHashMap<>();
         this.inNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
         this.inNetBuffer = new UnsafeBuffer(inNetByteBuffer);
         this.outNetByteBuffer = ByteBuffer.allocate(writeBuffer.capacity() << 1);
@@ -194,6 +178,31 @@ public final class TlsClientFactory implements StreamFactory
         this.inAppBuffer = new UnsafeBuffer(inAppByteBuffer);
         this.outAppByteBuffer = ByteBuffer.allocate(writeBuffer.capacity());
         this.outAppBuffer = new UnsafeBuffer(outAppByteBuffer);
+
+        this.random = new SecureRandom();
+    }
+
+    @Override
+    public void attach(
+        Binding binding)
+    {
+        TlsBinding tlsBinding = new TlsBinding(binding);
+
+        BindingVault vault = supplyVault.apply(tlsBinding.vaultId);
+
+        if (vault != null)
+        {
+            tlsBinding.init(vault, keyManagerAlgorithm, random);
+        }
+
+        bindings.put(binding.id, tlsBinding);
+    }
+
+    @Override
+    public void detach(
+        long bindingId)
+    {
+        bindings.remove(bindingId);
     }
 
     @Override
@@ -202,101 +211,31 @@ public final class TlsClientFactory implements StreamFactory
         DirectBuffer buffer,
         int index,
         int length,
-        MessageConsumer sender)
+        MessageConsumer application)
     {
         final BeginFW begin = beginRO.wrap(buffer, index, index + length);
-        final long streamId = begin.streamId();
-
-        MessageConsumer newStream = null;
-
-        if ((streamId & 0x0000_0000_0000_0001L) != 0L)
-        {
-            newStream = newClientStream(begin, sender);
-        }
-        else
-        {
-            newStream = correlations.remove(streamId);
-        }
-
-        return newStream;
-    }
-
-    private MessageConsumer newClientStream(
-        final BeginFW begin,
-        final MessageConsumer application)
-    {
         final long routeId = begin.routeId();
         final long authorization = begin.authorization();
-        final OctetsFW extension = begin.extension();
-        final ExtensionFW beginEx = extensionRO.tryWrap(extension.buffer(), extension.offset(), extension.limit());
-        final ProxyBeginExFW proxyBeginEx = beginEx != null && beginEx.typeId() == proxyTypeId ?
-                proxyBeginExRO.tryWrap(extension.buffer(), extension.offset(), extension.limit()) : null;
-
-        final MessagePredicate filter = (t, b, i, l) ->
-        {
-            RouteFW route = wrapRoute.apply(t, b, i, l);
-            TlsRouteExFW tlsRouteExRO = TlsClientFactory.this.tlsRouteExRO.get();
-            TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-            String16FW hostname = routeEx.hostname();
-            String8FW protocol = routeEx.protocol();
-            Array32FW<ProxyInfoFW> infos = proxyBeginEx != null ? proxyBeginEx.infos() : null;
-            ProxyInfoFW tlsAuthorityInfo = infos != null ? infos.matchFirst(a -> a.kind() == AUTHORITY) : null;
-            ProxyInfoFW tlsAlpnInfo = infos != null ? infos.matchFirst(a -> a.kind() == ALPN) : null;
-            String16FW tlsHostname = tlsAuthorityInfo != null ? tlsAuthorityInfo.authority() : null;
-            String8FW tlsProtocol = tlsAlpnInfo != null ? tlsAlpnInfo.alpn() : null;
-
-            return (tlsHostname == null || Objects.equals(tlsHostname, hostname)) &&
-                    (protocol.length() == -1 || Objects.equals(tlsProtocol, protocol));
-        };
-
-        final RouteFW route = router.resolve(routeId, authorization, filter, wrapRoute);
+        final ExtensionFW extension = begin.extension().get(extensionRO::tryWrap);
+        final ProxyBeginExFW beginEx = extension != null && extension.typeId() == proxyTypeId
+                ? begin.extension().get(beginExRO::tryWrap)
+                : null;
 
         MessageConsumer newStream = null;
 
+        TlsBinding binding = bindings.get(routeId);
+        TlsRoute route = binding != null ? binding.resolve(authorization, beginEx) : null;
         if (route != null)
         {
-            final TlsRouteExFW tlsRouteExRO = TlsClientFactory.this.tlsRouteExRO.get();
-            final TlsRouteExFW routeEx = route.extension().get(tlsRouteExRO::wrap);
-            Array32FW<ProxyInfoFW> infos = proxyBeginEx != null ? proxyBeginEx.infos() : null;
-            ProxyInfoFW tlsAuthorityInfo = infos != null ? infos.matchFirst(a -> a.kind() == AUTHORITY) : null;
-            ProxyInfoFW tlsAlpnInfo = infos != null ? infos.matchFirst(a -> a.kind() == ALPN) : null;
+            final SSLEngine tlsEngine = binding.newClientEngine(beginEx);
 
-            String tlsHostname = tlsAuthorityInfo != null ? tlsAuthorityInfo.authority().asString() : null;
-            if (tlsHostname == null)
+            if (tlsEngine != null)
             {
-                tlsHostname = routeEx.hostname().asString();
-            }
+                final long networkRouteId = route.id;
 
-            String tlsProtocol = tlsAlpnInfo != null ? tlsAlpnInfo.alpn().asString() : null;
-            if (tlsProtocol == null)
-            {
-                tlsProtocol = routeEx.protocol().asString();
-            }
-
-            final long networkRouteId = route.correlationId();
-
-            final long applicationInitialId = begin.streamId();
-            final long applicationRouteId = begin.routeId();
-            final long applicationAffinity = begin.affinity();
-
-            final TlsStoreInfo storeInfo = lookupStore.apply(remoteId(applicationRouteId));
-            final SSLContext context = storeInfo != null ? storeInfo.context : null;
-            if (context != null)
-            {
-                final SSLEngine tlsEngine = context.createSSLEngine(tlsHostname, -1);
-                tlsEngine.setUseClientMode(true);
-
-                final SSLParameters tlsParameters = tlsEngine.getSSLParameters();
-                tlsParameters.setEndpointIdentificationAlgorithm("HTTPS");
-                if (tlsHostname != null)
-                {
-                    tlsParameters.setServerNames(asList(new SNIHostName(tlsHostname)));
-                }
-                if (tlsProtocol != null && !tlsProtocol.isEmpty())
-                {
-                    tlsParameters.setApplicationProtocols(new String[] { tlsProtocol });
-                }
-                tlsEngine.setSSLParameters(tlsParameters);
+                final long applicationInitialId = begin.streamId();
+                final long applicationRouteId = begin.routeId();
+                final long applicationAffinity = begin.affinity();
 
                 newStream = new TlsStream(
                     application,
@@ -304,12 +243,43 @@ public final class TlsClientFactory implements StreamFactory
                     applicationInitialId,
                     applicationAffinity,
                     tlsEngine,
-                    tlsHostname,
                     networkRouteId)::onAppMessage;
             }
         }
 
         return newStream;
+    }
+
+    private MessageConsumer newStream(
+        MessageConsumer sender,
+        long routeId,
+        long streamId,
+        long sequence,
+        long acknowledge,
+        int maximum,
+        long traceId,
+        long authorization,
+        long affinity,
+        Consumer<OctetsFW.Builder> extension)
+    {
+        final BeginFW begin = beginRW.wrap(writeBuffer, 0, writeBuffer.capacity())
+                .routeId(routeId)
+                .streamId(streamId)
+                .sequence(sequence)
+                .acknowledge(acknowledge)
+                .maximum(maximum)
+                .traceId(traceId)
+                .authorization(authorization)
+                .affinity(affinity)
+                .extension(extension)
+                .build();
+
+        MessageConsumer receiver =
+            streamFactory.newStream(begin.typeId(), begin.buffer(), begin.offset(), begin.sizeof(), sender);
+
+        receiver.accept(begin.typeId(), begin.buffer(), begin.offset(), begin.sizeof());
+
+        return receiver;
     }
 
     private void doBegin(
@@ -584,11 +554,6 @@ public final class TlsClientFactory implements StreamFactory
                         case OK:
                             if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
                             {
-                                if (TlsNukleus.DEBUG_HANDSHAKE_FINISHED)
-                                {
-                                    System.out.format("result = %s, stream = %s\n", result, client.stream);
-                                }
-
                                 if (!client.stream.isPresent())
                                 {
                                     client.onDecodeHandshakeFinished(traceId, budgetId);
@@ -864,7 +829,6 @@ public final class TlsClientFactory implements StreamFactory
             long initialId,
             long affinity,
             SSLEngine tlsEngine,
-            String tlsHostname,
             long tlsRouteId)
         {
             this.app = application;
@@ -872,7 +836,7 @@ public final class TlsClientFactory implements StreamFactory
             this.initialId = initialId;
             this.replyId = supplyReplyId.applyAsLong(initialId);
             this.affinity = affinity;
-            this.client = new TlsClient(tlsEngine, tlsHostname, tlsRouteId);
+            this.client = new TlsClient(tlsEngine, tlsRouteId);
         }
 
         private int replyWindow()
@@ -1112,7 +1076,6 @@ public final class TlsClientFactory implements StreamFactory
 
             state = TlsState.openingReply(state);
 
-            router.setThrottle(replyId, this::onAppMessage);
             doBegin(app, routeId, replyId, replySeq, replyAck, replyMax, traceId, client.replyAuth, affinity,
                 ex -> ex.set((b, o, l) -> tlsBeginExRW.wrap(b, o, l)
                                                       .typeId(proxyTypeId)
@@ -1230,8 +1193,7 @@ public final class TlsClientFactory implements StreamFactory
         private final class TlsClient
         {
             private final SSLEngine tlsEngine;
-            private final String tlsHostname;
-            private final MessageConsumer net;
+            private MessageConsumer net;
             private final long routeId;
             private final long initialId;
             private final long replyId;
@@ -1267,15 +1229,12 @@ public final class TlsClientFactory implements StreamFactory
 
             private TlsClient(
                 SSLEngine tlsEngine,
-                String tlsHostname,
                 long routeId)
             {
                 this.tlsEngine = tlsEngine;
-                this.tlsHostname = tlsHostname;
                 this.routeId = routeId;
                 this.initialId = supplyInitialId.applyAsLong(routeId);
                 this.replyId = supplyReplyId.applyAsLong(initialId);
-                this.net = router.supplyReceiver(initialId);
                 this.decoder = decodeHandshake;
                 this.stream = NULL_STREAM;
             }
@@ -1528,8 +1487,6 @@ public final class TlsClientFactory implements StreamFactory
 
                 assert initialAck <= initialSeq;
 
-                correlations.remove(replyId);
-
                 cleanupEncodeSlot();
 
                 cancelHandshakeTask();
@@ -1637,10 +1594,8 @@ public final class TlsClientFactory implements StreamFactory
                 OctetsFW extension)
             {
                 state = TlsState.openingInitial(state);
-                correlations.put(replyId, this::onNetMessage);
 
-                router.setThrottle(initialId, this::onNetMessage);
-                doBegin(net, routeId, initialId, initialSeq, initialAck,
+                net = newStream(this::onNetMessage, routeId, initialId, initialSeq, initialAck,
                         initialMax, traceId, initialAuth, affinity, ex -> ex.set(extension));
 
                 try
@@ -1935,9 +1890,28 @@ public final class TlsClientFactory implements StreamFactory
                 stream = Optional.of(TlsStream.this);
 
                 final String protocol = tlsEngine.getApplicationProtocol();
+                ExtendedSSLSession session = (ExtendedSSLSession) tlsEngine.getSession();
+                List<SNIServerName> serverNames = session.getRequestedServerNames();
+                String hostname = serverNames.stream()
+                        .filter(s -> s.getType() == SNI_HOST_NAME)
+                        .map(SNIHostName.class::cast)
+                        .map(SNIHostName::getAsciiName)
+                        .findFirst()
+                        .orElse(null);
 
-                doAppBegin(traceId, budgetId, tlsHostname, protocol);
-                doAppWindow(traceId, budgetId);
+                TlsBinding binding = bindings.get(TlsStream.this.routeId);
+                TlsRoute route = binding.resolve(initialAuth, hostname, protocol);
+
+                if (route == null || route.id != client.routeId)
+                {
+                    doAppReset(traceId);
+                    doNetAbort(traceId);
+                }
+                else
+                {
+                    doAppBegin(traceId, budgetId, hostname, protocol);
+                    doAppWindow(traceId, budgetId);
+                }
             }
 
             private void onDecodeUnwrapped(

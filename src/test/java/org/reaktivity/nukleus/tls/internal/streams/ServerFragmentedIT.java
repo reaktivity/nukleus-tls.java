@@ -18,7 +18,6 @@ package org.reaktivity.nukleus.tls.internal.streams;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
 import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_WINDOW_BYTES_NAME;
-import static org.reaktivity.reaktor.test.ReaktorRule.EXTERNAL_AFFINITY_MASK;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -29,14 +28,14 @@ import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
+import org.reaktivity.reaktor.test.annotation.Configuration;
 import org.reaktivity.reaktor.test.annotation.Configure;
 
 public class ServerFragmentedIT
 {
     private final K3poRule k3po = new K3poRule()
-            .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
-            .addScriptRoot("client", "org/reaktivity/specification/nukleus/tls/streams/network")
-            .addScriptRoot("server", "org/reaktivity/specification/nukleus/tls/streams/application");
+            .addScriptRoot("net", "org/reaktivity/specification/nukleus/tls/streams/network")
+            .addScriptRoot("app", "org/reaktivity/specification/nukleus/tls/streams/application");
 
     private final TestRule timeout = new DisableOnDebug(new Timeout(10, SECONDS));
 
@@ -45,18 +44,18 @@ public class ServerFragmentedIT
             .commandBufferCapacity(1024)
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(8192)
-            .nukleus("tls"::equals)
-            .affinityMask("app#0", EXTERNAL_AFFINITY_MASK)
+            .configurationRoot("org/reaktivity/specification/nukleus/tls/config")
+            .external("app#0")
             .clean();
 
     @Rule
     public final TestRule chain = outerRule(reaktor).around(k3po).around(timeout);
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/connection.established/client",
-        "${server}/connection.established/server" })
+        "${net}/connection.established/client",
+        "${app}/connection.established/server" })
     @Configure(name = TLS_HANDSHAKE_WINDOW_BYTES_NAME, value = "8")
     public void shouldEstablishConnectionWithLimitedHandshakeWindow() throws Exception
     {
@@ -64,10 +63,10 @@ public class ServerFragmentedIT
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/echo.payload.length.100k/client",
-        "${server}/echo.payload.length.100k/server"})
+        "${net}/echo.payload.length.100k/client",
+        "${app}/echo.payload.length.100k/server"})
     @ScriptProperty({
         "serverWindow 8192"})
     public void shouldEchoPayloadLength100kWithLimitedPayloadWindow() throws Exception

@@ -18,7 +18,6 @@ package org.reaktivity.nukleus.tls.internal.streams;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
 import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_TIMEOUT_NAME;
-import static org.reaktivity.reaktor.test.ReaktorRule.EXTERNAL_AFFINITY_MASK;
 
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -26,19 +25,18 @@ import org.junit.Test;
 import org.junit.rules.DisableOnDebug;
 import org.junit.rules.TestRule;
 import org.junit.rules.Timeout;
-import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.ReaktorConfiguration;
 import org.reaktivity.reaktor.test.ReaktorRule;
+import org.reaktivity.reaktor.test.annotation.Configuration;
 import org.reaktivity.reaktor.test.annotation.Configure;
 
 public class ServerIT
 {
     private final K3poRule k3po = new K3poRule()
-            .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
-            .addScriptRoot("client", "org/reaktivity/specification/nukleus/tls/streams/network")
-            .addScriptRoot("server", "org/reaktivity/specification/nukleus/tls/streams/application");
+            .addScriptRoot("net", "org/reaktivity/specification/nukleus/tls/streams/network")
+            .addScriptRoot("app", "org/reaktivity/specification/nukleus/tls/streams/application");
 
     private final TestRule timeout = new DisableOnDebug(new Timeout(10, SECONDS));
 
@@ -47,8 +45,8 @@ public class ServerIT
             .commandBufferCapacity(1024)
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(8192)
-            .nukleus("tls"::equals)
-            .affinityMask("app#0", EXTERNAL_AFFINITY_MASK)
+            .configurationRoot("org/reaktivity/specification/nukleus/tls/config")
+            .external("app#0")
             .configure(ReaktorConfiguration.REAKTOR_DRAIN_ON_CLOSE, false)
             .clean();
 
@@ -56,40 +54,40 @@ public class ServerIT
     public final TestRule chain = outerRule(reaktor).around(k3po).around(timeout);
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/connection.established/client",
-        "${server}/connection.established/server" })
+        "${net}/connection.established/client",
+        "${app}/connection.established/server" })
     public void shouldEstablishConnection() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/connection.established/client",
-        "${server}/connection.established/server" })
+        "${net}/connection.established/client",
+        "${app}/connection.established/server" })
     public void shouldEstablishConnectionDefaultStore() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.alpn.json")
     @Specification({
-        "${route}/server.alpn/controller",
-        "${client}/connection.established.with.alpn/client",
-        "${server}/connection.established.with.alpn/server" })
+        "${net}/connection.established.with.alpn/client",
+        "${app}/connection.established.with.alpn/server" })
     public void shouldNegotiateWithAlpn() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/connection.established.with.alpn/client",
-        "${server}/connection.established/server" })
+        "${net}/connection.established.with.alpn/client",
+        "${app}/connection.established/server" })
     public void shouldNotNegotiateAlpnWithDefaultRoute() throws Exception
     {
         k3po.finish();
@@ -97,10 +95,10 @@ public class ServerIT
 
     @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
+    @Configuration("server.alpn.json")
     @Specification({
-        "${route}/server.alpn/controller",
-        "${client}/connection.not.established.with.wrong.alpn/client",
-        "${server}/connection.established/server" })
+        "${net}/connection.not.established.with.wrong.alpn/client",
+        "${app}/connection.established/server" })
     public void shouldNotNegotiateWithAlpnAsProtocolMismatch() throws Exception
     {
         k3po.finish();
@@ -108,186 +106,184 @@ public class ServerIT
 
     @Ignore("https://github.com/k3po/k3po/issues/454 - Support connect aborted")
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server.alpn/controller",
-        "${client}/connection.established/client" })
+        "${net}/connection.established/client" })
     public void shouldNegotiateWithNoAlpnButRouteMismatch() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.alpn.default.json")
     @Specification({
-        "${route}/server.alpn.default/controller",
-        "${client}/connection.established.with.alpn/client",
-        "${server}/connection.established.with.alpn/server" })
+        "${net}/connection.established.with.alpn/client",
+        "${app}/connection.established.with.alpn/server" })
     public void shouldNegotiateAlpnWithAlpnAndDefaultRoutes() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.alpn.json")
     @Specification({
-        "${route}/server.alpn.no.hostname/controller",
-        "${client}/connection.established.with.alpn/client",
-        "${server}/connection.established.with.alpn/server" })
+        "${net}/connection.established.with.alpn/client",
+        "${app}/connection.established.with.alpn/server" })
     public void shouldNegotiateAlpnWithAlpnAndNoHostname() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.alpn.default.json")
     @Specification({
-        "${route}/server.alpn.default/controller",
-        "${client}/connection.established/client",
-        "${server}/connection.established/server" })
+        "${net}/connection.established/client",
+        "${app}/connection.established/server" })
     public void shouldNotNegotiateAlpnWithAlpnAndDefaultRoutes() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/echo.payload.length.10k/client",
-        "${server}/echo.payload.length.10k/server"})
+        "${net}/echo.payload.length.10k/client",
+        "${app}/echo.payload.length.10k/server"})
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/echo.payload.length.100k/client",
-        "${server}/echo.payload.length.100k/server"})
+        "${net}/echo.payload.length.100k/client",
+        "${app}/echo.payload.length.100k/server"})
     public void shouldEchoPayloadLength100k() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/echo.payload.length.1000k/client",
-        "${server}/echo.payload.length.1000k/server"})
+        "${net}/echo.payload.length.1000k/client",
+        "${app}/echo.payload.length.1000k/server"})
     public void shouldEchoPayloadLength1000k() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/server.sent.write.close/client",
-        "${server}/server.sent.write.close/server"})
+        "${net}/server.sent.write.close/client",
+        "${app}/server.sent.write.close/server"})
     public void shouldReceiveServerSentWriteClose() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/client.sent.write.close.before.handshake/client"})
+        "${net}/client.sent.write.close.before.handshake/client"})
     public void shouldReceiveClientSentWriteCloseBeforeHandshake() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/client.sent.write.close/client",
-        "${server}/client.sent.write.close/server"})
+        "${net}/client.sent.write.close/client",
+        "${app}/client.sent.write.close/server"})
     public void shouldReceiveClientSentWriteClose() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/server.sent.write.abort/client",
-        "${server}/server.sent.write.abort/server"})
+        "${net}/server.sent.write.abort/client",
+        "${app}/server.sent.write.abort/server"})
     public void shouldReceiveServerSentWriteAbort() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/client.sent.write.abort.before.handshake/client"})
+        "${net}/client.sent.write.abort.before.handshake/client"})
     public void shouldReceiveClientSentWriteAbortBeforeHandshake() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/client.sent.write.abort/client",
-        "${server}/client.sent.write.abort/server"})
+        "${net}/client.sent.write.abort/client",
+        "${app}/client.sent.write.abort/server"})
     public void shouldReceiveClientSentWriteAbort() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/server.sent.read.abort/client",
-        "${server}/server.sent.read.abort/server"})
+        "${net}/server.sent.read.abort/client",
+        "${app}/server.sent.read.abort/server"})
     public void shouldReceiveServerSentReadAbort() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/client.sent.read.abort.before.handshake/client"})
+        "${net}/client.sent.read.abort.before.handshake/client"})
     public void shouldReceiveClientSentReadAbortBeforeHandshake() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/client.sent.read.abort/client",
-        "${server}/client.sent.read.abort/server"})
+        "${net}/client.sent.read.abort/client",
+        "${app}/client.sent.read.abort/server"})
     public void shouldReceiveClientSentReadAbort() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/client.hello.malformed/client"})
+        "${net}/client.hello.malformed/client"})
     public void shouldResetMalformedClientHello() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.mutual.wanted.json")
     @Specification({
-        "${route}/server.want.auth/controller",
-        "${client}/server.want.auth/client",
-        "${server}/server.want.auth/server"})
-    @ScriptProperty({
-        "authorization  -2666130979403333631L" })           // "0xdb00000000000001L"
+        "${net}/server.want.auth/client",
+        "${app}/server.want.auth/server"})
     public void serverWantClientAuth() throws Exception
     {
         k3po.finish();
     }
 
     @Test
+    @Configuration("server.json")
     @Specification({
-        "${route}/server/controller",
-        "${client}/server.handshake.timeout/client"})
+        "${net}/server.handshake.timeout/client"})
     @Configure(name = TLS_HANDSHAKE_TIMEOUT_NAME, value = "1")
     public void shouldTimeoutHandshake() throws Exception
     {

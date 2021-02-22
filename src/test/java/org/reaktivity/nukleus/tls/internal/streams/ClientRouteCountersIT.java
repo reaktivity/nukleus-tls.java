@@ -20,7 +20,6 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.junit.rules.RuleChain.outerRule;
-import static org.reaktivity.reaktor.test.ReaktorRule.EXTERNAL_AFFINITY_MASK;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -30,43 +29,40 @@ import org.junit.rules.Timeout;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
+import org.reaktivity.reaktor.test.annotation.Configuration;
 
 public class ClientRouteCountersIT
 {
-    private static final long CLIENT_ROUTE_ID = 0x0003000210000001L;
-
     private final K3poRule k3po = new K3poRule()
-            .addScriptRoot("route", "org/reaktivity/specification/nukleus/tls/control/route")
-            .addScriptRoot("client", "org/reaktivity/specification/nukleus/tls/streams/application")
-            .addScriptRoot("server", "org/reaktivity/specification/nukleus/tls/streams/network");
+            .addScriptRoot("app", "org/reaktivity/specification/nukleus/tls/streams/application")
+            .addScriptRoot("net", "org/reaktivity/specification/nukleus/tls/streams/network");
 
     private final TestRule timeout = new DisableOnDebug(new Timeout(10, SECONDS));
 
     private final ReaktorRule reaktor = new ReaktorRule()
             .directory("target/nukleus-itests")
-            .controller("tls"::equals)
             .commandBufferCapacity(1024)
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(8192)
-            .nukleus("tls"::equals)
-            .affinityMask("net#0", EXTERNAL_AFFINITY_MASK)
+            .configurationRoot("org/reaktivity/specification/nukleus/tls/config")
+            .external("net#0")
             .clean();
 
     @Rule
     public final TestRule chain = outerRule(timeout).around(reaktor).around(k3po);
 
     @Test
+    @Configuration("client.json")
     @Specification({
-        "${route}/client/controller",
-        "${client}/echo.payload.length.10k/client",
-        "${server}/echo.payload.length.10k/server"})
+        "${app}/echo.payload.length.10k/client",
+        "${net}/echo.payload.length.10k/server"})
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();
 
-        assertThat(reaktor.bytesWritten("app", CLIENT_ROUTE_ID), greaterThan(10240L));
-        assertThat(reaktor.bytesRead("app", CLIENT_ROUTE_ID), greaterThan(10240L));
-        assertThat(reaktor.framesWritten("app", CLIENT_ROUTE_ID), greaterThanOrEqualTo(3L));
-        assertThat(reaktor.framesRead("app", CLIENT_ROUTE_ID), greaterThanOrEqualTo(3L));
+        assertThat(reaktor.bytesWritten("default", "net#0"), greaterThan(10240L));
+        assertThat(reaktor.bytesRead("default", "net#0"), greaterThan(10240L));
+        assertThat(reaktor.framesWritten("default", "net#0"), greaterThanOrEqualTo(3L));
+        assertThat(reaktor.framesRead("default", "net#0"), greaterThanOrEqualTo(3L));
     }
 }
