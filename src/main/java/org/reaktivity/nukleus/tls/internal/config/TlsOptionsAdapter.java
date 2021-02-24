@@ -40,6 +40,9 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
     private static final String SNI_NAME = "sni";
     private static final String ALPN_NAME = "alpn";
     private static final String MUTUAL_NAME = "mutual";
+    private static final String CERTIFICATE_NAME = "certificate";
+
+    private final TlsCertificateAdapter certificate = new TlsCertificateAdapter();
 
     @Override
     public String type()
@@ -91,6 +94,11 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
             object.add(MUTUAL_NAME, mutual);
         }
 
+        if (tlsOptions.certificate != null)
+        {
+            object.add(CERTIFICATE_NAME, certificate.adaptToJson(tlsOptions.certificate));
+        }
+
         return object.build();
     }
 
@@ -116,8 +124,11 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
         TlsMutual mutual = object.containsKey(MUTUAL_NAME)
                 ? TlsMutual.valueOf(object.getString(MUTUAL_NAME).toUpperCase())
                 : null;
+        TlsCertificate cert = object.containsKey(CERTIFICATE_NAME)
+                ? certificate.adaptFromJson(object.getJsonObject(CERTIFICATE_NAME))
+                : null;
 
-        return new TlsOptions(version, keys, trust, sni, alpn, mutual);
+        return new TlsOptions(version, keys, trust, sni, alpn, mutual, cert);
     }
 
     private static List<String> asListString(

@@ -13,23 +13,27 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  */
-package org.reaktivity.nukleus.tls.internal.vault.config;
+package org.reaktivity.nukleus.tls.internal.config;
 
-import org.reaktivity.reaktor.config.Options;
+import java.time.Duration;
+import java.util.List;
 
-public class FileSystemOptions extends Options
+public class TlsCertificate
 {
-    public final FileSystemStore keys;
-    public final FileSystemStore trust;
-    public final FileSystemStore signers;
+    public final Duration validity;
+    public final String subject;
+    public final List<String> alternatives;
+    public final List<String> signers;
 
-    public FileSystemOptions(
-        FileSystemStore keys,
-        FileSystemStore trust,
-        FileSystemStore signers)
+    public TlsCertificate(
+        Duration validity,
+        String subject,
+        List<String> alternatives,
+        List<String> signers)
     {
-        this.keys = keys;
-        this.trust = trust;
+        this.validity = validity;
+        this.subject = subject;
+        this.alternatives = alternatives;
         this.signers = signers;
     }
 }

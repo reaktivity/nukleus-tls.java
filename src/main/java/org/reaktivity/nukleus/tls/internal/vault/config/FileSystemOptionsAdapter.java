@@ -28,6 +28,7 @@ public final class FileSystemOptionsAdapter implements OptionsAdapterSpi, JsonbA
 {
     private static final String KEYS_NAME = "keys";
     private static final String TRUST_NAME = "trust";
+    private static final String SIGNERS_NAME = "signers";
 
     private final FileSystemStoreAdapter store = new FileSystemStoreAdapter();
 
@@ -74,7 +75,10 @@ public final class FileSystemOptionsAdapter implements OptionsAdapterSpi, JsonbA
         FileSystemStore trust = object.containsKey(TRUST_NAME)
                 ? store.adaptFromJson(object.getJsonObject(TRUST_NAME))
                 : null;
+        FileSystemStore signers = object.containsKey(SIGNERS_NAME)
+                ? store.adaptFromJson(object.getJsonObject(SIGNERS_NAME))
+                : null;
 
-        return new FileSystemOptions(keys, trust);
+        return new FileSystemOptions(keys, trust, signers);
     }
 }

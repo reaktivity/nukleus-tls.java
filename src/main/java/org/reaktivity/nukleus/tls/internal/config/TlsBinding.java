@@ -38,6 +38,7 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 
 import org.agrona.LangUtil;
+import org.reaktivity.nukleus.tls.internal.signer.TlsX509ExtendedKeyManager;
 import org.reaktivity.nukleus.tls.internal.types.Array32FW;
 import org.reaktivity.nukleus.tls.internal.types.ProxyInfoFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ProxyBeginExFW;
@@ -87,6 +88,22 @@ public final class TlsBinding
                 KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(keyManagerAlgorithm);
                 keyManagerFactory.init(keys, keysPass);
                 keyManagers = keyManagerFactory.getKeyManagers();
+            }
+
+            if (options.certificate != null)
+            {
+                if (keyManagers != null)
+                {
+                    KeyManager[] keyManagersEx = new KeyManager[keyManagers.length + 1];
+                    System.arraycopy(keyManagers, 0, keyManagersEx, 0, keyManagers.length);
+                    keyManagers = keyManagersEx;
+                }
+                else
+                {
+                    keyManagers = new KeyManager[1];
+                }
+
+                keyManagers[keyManagers.length - 1] = new TlsX509ExtendedKeyManager(vault, options.certificate);
             }
 
             TrustManager[] trustManagers = null;
