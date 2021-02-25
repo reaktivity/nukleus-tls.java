@@ -17,7 +17,6 @@ package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
-import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_WINDOW_BYTES_NAME;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -27,6 +26,7 @@ import org.junit.rules.Timeout;
 import org.kaazing.k3po.junit.annotation.ScriptProperty;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
+import org.reaktivity.nukleus.tls.internal.TlsConfigurationTest;
 import org.reaktivity.reaktor.test.ReaktorRule;
 import org.reaktivity.reaktor.test.annotation.Configuration;
 import org.reaktivity.reaktor.test.annotation.Configure;
@@ -56,7 +56,7 @@ public class ClientFragmentedIT
     @Specification({
         "${app}/connection.established/client",
         "${net}/connection.established/server" })
-    @Configure(name = TLS_HANDSHAKE_WINDOW_BYTES_NAME, value = "8")
+    @Configure(name = TlsConfigurationTest.TLS_HANDSHAKE_WINDOW_BYTES_NAME, value = "8")
     public void shouldEstablishConnectionWithLimitedHandshakeWindow() throws Exception
     {
         k3po.finish();

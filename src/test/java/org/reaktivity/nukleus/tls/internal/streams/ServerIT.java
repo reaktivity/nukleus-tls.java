@@ -17,7 +17,7 @@ package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.rules.RuleChain.outerRule;
-import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_TIMEOUT_NAME;
+import static org.reaktivity.nukleus.tls.internal.TlsConfigurationTest.REAKTOR_TASK_PARALLELISM_NAME;
 
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -27,6 +27,7 @@ import org.junit.rules.TestRule;
 import org.junit.rules.Timeout;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
+import org.reaktivity.nukleus.tls.internal.TlsConfigurationTest;
 import org.reaktivity.reaktor.ReaktorConfiguration;
 import org.reaktivity.reaktor.test.ReaktorRule;
 import org.reaktivity.reaktor.test.annotation.Configuration;
@@ -227,6 +228,7 @@ public class ServerIT
     @Specification({
         "${net}/client.sent.write.abort/client",
         "${app}/client.sent.write.abort/server"})
+    @Configure(name = REAKTOR_TASK_PARALLELISM_NAME, value = "0")
     public void shouldReceiveClientSentWriteAbort() throws Exception
     {
         k3po.finish();
@@ -256,6 +258,7 @@ public class ServerIT
     @Specification({
         "${net}/client.sent.read.abort/client",
         "${app}/client.sent.read.abort/server"})
+    @Configure(name = REAKTOR_TASK_PARALLELISM_NAME, value = "0")
     public void shouldReceiveClientSentReadAbort() throws Exception
     {
         k3po.finish();
@@ -266,6 +269,26 @@ public class ServerIT
     @Specification({
         "${net}/client.hello.malformed/client"})
     public void shouldResetMalformedClientHello() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Configuration("server.mutual.json")
+    @Specification({
+        "${net}/server.want.auth/client",
+        "${app}/server.want.auth/server"})
+    public void serverNeedClientAuth() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Configuration("server.mutual.signer.json")
+    @Specification({
+        "${net}/server.want.auth/client",
+        "${app}/server.want.auth/server"})
+    public void serverNeedClientAuthWithSigner() throws Exception
     {
         k3po.finish();
     }
@@ -284,7 +307,7 @@ public class ServerIT
     @Configuration("server.json")
     @Specification({
         "${net}/server.handshake.timeout/client"})
-    @Configure(name = TLS_HANDSHAKE_TIMEOUT_NAME, value = "1")
+    @Configure(name = TlsConfigurationTest.TLS_HANDSHAKE_TIMEOUT_NAME, value = "1")
     public void shouldTimeoutHandshake() throws Exception
     {
         k3po.finish();

@@ -17,18 +17,22 @@ package org.reaktivity.nukleus.tls.internal;
 
 import static org.junit.Assert.assertEquals;
 import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_TIMEOUT;
-import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_TIMEOUT_NAME;
 import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_WINDOW_BYTES;
-import static org.reaktivity.nukleus.tls.internal.TlsConfiguration.TLS_HANDSHAKE_WINDOW_BYTES_NAME;
+import static org.reaktivity.reaktor.ReaktorConfiguration.REAKTOR_TASK_PARALLELISM;
 
 import org.junit.Test;
 
 public class TlsConfigurationTest
 {
+    public static final String TLS_HANDSHAKE_WINDOW_BYTES_NAME = "nukleus.tls.handshake.window.bytes";
+    public static final String TLS_HANDSHAKE_TIMEOUT_NAME = "nukleus.tls.handshake.timeout";
+    public static final String REAKTOR_TASK_PARALLELISM_NAME = "reaktor.task.parallelism";
+
     @Test
     public void shouldVerifyConstants() throws Exception
     {
         assertEquals(TLS_HANDSHAKE_WINDOW_BYTES.name(), TLS_HANDSHAKE_WINDOW_BYTES_NAME);
         assertEquals(TLS_HANDSHAKE_TIMEOUT.name(), TLS_HANDSHAKE_TIMEOUT_NAME);
+        assertEquals(REAKTOR_TASK_PARALLELISM.name(), REAKTOR_TASK_PARALLELISM_NAME);
     }
 }

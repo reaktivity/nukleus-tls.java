@@ -1223,7 +1223,7 @@ public final class TlsServerFactory implements TlsStreamFactory
         private void onNetSignalHandshakeTaskComplete(
             SignalFW signal)
         {
-            assert handshakeTaskFutureId != NO_CANCEL_ID;
+            //assert handshakeTaskFutureId != NO_CANCEL_ID;
 
             handshakeTaskFutureId = NO_CANCEL_ID;
 
