@@ -37,6 +37,7 @@ import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SNIServerName;
 import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLSession;
 import javax.net.ssl.X509ExtendedKeyManager;
 import javax.net.ssl.X509KeyManager;
 
@@ -46,6 +47,8 @@ import org.reaktivity.reaktor.nukleus.vault.BindingVault;
 
 public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager implements X509KeyManager
 {
+    public static final String DISTINGUISHED_NAME_KEY = "distinguished.name";
+
     private static final Map<String, String> SIG_TYPES_BY_KEY_TYPES;
 
     static
@@ -106,11 +109,42 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
 
     @Override
     public String chooseEngineClientAlias(
-        String[] keyType,
+        String[] keyTypes,
         Principal[] issuers,
         SSLEngine engine)
     {
-        return null;
+        String alias = null;
+
+        SSLSession session = engine.getSession();
+        String dname = (String) session.getValue(DISTINGUISHED_NAME_KEY);
+
+        if (dname != null)
+        {
+            loop:
+            for (String keyType : keyTypes)
+            {
+                String candidate = String.format("%s/%s", dname, keyType);
+
+                if (!cache.containsKey(candidate))
+                {
+                    TlsCacheEntry entry = cacheEntry(keyType, dname, null);
+
+                    if (entry != null)
+                    {
+                        cache.put(candidate, entry);
+                    }
+                }
+
+                if (cache.containsKey(candidate))
+                {
+                    alias = candidate;
+                    break loop;
+                }
+
+            }
+        }
+
+        return alias;
     }
 
     @Override
@@ -123,7 +157,7 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
 
         ExtendedSSLSession session = (ExtendedSSLSession) engine.getHandshakeSession();
 
-        sni:
+        loop:
         for (SNIServerName serverName : session.getRequestedServerNames())
         {
             if (serverName.getType() == SNI_HOST_NAME)
@@ -134,7 +168,8 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
 
                 if (!cache.containsKey(candidate))
                 {
-                    TlsCacheEntry entry = cacheEntry(keyType, asciiName);
+                    String dname = String.format("CN=%s", asciiName);
+                    TlsCacheEntry entry = cacheEntry(keyType, dname, asciiName);
 
                     if (entry != null)
                     {
@@ -145,7 +180,7 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
                 if (cache.containsKey(candidate))
                 {
                     alias = candidate;
-                    break sni;
+                    break loop;
                 }
             }
         }
@@ -171,13 +206,9 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
 
     private TlsCacheEntry cacheEntry(
         String keyType,
+        String dname,
         String serverName)
     {
-        if (!"RSA".equals(keyType))
-        {
-            return null;
-        }
-
         String sigType = SIG_TYPES_BY_KEY_TYPES.get(keyType);
         KeyPairGenerator generator = supplyGenerator(keyType);
         KeyPair pair = generator.generateKeyPair();
@@ -185,11 +216,12 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
         X509Certificate[] chain = null;
         if (sigType != null)
         {
-            String dname = String.format("CN=%s", serverName);
             Instant notBefore = Instant.now().minus(Duration.ofSeconds(5));
             Instant notAfter = notBefore.plus(certificate.validity);
             String signer = certificate.signers != null && !certificate.signers.isEmpty() ? certificate.signers.get(0) : null;
-            List<String> subjects = certificate.alternatives != null ? certificate.alternatives : singletonList(serverName);
+            List<String> subjects = certificate.alternatives != null
+                    ? certificate.alternatives
+                    : serverName != null ? singletonList(serverName) : null;
 
             chain = vault.sign(signer, pair.getPublic(), dname, notBefore, notAfter, subjects, sigType);
         }

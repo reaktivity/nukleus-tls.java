@@ -18,8 +18,11 @@ package org.reaktivity.nukleus.tls.internal.config;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
 import static javax.net.ssl.StandardConstants.SNI_HOST_NAME;
+import static org.reaktivity.nukleus.tls.internal.signer.TlsX509ExtendedKeyManager.DISTINGUISHED_NAME_KEY;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.ALPN;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.AUTHORITY;
+import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.SECURE;
+import static org.reaktivity.nukleus.tls.internal.types.ProxySecureInfoType.NAME;
 
 import java.security.KeyStore;
 import java.security.SecureRandom;
@@ -218,6 +221,27 @@ public final class TlsBinding
             }
 
             engine.setSSLParameters(parameters);
+
+            if (options.certificate != null)
+            {
+                SSLSession session = engine.getSession();
+
+                String dname = options.certificate.subject;
+
+                if (dname == null)
+                {
+                    ProxyInfoFW info = beginEx.infos().matchFirst(a -> a.kind() == SECURE && a.secure().kind() == NAME);
+                    if (info != null)
+                    {
+                        dname = info.secure().name().asString();
+                    }
+                }
+
+                if (dname != null)
+                {
+                    session.putValue(DISTINGUISHED_NAME_KEY, dname);
+                }
+            }
         }
 
         return engine;

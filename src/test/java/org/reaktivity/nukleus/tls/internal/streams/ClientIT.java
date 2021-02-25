@@ -75,6 +75,16 @@ public class ClientIT
     }
 
     @Test
+    @Configuration("client.mutual.signer.json")
+    @Specification({
+        "${app}/client.auth/client",
+        "${net}/client.auth/server" })
+    public void shouldEstablishConnectionWithSigner() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
     @Configuration("client.json")
     @Specification({
         "${app}/connection.established.with.extension.data/client",
