@@ -15,6 +15,7 @@
  */
 package org.reaktivity.nukleus.tls.internal.vault;
 
+import static java.util.Collections.unmodifiableMap;
 import static java.util.stream.Collectors.toList;
 import static org.bouncycastle.asn1.x509.Extension.authorityKeyIdentifier;
 import static org.bouncycastle.asn1.x509.Extension.keyUsage;
@@ -42,7 +43,9 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.function.Function;
 
 import javax.security.auth.x500.X500Principal;
@@ -70,6 +73,17 @@ import org.reaktivity.reaktor.nukleus.vault.BindingVault;
 public class FileSystemVault implements BindingVault
 {
     private static final String TYPE_DEFAULT = "PKCS12";
+
+    private static final Map<String, String> SIG_TYPES_BY_KEY_TYPES;
+
+    static
+    {
+        Map<String, String> sigAlgsByKeyAlgs = new TreeMap<>(String::compareToIgnoreCase);
+        sigAlgsByKeyAlgs.put("EC", "SHA256withECDSA");
+        sigAlgsByKeyAlgs.put("RSA", "SHA256WithRSA");
+        sigAlgsByKeyAlgs.put("DSA", "SHA1WithDSA");
+        SIG_TYPES_BY_KEY_TYPES = unmodifiableMap(sigAlgsByKeyAlgs);
+    }
 
     private final Function<String, KeyStore.Entry> lookupKey;
     private final Function<String, KeyStore.Entry> lookupTrust;
@@ -114,14 +128,20 @@ public class FileSystemVault implements BindingVault
         String distinguishedName,
         Instant notBefore,
         Instant notAfter,
-        List<String> subjectNames,
-        String signatureAlg)
+        List<String> subjectNames)
     {
         X509Certificate[] chain = null;
 
         sign:
         try
         {
+            String keyType = publicKey.getAlgorithm();
+            String sigType = SIG_TYPES_BY_KEY_TYPES.get(keyType);
+            if (sigType == null)
+            {
+                break sign;
+            }
+
             X509Certificate signerCert = lookupSignerCert.apply(signerAlias);
             PrivateKey signerKey = lookupSignerKey.apply(signerAlias);
 
@@ -141,7 +161,7 @@ public class FileSystemVault implements BindingVault
             X500Name issuer = new X500Name(RFC4519Style.INSTANCE, issuerX500.getName());
             X500Name dnameX500 = new X500Name(RFC4519Style.INSTANCE, distinguishedName);
 
-            ContentSigner signer = new JcaContentSignerBuilder(signatureAlg)
+            ContentSigner signer = new JcaContentSignerBuilder(sigType)
                 .setProvider(provider)
                 .setSecureRandom(random)
                 .build(signerKey);

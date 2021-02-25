@@ -209,20 +209,15 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
         String dname,
         String serverName)
     {
-        String sigType = SIG_TYPES_BY_KEY_TYPES.get(keyType);
         KeyPairGenerator generator = supplyGenerator(keyType);
         KeyPair pair = generator.generateKeyPair();
 
-        X509Certificate[] chain = null;
-        if (sigType != null)
-        {
-            Instant notBefore = Instant.now().minus(Duration.ofSeconds(5));
-            Instant notAfter = notBefore.plus(certificate.validity);
-            String signer = certificate.signers != null && !certificate.signers.isEmpty() ? certificate.signers.get(0) : null;
-            List<String> subjects = serverName != null ? singletonList(serverName) : null;
+        Instant notBefore = Instant.now().minus(Duration.ofSeconds(5));
+        Instant notAfter = notBefore.plus(certificate.validity);
+        String signer = certificate.signers != null && !certificate.signers.isEmpty() ? certificate.signers.get(0) : null;
+        List<String> subjects = serverName != null ? singletonList(serverName) : null;
 
-            chain = vault.sign(signer, pair.getPublic(), dname, notBefore, notAfter, subjects, sigType);
-        }
+        X509Certificate[] chain = vault.sign(signer, pair.getPublic(), dname, notBefore, notAfter, subjects);
 
         TlsCacheEntry entry = null;
         if (chain != null)
