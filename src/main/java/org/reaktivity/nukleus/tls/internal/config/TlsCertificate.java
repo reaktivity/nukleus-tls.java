@@ -21,19 +21,13 @@ import java.util.List;
 public class TlsCertificate
 {
     public final Duration validity;
-    public final String subject;
-    public final List<String> alternatives;
     public final List<String> signers;
 
     public TlsCertificate(
         Duration validity,
-        String subject,
-        List<String> alternatives,
         List<String> signers)
     {
         this.validity = validity;
-        this.subject = subject;
-        this.alternatives = alternatives;
         this.signers = signers;
     }
 }

@@ -226,15 +226,12 @@ public final class TlsBinding
             {
                 SSLSession session = engine.getSession();
 
-                String dname = options.certificate.subject;
+                String dname = null;
 
-                if (dname == null)
+                ProxyInfoFW info = beginEx.infos().matchFirst(a -> a.kind() == SECURE && a.secure().kind() == NAME);
+                if (info != null)
                 {
-                    ProxyInfoFW info = beginEx.infos().matchFirst(a -> a.kind() == SECURE && a.secure().kind() == NAME);
-                    if (info != null)
-                    {
-                        dname = info.secure().name().asString();
-                    }
+                    dname = info.secure().name().asString();
                 }
 
                 if (dname != null)

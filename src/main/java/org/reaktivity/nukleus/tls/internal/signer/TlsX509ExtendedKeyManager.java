@@ -219,9 +219,7 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
             Instant notBefore = Instant.now().minus(Duration.ofSeconds(5));
             Instant notAfter = notBefore.plus(certificate.validity);
             String signer = certificate.signers != null && !certificate.signers.isEmpty() ? certificate.signers.get(0) : null;
-            List<String> subjects = certificate.alternatives != null
-                    ? certificate.alternatives
-                    : serverName != null ? singletonList(serverName) : null;
+            List<String> subjects = serverName != null ? singletonList(serverName) : null;
 
             chain = vault.sign(signer, pair.getPublic(), dname, notBefore, notAfter, subjects, sigType);
         }

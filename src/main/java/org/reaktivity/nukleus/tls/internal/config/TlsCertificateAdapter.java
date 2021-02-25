@@ -32,8 +32,6 @@ import javax.json.bind.adapter.JsonbAdapter;
 public final class TlsCertificateAdapter implements JsonbAdapter<TlsCertificate, JsonObject>
 {
     private static final String VALIDITY_NAME = "validity";
-    private static final String SUBJECT_NAME = "subject";
-    private static final String ALTERNATIVES_NAME = "alternatives";
     private static final String SIGNERS_NAME = "signers";
 
     @Override
@@ -45,18 +43,6 @@ public final class TlsCertificateAdapter implements JsonbAdapter<TlsCertificate,
         if (certificate.validity != null)
         {
             object.add(VALIDITY_NAME, certificate.validity.toDays());
-        }
-
-        if (certificate.subject != null)
-        {
-            object.add(SUBJECT_NAME, certificate.subject);
-        }
-
-        if (certificate.alternatives != null)
-        {
-            JsonArrayBuilder alternatives = Json.createArrayBuilder();
-            certificate.alternatives.forEach(alternatives::add);
-            object.add(ALTERNATIVES_NAME, alternatives);
         }
 
         if (certificate.signers != null)
@@ -76,17 +62,11 @@ public final class TlsCertificateAdapter implements JsonbAdapter<TlsCertificate,
         Duration validity = object.containsKey(VALIDITY_NAME)
                 ? Duration.ofDays(object.getInt(VALIDITY_NAME))
                 : null;
-        String subject = object.containsKey(SUBJECT_NAME)
-                ? object.getString(SUBJECT_NAME)
-                : null;
-        List<String> alternatives = object.containsKey(ALTERNATIVES_NAME)
-                ? asListString(object.getJsonArray(ALTERNATIVES_NAME))
-                : null;
         List<String> signers = object.containsKey(SIGNERS_NAME)
                 ? asListString(object.getJsonArray(SIGNERS_NAME))
                 : null;
 
-        return new TlsCertificate(validity, subject, alternatives, signers);
+        return new TlsCertificate(validity, signers);
     }
 
     private static List<String> asListString(
