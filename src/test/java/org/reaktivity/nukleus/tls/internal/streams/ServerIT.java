@@ -64,11 +64,11 @@ public class ServerIT
     }
 
     @Test
-    @Configuration("server.json")
+    @Configuration("server.signer.json")
     @Specification({
         "${net}/connection.established/client",
         "${app}/connection.established/server" })
-    public void shouldEstablishConnectionDefaultStore() throws Exception
+    public void shouldEstablishConnectionWithSigner() throws Exception
     {
         k3po.finish();
     }

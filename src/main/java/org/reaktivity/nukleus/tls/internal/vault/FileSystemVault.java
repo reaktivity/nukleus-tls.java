@@ -17,11 +17,11 @@ package org.reaktivity.nukleus.tls.internal.vault;
 
 import static java.util.stream.Collectors.toList;
 import static org.bouncycastle.asn1.x509.Extension.authorityKeyIdentifier;
-import static org.bouncycastle.asn1.x509.Extension.basicConstraints;
 import static org.bouncycastle.asn1.x509.Extension.keyUsage;
 import static org.bouncycastle.asn1.x509.Extension.subjectAlternativeName;
 import static org.bouncycastle.asn1.x509.Extension.subjectKeyIdentifier;
 import static org.bouncycastle.asn1.x509.GeneralName.dNSName;
+import static org.bouncycastle.asn1.x509.KeyUsage.digitalSignature;
 import static org.bouncycastle.asn1.x509.KeyUsage.keyEncipherment;
 
 import java.io.ByteArrayInputStream;
@@ -51,7 +51,7 @@ import org.agrona.LangUtil;
 import org.bouncycastle.asn1.ASN1Encodable;
 import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.x500.X500Name;
-import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x500.style.RFC4519Style;
 import org.bouncycastle.asn1.x509.GeneralName;
 import org.bouncycastle.asn1.x509.KeyUsage;
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
@@ -108,7 +108,7 @@ public class FileSystemVault implements BindingVault
     }
 
     @Override
-    public X509Certificate sign(
+    public X509Certificate[] sign(
         String signerAlias,
         PublicKey publicKey,
         String distinguishedName,
@@ -117,7 +117,7 @@ public class FileSystemVault implements BindingVault
         List<String> subjectNames,
         String signatureAlg)
     {
-        X509Certificate signed = null;
+        X509Certificate[] chain = null;
 
         sign:
         try
@@ -130,10 +130,7 @@ public class FileSystemVault implements BindingVault
                 break sign;
             }
 
-            if (provider == null)
-            {
-                provider = new BouncyCastleProvider();
-            }
+            Provider provider = provider();
 
             if (factory == null)
             {
@@ -141,11 +138,12 @@ public class FileSystemVault implements BindingVault
             }
 
             X500Principal issuerX500 = signerCert.getIssuerX500Principal();
-            X500Name issuer = new X500Name(issuerX500.getName());
-            X500Name dnameX500 = new X500Name(distinguishedName);
+            X500Name issuer = new X500Name(RFC4519Style.INSTANCE, issuerX500.getName());
+            X500Name dnameX500 = new X500Name(RFC4519Style.INSTANCE, distinguishedName);
 
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlg)
                 .setProvider(provider)
+                .setSecureRandom(random)
                 .build(signerKey);
             SubjectPublicKeyInfo publicKeyInfo =
                 new JcaPKCS10CertificationRequestBuilder(dnameX500, publicKey)
@@ -161,12 +159,10 @@ public class FileSystemVault implements BindingVault
                         Date.from(notAfter),
                         dnameX500,
                         publicKeyInfo)
-                    .addExtension(basicConstraints, true, new BasicConstraints(false))
                     .addExtension(authorityKeyIdentifier, false, utils.createAuthorityKeyIdentifier(signerCert))
-                    .addExtension(subjectKeyIdentifier, false, utils.createSubjectKeyIdentifier(publicKeyInfo))
-                    .addExtension(keyUsage, false, new KeyUsage(keyEncipherment));
+                    .addExtension(keyUsage, true, new KeyUsage(digitalSignature | keyEncipherment));
 
-            if (!subjectNames.isEmpty())
+            if (subjectNames != null && !subjectNames.isEmpty())
             {
                 List<ASN1Encodable> encodableNames = subjectNames.stream()
                     .map(n -> new GeneralName(dNSName, n))
@@ -178,22 +174,36 @@ public class FileSystemVault implements BindingVault
                 builder.addExtension(subjectAlternativeName, false, new DERSequence(encodableArray));
             }
 
-            X509CertificateHolder holder = builder.build(signer);
+            X509CertificateHolder holder = builder
+                    .addExtension(subjectKeyIdentifier, false, utils.createSubjectKeyIdentifier(publicKeyInfo))
+                    .build(signer);
             X509Certificate issued = new JcaX509CertificateConverter()
                 .setProvider(provider)
                 .getCertificate(holder);
 
             InputStream encoded = new ByteArrayInputStream(issued.getEncoded());
-            signed = (X509Certificate) factory.generateCertificate(encoded);
+            X509Certificate signedCert = (X509Certificate) factory.generateCertificate(encoded);
 
-            signed.verify(signerCert.getPublicKey());
+            signedCert.verify(signerCert.getPublicKey());
+
+            chain = new X509Certificate[] { issued, signerCert };
         }
         catch (Exception ex)
         {
             // sign failed
         }
 
-        return signed;
+        return chain;
+    }
+
+    private Provider provider()
+    {
+        if (provider == null)
+        {
+            provider = new BouncyCastleProvider();
+        }
+
+        return provider;
     }
 
     private KeyStore newStore(
