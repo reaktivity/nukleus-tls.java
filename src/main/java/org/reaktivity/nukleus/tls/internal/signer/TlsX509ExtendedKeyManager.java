@@ -16,7 +16,6 @@
 package org.reaktivity.nukleus.tls.internal.signer;
 
 import static java.util.Collections.singletonList;
-import static java.util.Collections.unmodifiableMap;
 import static javax.net.ssl.StandardConstants.SNI_HOST_NAME;
 
 import java.net.Socket;
@@ -31,7 +30,6 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SNIHostName;
@@ -48,17 +46,6 @@ import org.reaktivity.reaktor.nukleus.vault.BindingVault;
 public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager implements X509KeyManager
 {
     public static final String DISTINGUISHED_NAME_KEY = "distinguished.name";
-
-    private static final Map<String, String> SIG_TYPES_BY_KEY_TYPES;
-
-    static
-    {
-        Map<String, String> sigAlgsByKeyAlgs = new TreeMap<>(String::compareToIgnoreCase);
-        sigAlgsByKeyAlgs.put("EC", "SHA256withECDSA");
-        sigAlgsByKeyAlgs.put("RSA", "SHA256WithRSA");
-        sigAlgsByKeyAlgs.put("DSA", "SHA1WithDSA");
-        SIG_TYPES_BY_KEY_TYPES = unmodifiableMap(sigAlgsByKeyAlgs);
-    }
 
     private final BindingVault vault;
     private final TlsCertificate certificate;
