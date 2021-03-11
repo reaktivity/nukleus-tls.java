@@ -33,7 +33,6 @@ import java.net.URLConnection;
 import java.security.Key;
 import java.security.KeyStore;
 import java.security.PrivateKey;
-import java.security.Provider;
 import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.cert.Certificate;
@@ -62,7 +61,6 @@ import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
@@ -90,8 +88,6 @@ public class FileSystemVault implements BindingVault
     private final Function<String, X509Certificate> lookupSignerCert;
     private final Function<String, PrivateKey> lookupSignerKey;
     private final SecureRandom random;
-
-    private Provider provider;
 
     private CertificateFactory factory;
 
@@ -150,8 +146,6 @@ public class FileSystemVault implements BindingVault
                 break sign;
             }
 
-            Provider provider = provider();
-
             if (factory == null)
             {
                 factory = CertificateFactory.getInstance("X509");
@@ -162,7 +156,6 @@ public class FileSystemVault implements BindingVault
             X500Name dnameX500 = new X500Name(RFC4519Style.INSTANCE, distinguishedName);
 
             ContentSigner signer = new JcaContentSignerBuilder(sigType)
-                .setProvider(provider)
                 .setSecureRandom(random)
                 .build(signerKey);
             SubjectPublicKeyInfo publicKeyInfo =
@@ -198,7 +191,6 @@ public class FileSystemVault implements BindingVault
                     .addExtension(subjectKeyIdentifier, false, utils.createSubjectKeyIdentifier(publicKeyInfo))
                     .build(signer);
             X509Certificate issued = new JcaX509CertificateConverter()
-                .setProvider(provider)
                 .getCertificate(holder);
 
             InputStream encoded = new ByteArrayInputStream(issued.getEncoded());
@@ -214,16 +206,6 @@ public class FileSystemVault implements BindingVault
         }
 
         return chain;
-    }
-
-    private Provider provider()
-    {
-        if (provider == null)
-        {
-            provider = new BouncyCastleProvider();
-        }
-
-        return provider;
     }
 
     private KeyStore newStore(

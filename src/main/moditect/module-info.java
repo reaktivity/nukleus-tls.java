@@ -16,6 +16,8 @@
 module org.reaktivity.nukleus.tls
 {
     requires org.reaktivity.reaktor;
+    requires org.bouncycastle.provider;
+    requires org.bouncycastle.pkix;
 
     provides org.reaktivity.reaktor.nukleus.NukleusFactorySpi
         with org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi,
