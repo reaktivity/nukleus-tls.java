@@ -18,7 +18,7 @@ package org.reaktivity.nukleus.tls.internal.config;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
 import static javax.net.ssl.StandardConstants.SNI_HOST_NAME;
-import static org.reaktivity.nukleus.tls.internal.signer.TlsX509ExtendedKeyManager.DISTINGUISHED_NAME_KEY;
+import static org.reaktivity.nukleus.tls.internal.signer.TlsX509ExtendedKeyManager.COMMON_NAME_KEY;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.ALPN;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.AUTHORITY;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.SECURE;
@@ -226,17 +226,17 @@ public final class TlsBinding
             {
                 SSLSession session = engine.getSession();
 
-                String dname = null;
+                String name = null;
 
                 ProxyInfoFW info = beginEx.infos().matchFirst(a -> a.kind() == SECURE && a.secure().kind() == NAME);
                 if (info != null)
                 {
-                    dname = info.secure().name().asString();
+                    name = info.secure().name().asString();
                 }
 
-                if (dname != null)
+                if (name != null)
                 {
-                    session.putValue(DISTINGUISHED_NAME_KEY, dname);
+                    session.putValue(COMMON_NAME_KEY, name);
                 }
             }
         }
@@ -295,6 +295,15 @@ public final class TlsBinding
 
         String selected = null;
 
+        for (String protocol : protocols)
+        {
+            if (alpn != null && alpn.contains(protocol))
+            {
+                selected = protocol;
+                break;
+            }
+        }
+
         if (serverNames != null)
         {
             for (SNIServerName serverName : serverNames)
@@ -324,6 +333,25 @@ public final class TlsBinding
                                 break;
                             }
                         }
+                    }
+                }
+            }
+        }
+        else
+        {
+            for (TlsRoute route : routes)
+            {
+                for (String protocol : protocols)
+                {
+                    if (alpn != null && !alpn.contains(protocol))
+                    {
+                        continue;
+                    }
+
+                    if (route.when.stream().anyMatch(m -> m.matches(null, protocol)))
+                    {
+                        selected = protocol;
+                        break;
                     }
                 }
             }

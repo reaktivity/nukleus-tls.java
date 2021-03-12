@@ -17,7 +17,6 @@ package org.reaktivity.nukleus.tls.internal.config;
 
 import static java.util.stream.Collectors.toList;
 import static org.reaktivity.nukleus.tls.internal.config.TlsMutual.NEEDED;
-import static org.reaktivity.nukleus.tls.internal.config.TlsMutual.WANTED;
 
 import java.util.List;
 
@@ -126,7 +125,7 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
                 : null;
         TlsMutual mutual = object.containsKey(MUTUAL_NAME)
                 ? TlsMutual.valueOf(object.getString(MUTUAL_NAME).toUpperCase())
-                : trust != null ? NEEDED : WANTED;
+                : trust != null ? NEEDED : null;
         TlsCertificate cert = object.containsKey(CERTIFICATE_NAME)
                 ? certificate.adaptFromJson(object.getJsonObject(CERTIFICATE_NAME))
                 : null;

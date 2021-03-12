@@ -45,7 +45,7 @@ import org.reaktivity.reaktor.nukleus.vault.BindingVault;
 
 public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager implements X509KeyManager
 {
-    public static final String DISTINGUISHED_NAME_KEY = "distinguished.name";
+    public static final String COMMON_NAME_KEY = "common.name";
 
     private final BindingVault vault;
     private final TlsCertificate certificate;
@@ -103,17 +103,18 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
         String alias = null;
 
         SSLSession session = engine.getSession();
-        String dname = (String) session.getValue(DISTINGUISHED_NAME_KEY);
+        String name = (String) session.getValue(COMMON_NAME_KEY);
 
-        if (dname != null)
+        if (name != null)
         {
             loop:
             for (String keyType : keyTypes)
             {
-                String candidate = String.format("%s/%s", dname, keyType);
+                String candidate = String.format("%s/%s", name, keyType);
 
                 if (!cache.containsKey(candidate))
                 {
+                    String dname = String.format("CN=%s", name);
                     TlsCacheEntry entry = cacheEntry(keyType, dname, null);
 
                     if (entry != null)

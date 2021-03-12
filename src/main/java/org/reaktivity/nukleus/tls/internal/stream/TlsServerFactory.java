@@ -22,6 +22,7 @@ import static org.reaktivity.reaktor.nukleus.buffer.BufferPool.NO_SLOT;
 import static org.reaktivity.reaktor.nukleus.concurrent.Signaler.NO_CANCEL_ID;
 
 import java.nio.ByteBuffer;
+import java.security.Principal;
 import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
@@ -31,6 +32,8 @@ import java.util.function.Consumer;
 import java.util.function.LongFunction;
 import java.util.function.LongUnaryOperator;
 import java.util.function.ToLongFunction;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SNIHostName;
@@ -123,6 +126,8 @@ public final class TlsServerFactory implements TlsStreamFactory
     private final TlsServerDecoder decodeNotHandshaking = this::decodeNotHandshaking;
     private final TlsServerDecoder decodeNotHandshakingUnwrapped = this::decodeNotHandshakingUnwrapped;
     private final TlsServerDecoder decodeIgnoreAll = this::decodeIgnoreAll;
+
+    private final Matcher matchCN = Pattern.compile("CN=([^,]*).*").matcher("");
 
     private final int proxyTypeId;
     private final Signaler signaler;
@@ -1535,6 +1540,7 @@ public final class TlsServerFactory implements TlsStreamFactory
 
             ExtendedSSLSession tlsSession = (ExtendedSSLSession) tlsEngine.getSession();
             List<SNIServerName> serverNames = tlsSession.getRequestedServerNames();
+            String name = getCommonName(tlsEngine);
             String alpn = tlsEngine.getApplicationProtocol();
 
             String tlsHostname = serverNames.stream()
@@ -1553,7 +1559,7 @@ public final class TlsServerFactory implements TlsStreamFactory
             {
                 final TlsStream stream = new TlsStream(route.id, tlsEngine);
 
-                stream.doAppBegin(traceId, tlsHostname, tlsProtocol);
+                stream.doAppBegin(traceId, tlsHostname, tlsProtocol, name);
             }
             else
             {
@@ -1952,7 +1958,8 @@ public final class TlsServerFactory implements TlsStreamFactory
             private void doAppBegin(
                 long traceId,
                 String hostname,
-                String protocol)
+                String protocol,
+                String name)
             {
                 initialSeq = TlsServer.this.initialSeq;
                 initialAck = initialSeq;
@@ -2010,6 +2017,11 @@ public final class TlsServerFactory implements TlsStreamFactory
                                                               if (hostname != null)
                                                               {
                                                                   is.item(i -> i.authority(hostname));
+                                                              }
+
+                                                              if (name != null)
+                                                              {
+                                                                  is.item(i -> i.secure(s -> s.name(name)));
                                                               }
                                                           })
                                                           .build()
@@ -2140,5 +2152,34 @@ public final class TlsServerFactory implements TlsStreamFactory
         Optional<TlsServer.TlsStream> stream)
     {
         return TlsState.initialClosed(state) && TlsState.replyClosed(state) ? NULL_STREAM : stream;
+    }
+
+    private String getCommonName(
+        SSLEngine tlsEngine)
+    {
+        String commonName = null;
+
+        if (tlsEngine.getNeedClientAuth() || tlsEngine.getWantClientAuth())
+        {
+            try
+            {
+                SSLSession tlsSession = tlsEngine.getSession();
+                Principal peer = tlsSession.getPeerPrincipal();
+                if (peer != null)
+                {
+                    String name = peer.getName();
+                    if (matchCN.reset(name).matches())
+                    {
+                        commonName = matchCN.group(1);
+                    }
+                }
+            }
+            catch (SSLPeerUnverifiedException ex)
+            {
+                // ignore
+            }
+        }
+
+        return commonName;
     }
 }
