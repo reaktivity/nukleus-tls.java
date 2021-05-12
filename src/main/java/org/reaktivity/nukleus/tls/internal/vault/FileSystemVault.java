@@ -30,16 +30,12 @@ import java.io.InputStream;
 import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLConnection;
-import java.security.Key;
 import java.security.KeyStore;
+import java.security.KeyStore.Entry;
 import java.security.PrivateKey;
-import java.security.PublicKey;
 import java.security.SecureRandom;
-import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
-import java.time.Instant;
-import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +63,7 @@ import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
 import org.reaktivity.nukleus.tls.internal.vault.config.FileSystemOptions;
 import org.reaktivity.nukleus.tls.internal.vault.config.FileSystemStore;
 import org.reaktivity.reaktor.nukleus.vault.BindingVault;
+import org.reaktivity.reaktor.nukleus.vault.CertificateRequest;
 
 public class FileSystemVault implements BindingVault
 {
@@ -77,16 +74,15 @@ public class FileSystemVault implements BindingVault
     static
     {
         Map<String, String> sigAlgsByKeyAlgs = new TreeMap<>(String::compareToIgnoreCase);
-        sigAlgsByKeyAlgs.put("EC", "SHA256withECDSA");
+        sigAlgsByKeyAlgs.put("EC", "SHA256WithECDSA");
         sigAlgsByKeyAlgs.put("RSA", "SHA256WithRSA");
         sigAlgsByKeyAlgs.put("DSA", "SHA1WithDSA");
         SIG_TYPES_BY_KEY_TYPES = unmodifiableMap(sigAlgsByKeyAlgs);
     }
 
-    private final Function<String, KeyStore.Entry> lookupKey;
-    private final Function<String, KeyStore.Entry> lookupTrust;
-    private final Function<String, X509Certificate> lookupSignerCert;
-    private final Function<String, PrivateKey> lookupSignerKey;
+    private final Function<String, KeyStore.PrivateKeyEntry> lookupKey;
+    private final Function<String, KeyStore.TrustedCertificateEntry> lookupTrust;
+    private final Function<String, KeyStore.PrivateKeyEntry> lookupSigner;
     private final SecureRandom random;
 
     private CertificateFactory factory;
@@ -95,53 +91,50 @@ public class FileSystemVault implements BindingVault
         FileSystemOptions options,
         Function<String, URL> resolvePath)
     {
-        lookupKey = supplyLookupEntry(resolvePath, options.keys);
-        lookupTrust = supplyLookupEntry(resolvePath, options.trust);
-        lookupSignerCert = supplyLookupX509Certificate(resolvePath, options.signers);
-        lookupSignerKey = supplyLookupPrivateKey(resolvePath, options.signers);
+        lookupKey = supplyLookupPrivateKeyEntry(resolvePath, options.keys);
+        lookupTrust = supplyLookupTrustedCertificateEntry(resolvePath, options.trust);
+        lookupSigner = supplyLookupPrivateKeyEntry(resolvePath, options.signers);
         random = new SecureRandom();
     }
 
     @Override
-    public KeyStore newKeys(
-        char[] password,
-        Collection<String> aliases)
+    public KeyStore.PrivateKeyEntry key(
+        String alias)
     {
-        return newStore(password, aliases, lookupKey);
+        return lookupKey.apply(alias);
     }
 
     @Override
-    public KeyStore newTrust(
-        Collection<String> aliases)
+    public KeyStore.TrustedCertificateEntry trust(
+        String alias)
     {
-        return newStore(null, aliases, lookupTrust);
+        return lookupTrust.apply(alias);
+    }
+
+    @Override
+    public String signedRef(
+        String signer,
+        String dname,
+        String keyType)
+    {
+        return null;
     }
 
     @Override
     public X509Certificate[] sign(
         String signerAlias,
-        PublicKey publicKey,
-        String distinguishedName,
-        Instant notBefore,
-        Instant notAfter,
-        List<String> subjectNames)
+        CertificateRequest request)
     {
         X509Certificate[] chain = null;
 
         sign:
         try
         {
-            String keyType = publicKey.getAlgorithm();
-            String sigType = SIG_TYPES_BY_KEY_TYPES.get(keyType);
-            if (sigType == null)
-            {
-                break sign;
-            }
+            KeyStore.PrivateKeyEntry signerEntry = lookupSigner.apply(signerAlias);
 
-            X509Certificate signerCert = lookupSignerCert.apply(signerAlias);
-            PrivateKey signerKey = lookupSignerKey.apply(signerAlias);
-
-            if (signerCert == null || signerKey == null)
+            if (signerEntry == null ||
+                signerEntry.getPrivateKey() == null ||
+                !X509Certificate.class.isInstance(signerEntry.getCertificate()))
             {
                 break sign;
             }
@@ -151,15 +144,24 @@ public class FileSystemVault implements BindingVault
                 factory = CertificateFactory.getInstance("X509");
             }
 
-            X500Principal issuerX500 = signerCert.getIssuerX500Principal();
+            PrivateKey signerKey = signerEntry.getPrivateKey();
+            X509Certificate signerX509 = (X509Certificate) signerEntry.getCertificate();
+            X500Principal issuerX500 = signerX509.getIssuerX500Principal();
             X500Name issuer = new X500Name(RFC4519Style.INSTANCE, issuerX500.getName());
-            X500Name dnameX500 = new X500Name(RFC4519Style.INSTANCE, distinguishedName);
+            X500Name dnameX500 = new X500Name(RFC4519Style.INSTANCE, request.dname);
+
+            String keyType = signerKey.getAlgorithm();
+            String sigType = SIG_TYPES_BY_KEY_TYPES.get(keyType);
+            if (sigType == null)
+            {
+                break sign;
+            }
 
             ContentSigner signer = new JcaContentSignerBuilder(sigType)
                 .setSecureRandom(random)
                 .build(signerKey);
             SubjectPublicKeyInfo publicKeyInfo =
-                new JcaPKCS10CertificationRequestBuilder(dnameX500, publicKey)
+                new JcaPKCS10CertificationRequestBuilder(dnameX500, request.publicKey)
                     .build(signer)
                     .getSubjectPublicKeyInfo();
 
@@ -168,16 +170,16 @@ public class FileSystemVault implements BindingVault
                 new X509v3CertificateBuilder(
                         issuer,
                         new BigInteger(Long.SIZE, random),
-                        Date.from(notBefore),
-                        Date.from(notAfter),
+                        Date.from(request.notBefore),
+                        Date.from(request.notAfter),
                         dnameX500,
                         publicKeyInfo)
-                    .addExtension(authorityKeyIdentifier, false, utils.createAuthorityKeyIdentifier(signerCert))
+                    .addExtension(authorityKeyIdentifier, false, utils.createAuthorityKeyIdentifier(signerX509))
                     .addExtension(keyUsage, true, new KeyUsage(digitalSignature | keyEncipherment));
 
-            if (subjectNames != null && !subjectNames.isEmpty())
+            if (request.subjectNames != null && !request.subjectNames.isEmpty())
             {
-                List<ASN1Encodable> encodableNames = subjectNames.stream()
+                List<ASN1Encodable> encodableNames = request.subjectNames.stream()
                     .map(n -> new GeneralName(dNSName, n))
                     .map(ASN1Encodable.class::cast)
                     .collect(toList());
@@ -196,9 +198,9 @@ public class FileSystemVault implements BindingVault
             InputStream encoded = new ByteArrayInputStream(issued.getEncoded());
             X509Certificate signedCert = (X509Certificate) factory.generateCertificate(encoded);
 
-            signedCert.verify(signerCert.getPublicKey());
+            signedCert.verify(signerX509.getPublicKey());
 
-            chain = new X509Certificate[] { issued, signerCert };
+            chain = new X509Certificate[] { issued, signerX509 };
         }
         catch (Exception ex)
         {
@@ -208,58 +210,18 @@ public class FileSystemVault implements BindingVault
         return chain;
     }
 
-    private KeyStore newStore(
-        char[] password,
-        Collection<String> aliases,
-        Function<String, KeyStore.Entry> lookupAlias)
-    {
-        KeyStore store = null;
-
-        try
-        {
-            if (aliases != null)
-            {
-                store = KeyStore.getInstance(TYPE_DEFAULT);
-                store.load(null, password);
-
-                for (String alias : aliases)
-                {
-                    KeyStore.Entry entry = lookupAlias.apply(alias);
-                    if (entry != null)
-                    {
-                        KeyStore.ProtectionParameter protection = new KeyStore.PasswordProtection(password);
-                        store.setEntry(alias, entry, protection);
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            LangUtil.rethrowUnchecked(ex);
-        }
-
-        return store;
-    }
-
-    private static Function<String, KeyStore.Entry> supplyLookupEntry(
+    private static Function<String, KeyStore.PrivateKeyEntry> supplyLookupPrivateKeyEntry(
         Function<String, URL> resolvePath,
         FileSystemStore aliases)
     {
-        return supplyLookupAlias(resolvePath, aliases, FileSystemVault::lookupEntry);
+        return supplyLookupAlias(resolvePath, aliases, FileSystemVault::lookupPrivateKeyEntry);
     }
 
-    private static Function<String, X509Certificate> supplyLookupX509Certificate(
+    private static Function<String, KeyStore.TrustedCertificateEntry> supplyLookupTrustedCertificateEntry(
         Function<String, URL> resolvePath,
         FileSystemStore aliases)
     {
-        return supplyLookupAlias(resolvePath, aliases, FileSystemVault::lookupX509Certificate);
-    }
-
-    private static Function<String, PrivateKey> supplyLookupPrivateKey(
-        Function<String, URL> resolvePath,
-        FileSystemStore aliases)
-    {
-        return supplyLookupAlias(resolvePath, aliases, FileSystemVault::lookupPrivateKey);
+        return supplyLookupAlias(resolvePath, aliases, FileSystemVault::lookupTrustedCertificateEntry);
     }
 
     private static <R> Function<String, R> supplyLookupAlias(
@@ -323,44 +285,24 @@ public class FileSystemVault implements BindingVault
         return entry;
     }
 
-    private static X509Certificate lookupX509Certificate(
+    private static KeyStore.PrivateKeyEntry lookupPrivateKeyEntry(
         String alias,
         KeyStore store,
         KeyStore.PasswordProtection protection)
     {
-        X509Certificate x509 = null;
+        Entry entry = lookupEntry(alias, store, protection);
 
-        try
-        {
-            Certificate certificate = store.getCertificate(alias);
-            x509 = certificate instanceof X509Certificate ? (X509Certificate) certificate : null;
-        }
-        catch (Exception ex)
-        {
-            LangUtil.rethrowUnchecked(ex);
-        }
-
-        return x509;
+        return entry instanceof KeyStore.PrivateKeyEntry ? (KeyStore.PrivateKeyEntry) entry : null;
     }
 
-    private static PrivateKey lookupPrivateKey(
+    private static KeyStore.TrustedCertificateEntry lookupTrustedCertificateEntry(
         String alias,
         KeyStore store,
         KeyStore.PasswordProtection protection)
     {
-        PrivateKey privateKey = null;
+        Entry entry = lookupEntry(alias, store, protection);
 
-        try
-        {
-            Key key = store.getKey(alias, protection.getPassword());
-            privateKey = key instanceof PrivateKey ? (PrivateKey) key : null;
-        }
-        catch (Exception ex)
-        {
-            LangUtil.rethrowUnchecked(ex);
-        }
-
-        return privateKey;
+        return entry instanceof KeyStore.TrustedCertificateEntry ? (KeyStore.TrustedCertificateEntry) entry : null;
     }
 
     @FunctionalInterface

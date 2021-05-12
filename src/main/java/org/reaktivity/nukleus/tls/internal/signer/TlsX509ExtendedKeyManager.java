@@ -21,15 +21,17 @@ import static javax.net.ssl.StandardConstants.SNI_HOST_NAME;
 import java.net.Socket;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.KeyStore.PrivateKeyEntry;
 import java.security.NoSuchAlgorithmException;
 import java.security.Principal;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
-import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.SNIHostName;
@@ -42,6 +44,7 @@ import javax.net.ssl.X509KeyManager;
 import org.agrona.LangUtil;
 import org.reaktivity.nukleus.tls.internal.config.TlsCertificate;
 import org.reaktivity.reaktor.nukleus.vault.BindingVault;
+import org.reaktivity.reaktor.nukleus.vault.CertificateRequest;
 
 public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager implements X509KeyManager
 {
@@ -49,7 +52,7 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
 
     private final BindingVault vault;
     private final TlsCertificate certificate;
-    private final Map<String, TlsCacheEntry> cache;
+    private final Map<String, KeyStore.PrivateKeyEntry> cache;
 
     public TlsX509ExtendedKeyManager(
         BindingVault vault,
@@ -65,7 +68,7 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
         String keyType,
         Principal[] issuers)
     {
-        return null;
+        return cache.keySet().toArray(String[]::new);
     }
 
     @Override
@@ -108,27 +111,31 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
         if (name != null)
         {
             loop:
-            for (String keyType : keyTypes)
+            for (String signer : certificate.signers)
             {
-                String candidate = String.format("%s/%s", name, keyType);
-
-                if (!cache.containsKey(candidate))
+                for (String keyType : keyTypes)
                 {
-                    String dname = String.format("CN=%s", name);
-                    TlsCacheEntry entry = cacheEntry(keyType, dname, null);
+                    String candidate = String.format("%s/%s", name, keyType);
 
-                    if (entry != null)
+                    if (!cache.containsKey(candidate))
                     {
-                        cache.put(candidate, entry);
+                        String dname = String.format("CN=%s", name);
+                        char[] passphrase = "generated".toCharArray();
+                        PrivateKeyEntry entry = supplyKeyEntry(signer, passphrase, keyType, dname, null);
+
+                        if (entry != null)
+                        {
+                            cache.put(candidate, entry);
+                        }
                     }
-                }
 
-                if (cache.containsKey(candidate))
-                {
-                    alias = candidate;
-                    break loop;
-                }
+                    if (cache.containsKey(candidate))
+                    {
+                        alias = candidate;
+                        break loop;
+                    }
 
+                }
             }
         }
 
@@ -156,12 +163,17 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
 
                 if (!cache.containsKey(candidate))
                 {
-                    String dname = String.format("CN=%s", asciiName);
-                    TlsCacheEntry entry = cacheEntry(keyType, dname, asciiName);
-
-                    if (entry != null)
+                    for (String signer : certificate.signers)
                     {
-                        cache.put(candidate, entry);
+                        String dname = String.format("CN=%s", asciiName);
+                        char[] passphrase = "generated".toCharArray();
+                        KeyStore.PrivateKeyEntry entry = supplyKeyEntry(signer, passphrase, keyType, dname, asciiName);
+
+                        if (entry != null)
+                        {
+                            cache.put(candidate, entry);
+                            break;
+                        }
                     }
                 }
 
@@ -180,37 +192,61 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
     public X509Certificate[] getCertificateChain(
         String alias)
     {
-        TlsCacheEntry entry = cache.get(alias);
-        return entry != null ? entry.chain : null;
+        KeyStore.PrivateKeyEntry entry = cache.get(alias);
+
+        X509Certificate[] x509s = null;
+
+        if (entry != null)
+        {
+            x509s = Arrays.asList(entry.getCertificateChain())
+                .stream()
+                .filter(X509Certificate.class::isInstance)
+                .collect(Collectors.toList())
+                .toArray(X509Certificate[]::new);
+        }
+
+        return x509s;
     }
 
     @Override
     public PrivateKey getPrivateKey(
         String alias)
     {
-        TlsCacheEntry entry = cache.get(alias);
-        return entry != null ? entry.key : null;
+        KeyStore.PrivateKeyEntry entry = cache.get(alias);
+        return entry != null ? entry.getPrivateKey() : null;
     }
 
-    private TlsCacheEntry cacheEntry(
+    private KeyStore.PrivateKeyEntry supplyKeyEntry(
+        String signerAlias,
+        char[] passphrase,
         String keyType,
         String dname,
         String serverName)
     {
-        KeyPairGenerator generator = supplyGenerator(keyType);
-        KeyPair pair = generator.generateKeyPair();
+        KeyStore.PrivateKeyEntry entry = null;
 
-        Instant notBefore = Instant.now().minus(Duration.ofSeconds(5));
-        Instant notAfter = notBefore.plus(certificate.validity);
-        String signer = certificate.signers != null && !certificate.signers.isEmpty() ? certificate.signers.get(0) : null;
-        List<String> subjects = serverName != null ? singletonList(serverName) : null;
+        String signedRef = vault.signedRef(signerAlias, dname, keyType);
 
-        X509Certificate[] chain = vault.sign(signer, pair.getPublic(), dname, notBefore, notAfter, subjects);
-
-        TlsCacheEntry entry = null;
-        if (chain != null)
+        if (signedRef != null)
         {
-            entry = new TlsCacheEntry(chain, pair.getPrivate());
+            entry = vault.key(signedRef);
+        }
+        else
+        {
+            KeyPair pair = supplyGenerator(keyType).generateKeyPair();
+            CertificateRequest request = new CertificateRequest();
+            request.publicKey = pair.getPublic();
+            request.dname = dname;
+            request.notBefore = Instant.now();
+            request.notAfter = request.notBefore.plus(certificate.validity);
+            request.subjectNames = serverName != null ? singletonList(serverName) : null;
+
+            X509Certificate[] chain = vault.sign(signerAlias, request);
+
+            if (chain != null)
+            {
+                entry = new PrivateKeyEntry(pair.getPrivate(), chain);
+            }
         }
 
         return entry;
@@ -229,19 +265,5 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
             LangUtil.rethrowUnchecked(ex);
         }
         return generator;
-    }
-
-    private static final class TlsCacheEntry
-    {
-        final X509Certificate[] chain;
-        final PrivateKey key;
-
-        private TlsCacheEntry(
-            X509Certificate[] chain,
-            PrivateKey key)
-        {
-            this.chain = chain;
-            this.key = key;
-        }
     }
 }

@@ -26,6 +26,7 @@ import static org.reaktivity.nukleus.tls.internal.types.ProxySecureInfoType.NAME
 
 import java.security.KeyStore;
 import java.security.SecureRandom;
+import java.util.Collection;
 import java.util.List;
 
 import javax.net.ssl.ExtendedSSLSession;
@@ -51,6 +52,8 @@ import org.reaktivity.reaktor.nukleus.vault.BindingVault;
 
 public final class TlsBinding
 {
+    private static final String TYPE_DEFAULT = "PKCS12";
+
     public final long id;
     public final long vaultId;
     public final String entry;
@@ -79,12 +82,11 @@ public final class TlsBinding
         SecureRandom random)
     {
         char[] keysPass = "generated".toCharArray();
-        KeyStore keys = vault.newKeys(keysPass, options.keys);
-        KeyStore trust = vault.newTrust(options.trust);
+        KeyStore keys = newKeys(vault, keysPass, options.keys);
+        KeyStore trust = newTrust(vault, options.trust);
 
         try
         {
-
             KeyManager[] keyManagers = null;
             if (keys != null)
             {
@@ -363,5 +365,64 @@ public final class TlsBinding
         }
 
         return selected;
+    }
+
+    private KeyStore newKeys(
+        BindingVault vault,
+        char[] password,
+        Collection<String> keyNames)
+    {
+        KeyStore store = null;
+
+        try
+        {
+            if (keyNames != null)
+            {
+                store = KeyStore.getInstance(TYPE_DEFAULT);
+                store.load(null, password);
+
+                for (String keyName : keyNames)
+                {
+                    KeyStore.PrivateKeyEntry entry = vault.key(keyName);
+                    KeyStore.ProtectionParameter protection = new KeyStore.PasswordProtection(password);
+                    store.setEntry(keyName, entry, protection);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LangUtil.rethrowUnchecked(ex);
+        }
+
+        return store;
+    }
+
+    private KeyStore newTrust(
+        BindingVault vault,
+        Collection<String> trustNames)
+    {
+        KeyStore store = null;
+
+        try
+        {
+            if (trustNames != null)
+            {
+                store = KeyStore.getInstance(TYPE_DEFAULT);
+                store.load(null, null);
+
+                for (String trustName : trustNames)
+                {
+                    KeyStore.TrustedCertificateEntry entry = vault.trust(trustName);
+
+                    store.setEntry(trustName, entry, null);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LangUtil.rethrowUnchecked(ex);
+        }
+
+        return store;
     }
 }
