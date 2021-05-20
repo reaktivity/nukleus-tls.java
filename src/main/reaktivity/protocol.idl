@@ -43,5 +43,13 @@ scope protocol
             uint16 length;
             octets[length] payload;
         }
+
+        struct TlsRecord
+        {
+            uint8 type;
+            TlsProtocolVersion version;
+            uint16 length;
+            octets[length] payload;
+        }
     }
 }

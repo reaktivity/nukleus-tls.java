@@ -16,12 +16,14 @@
 package org.reaktivity.nukleus.tls.internal;
 
 import static org.reaktivity.reaktor.config.Role.CLIENT;
+import static org.reaktivity.reaktor.config.Role.PROXY;
 import static org.reaktivity.reaktor.config.Role.SERVER;
 
 import java.util.EnumMap;
 import java.util.Map;
 
 import org.reaktivity.nukleus.tls.internal.stream.TlsClientFactory;
+import org.reaktivity.nukleus.tls.internal.stream.TlsProxyFactory;
 import org.reaktivity.nukleus.tls.internal.stream.TlsServerFactory;
 import org.reaktivity.nukleus.tls.internal.stream.TlsStreamFactory;
 import org.reaktivity.reaktor.config.Binding;
@@ -41,6 +43,7 @@ final class TlsElektron implements Elektron
         TlsCounters counters = new TlsCounters(context::supplyCounter, context::supplyAccumulator);
         Map<Role, TlsStreamFactory> factories = new EnumMap<>(Role.class);
         factories.put(SERVER, new TlsServerFactory(config, context, counters));
+        factories.put(PROXY, new TlsProxyFactory(config, context, counters));
         factories.put(CLIENT, new TlsClientFactory(config, context, counters));
         this.factories = factories;
     }
