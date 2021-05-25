@@ -59,7 +59,10 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
 
         JsonObjectBuilder object = Json.createObjectBuilder();
 
-        object.add(VERSION_NAME, tlsOptions.version);
+        if (tlsOptions.version != null)
+        {
+            object.add(VERSION_NAME, tlsOptions.version);
+        }
 
         if (tlsOptions.keys != null)
         {
