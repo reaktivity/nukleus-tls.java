@@ -13,24 +13,27 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  */
-package org.reaktivity.nukleus.tls.internal;
+package org.reaktivity.nukleus.tls.internal.config;
 
-import org.reaktivity.reaktor.nukleus.Configuration;
-import org.reaktivity.reaktor.nukleus.Nukleus;
-import org.reaktivity.reaktor.nukleus.NukleusFactorySpi;
+import static java.util.stream.Collectors.toList;
 
-public final class TlsNukleusFactorySpi implements NukleusFactorySpi
+import java.util.List;
+
+import org.reaktivity.reaktor.config.Options;
+import org.reaktivity.reaktor.config.Route;
+
+public final class TlsRoute extends Options
 {
-    @Override
-    public String name()
-    {
-        return TlsNukleus.NAME;
-    }
+    public final long id;
+    public List<TlsMatcher> when;
 
-    @Override
-    public Nukleus create(
-        Configuration config)
+    public TlsRoute(
+        Route route)
     {
-        return new TlsNukleus(new TlsConfiguration(config));
+        this.id = route.id;
+        this.when = route.when.stream()
+            .map(TlsCondition.class::cast)
+            .map(TlsMatcher::new)
+            .collect(toList());
     }
 }

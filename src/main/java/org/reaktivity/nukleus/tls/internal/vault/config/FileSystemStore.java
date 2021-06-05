@@ -13,24 +13,21 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  */
-package org.reaktivity.nukleus.tls.internal;
+package org.reaktivity.nukleus.tls.internal.vault.config;
 
-import org.reaktivity.reaktor.nukleus.Configuration;
-import org.reaktivity.reaktor.nukleus.Nukleus;
-import org.reaktivity.reaktor.nukleus.NukleusFactorySpi;
-
-public final class TlsNukleusFactorySpi implements NukleusFactorySpi
+public class FileSystemStore
 {
-    @Override
-    public String name()
-    {
-        return TlsNukleus.NAME;
-    }
+    public final String store;
+    public final String type;
+    public final String password;
 
-    @Override
-    public Nukleus create(
-        Configuration config)
+    public FileSystemStore(
+        String store,
+        String type,
+        String password)
     {
-        return new TlsNukleus(new TlsConfiguration(config));
+        this.store = store;
+        this.type = type;
+        this.password = password;
     }
 }

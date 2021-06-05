@@ -15,13 +15,10 @@
  */
 package org.reaktivity.nukleus.tls.internal;
 
-import org.reaktivity.nukleus.Configuration;
+import org.reaktivity.reaktor.nukleus.Configuration;
 
 public class TlsConfiguration extends Configuration
 {
-    public static final String TLS_HANDSHAKE_WINDOW_BYTES_NAME = "nukleus.tls.handshake.window.bytes";
-    public static final String TLS_HANDSHAKE_TIMEOUT_NAME = "nukleus.tls.handshake.timeout";
-
     public static final IntPropertyDef TLS_HANDSHAKE_WINDOW_BYTES;
     public static final IntPropertyDef TLS_HANDSHAKE_TIMEOUT;
     public static final PropertyDef<String> TLS_KEY_MANAGER_ALGORITHM;

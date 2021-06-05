@@ -15,43 +15,59 @@
  */
 package org.reaktivity.nukleus.tls.internal;
 
-import static org.reaktivity.nukleus.route.RouteKind.CLIENT;
-import static org.reaktivity.nukleus.route.RouteKind.SERVER;
+import static org.reaktivity.reaktor.config.Role.CLIENT;
+import static org.reaktivity.reaktor.config.Role.PROXY;
+import static org.reaktivity.reaktor.config.Role.SERVER;
 
 import java.util.EnumMap;
 import java.util.Map;
-import java.util.function.IntFunction;
 
-import org.reaktivity.nukleus.Elektron;
-import org.reaktivity.nukleus.route.RouteKind;
-import org.reaktivity.nukleus.stream.StreamFactoryBuilder;
-import org.reaktivity.nukleus.tls.internal.stream.TlsClientFactoryBuilder;
-import org.reaktivity.nukleus.tls.internal.stream.TlsServerFactoryBuilder;
+import org.reaktivity.nukleus.tls.internal.stream.TlsClientFactory;
+import org.reaktivity.nukleus.tls.internal.stream.TlsProxyFactory;
+import org.reaktivity.nukleus.tls.internal.stream.TlsServerFactory;
+import org.reaktivity.nukleus.tls.internal.stream.TlsStreamFactory;
+import org.reaktivity.reaktor.config.Binding;
+import org.reaktivity.reaktor.config.Role;
+import org.reaktivity.reaktor.nukleus.Elektron;
+import org.reaktivity.reaktor.nukleus.ElektronContext;
+import org.reaktivity.reaktor.nukleus.stream.StreamFactory;
 
 final class TlsElektron implements Elektron
 {
-    private final Map<RouteKind, StreamFactoryBuilder> streamFactoryBuilders;
+    private final Map<Role, TlsStreamFactory> factories;
 
     TlsElektron(
         TlsConfiguration config,
-        IntFunction<TlsStoreInfo> lookupStoreInfoByRouteId)
+        ElektronContext context)
     {
-        Map<RouteKind, StreamFactoryBuilder> streamFactoryBuilders = new EnumMap<>(RouteKind.class);
-        streamFactoryBuilders.put(SERVER, new TlsServerFactoryBuilder(config, lookupStoreInfoByRouteId));
-        streamFactoryBuilders.put(CLIENT, new TlsClientFactoryBuilder(config, lookupStoreInfoByRouteId));
-        this.streamFactoryBuilders = streamFactoryBuilders;
+        TlsCounters counters = new TlsCounters(context::supplyCounter, context::supplyAccumulator);
+        Map<Role, TlsStreamFactory> factories = new EnumMap<>(Role.class);
+        factories.put(SERVER, new TlsServerFactory(config, context, counters));
+        factories.put(PROXY, new TlsProxyFactory(config, context, counters));
+        factories.put(CLIENT, new TlsClientFactory(config, context, counters));
+        this.factories = factories;
     }
 
     @Override
-    public StreamFactoryBuilder streamFactoryBuilder(
-        RouteKind kind)
+    public StreamFactory attach(
+        Binding binding)
     {
-        return streamFactoryBuilders.get(kind);
+        TlsStreamFactory factory = factories.get(binding.kind);
+        if (factory != null)
+        {
+            factory.attach(binding);
+        }
+        return factory;
     }
 
     @Override
-    public String toString()
+    public void detach(
+        Binding binding)
     {
-        return String.format("%s %s", getClass().getSimpleName(), streamFactoryBuilders);
+        TlsStreamFactory factory = factories.get(binding.kind);
+        if (factory != null)
+        {
+            factory.detach(binding.id);
+        }
     }
 }
