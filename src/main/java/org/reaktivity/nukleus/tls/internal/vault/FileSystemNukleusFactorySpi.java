@@ -13,24 +13,25 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  */
-package org.reaktivity.nukleus.tls.internal;
+package org.reaktivity.nukleus.tls.internal.vault;
 
+import org.reaktivity.nukleus.tls.internal.TlsConfiguration;
 import org.reaktivity.reaktor.nukleus.Configuration;
 import org.reaktivity.reaktor.nukleus.Nukleus;
 import org.reaktivity.reaktor.nukleus.NukleusFactorySpi;
 
-public final class TlsNukleusFactorySpi implements NukleusFactorySpi
+public final class FileSystemNukleusFactorySpi implements NukleusFactorySpi
 {
     @Override
     public String name()
     {
-        return TlsNukleus.NAME;
+        return FileSystemNukleus.NAME;
     }
 
     @Override
     public Nukleus create(
         Configuration config)
     {
-        return new TlsNukleus(new TlsConfiguration(config));
+        return new FileSystemNukleus(new TlsConfiguration(config));
     }
 }

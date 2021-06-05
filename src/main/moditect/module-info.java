@@ -16,10 +16,17 @@
 module org.reaktivity.nukleus.tls
 {
     requires org.reaktivity.reaktor;
+    requires org.bouncycastle.provider;
+    requires org.bouncycastle.pkix;
 
-    provides org.reaktivity.nukleus.NukleusFactorySpi
-        with org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi;
+    provides org.reaktivity.reaktor.nukleus.NukleusFactorySpi
+        with org.reaktivity.nukleus.tls.internal.TlsNukleusFactorySpi,
+             org.reaktivity.nukleus.tls.internal.vault.FileSystemNukleusFactorySpi;
 
-    provides org.reaktivity.nukleus.ControllerFactorySpi
-        with org.reaktivity.nukleus.tls.internal.TlsControllerFactorySpi;
+    provides org.reaktivity.reaktor.config.OptionsAdapterSpi
+        with org.reaktivity.nukleus.tls.internal.config.TlsOptionsAdapter,
+             org.reaktivity.nukleus.tls.internal.vault.config.FileSystemOptionsAdapter;
+
+    provides org.reaktivity.reaktor.config.ConditionAdapterSpi
+        with org.reaktivity.nukleus.tls.internal.config.TlsConditionAdapter;
 }

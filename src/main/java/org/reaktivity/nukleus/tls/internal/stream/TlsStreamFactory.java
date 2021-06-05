@@ -13,24 +13,16 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  */
-package org.reaktivity.nukleus.tls.internal;
+package org.reaktivity.nukleus.tls.internal.stream;
 
-import org.reaktivity.reaktor.nukleus.Configuration;
-import org.reaktivity.reaktor.nukleus.Nukleus;
-import org.reaktivity.reaktor.nukleus.NukleusFactorySpi;
+import org.reaktivity.reaktor.config.Binding;
+import org.reaktivity.reaktor.nukleus.stream.StreamFactory;
 
-public final class TlsNukleusFactorySpi implements NukleusFactorySpi
+public interface TlsStreamFactory extends StreamFactory
 {
-    @Override
-    public String name()
-    {
-        return TlsNukleus.NAME;
-    }
+    void attach(
+        Binding binding);
 
-    @Override
-    public Nukleus create(
-        Configuration config)
-    {
-        return new TlsNukleus(new TlsConfiguration(config));
-    }
+    void detach(
+        long bindingId);
 }

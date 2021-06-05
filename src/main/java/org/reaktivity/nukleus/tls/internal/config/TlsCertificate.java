@@ -13,24 +13,21 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  */
-package org.reaktivity.nukleus.tls.internal;
+package org.reaktivity.nukleus.tls.internal.config;
 
-import org.reaktivity.reaktor.nukleus.Configuration;
-import org.reaktivity.reaktor.nukleus.Nukleus;
-import org.reaktivity.reaktor.nukleus.NukleusFactorySpi;
+import java.time.Duration;
+import java.util.List;
 
-public final class TlsNukleusFactorySpi implements NukleusFactorySpi
+public class TlsCertificate
 {
-    @Override
-    public String name()
-    {
-        return TlsNukleus.NAME;
-    }
+    public final Duration validity;
+    public final List<String> signers;
 
-    @Override
-    public Nukleus create(
-        Configuration config)
+    public TlsCertificate(
+        Duration validity,
+        List<String> signers)
     {
-        return new TlsNukleus(new TlsConfiguration(config));
+        this.validity = validity;
+        this.signers = signers;
     }
 }
