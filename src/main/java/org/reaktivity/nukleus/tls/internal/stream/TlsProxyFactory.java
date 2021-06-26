@@ -1213,6 +1213,12 @@ public final class TlsProxyFactory implements TlsStreamFactory
             {
                 doNetEnd(traceId);
             }
+
+            if (handshakeTimeoutFutureId != NO_CANCEL_ID)
+            {
+                signaler.cancel(handshakeTimeoutFutureId);
+                handshakeTimeoutFutureId = NO_CANCEL_ID;
+            }
         }
 
         private void cleanupNet(
