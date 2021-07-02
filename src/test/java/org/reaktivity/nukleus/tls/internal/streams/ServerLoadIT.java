@@ -18,7 +18,6 @@ package org.reaktivity.nukleus.tls.internal.streams;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.junit.rules.RuleChain.outerRule;
 
 import org.junit.Rule;
@@ -31,11 +30,11 @@ import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
 import org.reaktivity.reaktor.test.annotation.Configuration;
 
-public class ClientRouteCountersIT
+public class ServerLoadIT
 {
     private final K3poRule k3po = new K3poRule()
-            .addScriptRoot("app", "org/reaktivity/specification/nukleus/tls/streams/application")
-            .addScriptRoot("net", "org/reaktivity/specification/nukleus/tls/streams/network");
+            .addScriptRoot("net", "org/reaktivity/specification/nukleus/tls/streams/network")
+            .addScriptRoot("app", "org/reaktivity/specification/nukleus/tls/streams/application");
 
     private final TestRule timeout = new DisableOnDebug(new Timeout(10, SECONDS));
 
@@ -45,24 +44,22 @@ public class ClientRouteCountersIT
             .responseBufferCapacity(1024)
             .counterValuesBufferCapacity(8192)
             .configurationRoot("org/reaktivity/specification/nukleus/tls/config")
-            .external("net#0")
+            .external("app#0")
             .clean();
 
     @Rule
-    public final TestRule chain = outerRule(timeout).around(reaktor).around(k3po);
+    public final TestRule chain = outerRule(reaktor).around(k3po).around(timeout);
 
     @Test
-    @Configuration("client.json")
+    @Configuration("server.json")
     @Specification({
-        "${app}/echo.payload.length.10k/client",
-        "${net}/echo.payload.length.10k/server"})
+        "${net}/echo.payload.length.10k/client",
+        "${app}/echo.payload.length.10k/server"})
     public void shouldEchoPayloadLength10k() throws Exception
     {
         k3po.finish();
 
-        assertThat(reaktor.bytesWritten("default", "net#0"), greaterThan(10240L));
-        assertThat(reaktor.bytesRead("default", "net#0"), greaterThan(10240L));
-        assertThat(reaktor.framesWritten("default", "net#0"), greaterThanOrEqualTo(3L));
-        assertThat(reaktor.framesRead("default", "net#0"), greaterThanOrEqualTo(3L));
+        assertThat(reaktor.initialBytes("default", "net#0"), greaterThan(10240L));
+        assertThat(reaktor.replyBytes("default", "net#0"), greaterThan(10240L));
     }
 }
