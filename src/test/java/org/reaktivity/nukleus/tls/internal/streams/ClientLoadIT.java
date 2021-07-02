@@ -17,8 +17,7 @@ package org.reaktivity.nukleus.tls.internal.streams;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.equalTo;
 import static org.junit.rules.RuleChain.outerRule;
 
 import org.junit.Rule;
@@ -31,7 +30,7 @@ import org.kaazing.k3po.junit.rules.K3poRule;
 import org.reaktivity.reaktor.test.ReaktorRule;
 import org.reaktivity.reaktor.test.annotation.Configuration;
 
-public class ClientRouteCountersIT
+public class ClientLoadIT
 {
     private final K3poRule k3po = new K3poRule()
             .addScriptRoot("app", "org/reaktivity/specification/nukleus/tls/streams/application")
@@ -60,9 +59,7 @@ public class ClientRouteCountersIT
     {
         k3po.finish();
 
-        assertThat(reaktor.bytesWritten("default", "net#0"), greaterThan(10240L));
-        assertThat(reaktor.bytesRead("default", "net#0"), greaterThan(10240L));
-        assertThat(reaktor.framesWritten("default", "net#0"), greaterThanOrEqualTo(3L));
-        assertThat(reaktor.framesRead("default", "net#0"), greaterThanOrEqualTo(3L));
+        assertThat(reaktor.initialBytes("default", "app#0"), equalTo(10240L));
+        assertThat(reaktor.replyBytes("default", "app#0"), equalTo(10240L));
     }
 }
