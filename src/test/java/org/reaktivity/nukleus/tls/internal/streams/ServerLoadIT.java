@@ -27,6 +27,7 @@ import org.junit.rules.TestRule;
 import org.junit.rules.Timeout;
 import org.kaazing.k3po.junit.annotation.Specification;
 import org.kaazing.k3po.junit.rules.K3poRule;
+import org.reaktivity.reaktor.ReaktorLoad;
 import org.reaktivity.reaktor.test.ReaktorRule;
 import org.reaktivity.reaktor.test.annotation.Configuration;
 
@@ -59,7 +60,9 @@ public class ServerLoadIT
     {
         k3po.finish();
 
-        assertThat(reaktor.initialBytes("default", "net#0"), greaterThan(10240L));
-        assertThat(reaktor.replyBytes("default", "net#0"), greaterThan(10240L));
+        ReaktorLoad load = reaktor.load("default", "net#0");
+
+        assertThat(load.initialBytes(), greaterThan(10240L));
+        assertThat(load.replyBytes(), greaterThan(10240L));
     }
 }
