@@ -41,9 +41,8 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
     private static final String SNI_NAME = "sni";
     private static final String ALPN_NAME = "alpn";
     private static final String MUTUAL_NAME = "mutual";
-    private static final String CERTIFICATE_NAME = "certificate";
-
-    private final TlsCertificateAdapter certificate = new TlsCertificateAdapter();
+    private static final String SIGNERS_NAME = "signers";
+    private static final String TRUSTCACERTS_NAME = "trustcacerts";
 
     @Override
     public String type()
@@ -78,6 +77,11 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
             object.add(TRUST_NAME, trust);
         }
 
+        if (tlsOptions.trustcacerts)
+        {
+            object.add(TRUSTCACERTS_NAME, true);
+        }
+
         if (tlsOptions.sni != null)
         {
             JsonArrayBuilder sni = Json.createArrayBuilder();
@@ -99,9 +103,11 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
             object.add(MUTUAL_NAME, mutual);
         }
 
-        if (tlsOptions.certificate != null)
+        if (tlsOptions.signers != null)
         {
-            object.add(CERTIFICATE_NAME, certificate.adaptToJson(tlsOptions.certificate));
+            JsonArrayBuilder signers = Json.createArrayBuilder();
+            tlsOptions.signers.forEach(signers::add);
+            object.add(SIGNERS_NAME, signers);
         }
 
         return object.build();
@@ -120,6 +126,9 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
         List<String> trust = object.containsKey(TRUST_NAME)
                 ? asListString(object.getJsonArray(TRUST_NAME))
                 : null;
+        boolean trustcacerts = object.containsKey(TRUSTCACERTS_NAME)
+                ? object.getBoolean(TRUSTCACERTS_NAME)
+                : false;
         List<String> sni = object.containsKey(SNI_NAME)
                 ? asListString(object.getJsonArray(SNI_NAME))
                 : null;
@@ -129,11 +138,11 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
         TlsMutual mutual = object.containsKey(MUTUAL_NAME)
                 ? TlsMutual.valueOf(object.getString(MUTUAL_NAME).toUpperCase())
                 : trust != null ? NEEDED : null;
-        TlsCertificate cert = object.containsKey(CERTIFICATE_NAME)
-                ? certificate.adaptFromJson(object.getJsonObject(CERTIFICATE_NAME))
+        List<String> signers = object.containsKey(SIGNERS_NAME)
+                ? asListString(object.getJsonArray(SIGNERS_NAME))
                 : null;
 
-        return new TlsOptions(version, keys, trust, sni, alpn, mutual, cert);
+        return new TlsOptions(version, keys, trust, sni, alpn, mutual, signers, trustcacerts);
     }
 
     private static List<String> asListString(

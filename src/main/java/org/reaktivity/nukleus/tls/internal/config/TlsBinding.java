@@ -18,14 +18,17 @@ package org.reaktivity.nukleus.tls.internal.config;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
 import static javax.net.ssl.StandardConstants.SNI_HOST_NAME;
-import static org.reaktivity.nukleus.tls.internal.signer.TlsX509ExtendedKeyManager.COMMON_NAME_KEY;
+import static org.reaktivity.nukleus.tls.internal.identity.TlsX509ExtendedKeyManager.DISTINGUISHED_NAME_KEY;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.ALPN;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.AUTHORITY;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.SECURE;
 import static org.reaktivity.nukleus.tls.internal.types.ProxySecureInfoType.NAME;
 
 import java.security.KeyStore;
+import java.security.KeyStore.TrustedCertificateEntry;
 import java.security.SecureRandom;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.Collection;
 import java.util.List;
 
@@ -40,9 +43,11 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509ExtendedKeyManager;
+import javax.security.auth.x500.X500Principal;
 
 import org.agrona.LangUtil;
-import org.reaktivity.nukleus.tls.internal.signer.TlsX509ExtendedKeyManager;
+import org.reaktivity.nukleus.tls.internal.identity.TlsX509ExtendedKeyManager;
 import org.reaktivity.nukleus.tls.internal.types.Array32FW;
 import org.reaktivity.nukleus.tls.internal.types.ProxyInfoFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ProxyBeginExFW;
@@ -82,8 +87,8 @@ public final class TlsBinding
         SecureRandom random)
     {
         char[] keysPass = "generated".toCharArray();
-        KeyStore keys = newKeys(vault, keysPass, options.keys);
-        KeyStore trust = newTrust(vault, options.trust);
+        KeyStore keys = newKeys(vault, keysPass, options.keys, options.signers);
+        KeyStore trust = newTrust(vault, options.trust, options.trustcacerts && kind == Role.CLIENT);
 
         try
         {
@@ -93,22 +98,18 @@ public final class TlsBinding
                 KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(keyManagerAlgorithm);
                 keyManagerFactory.init(keys, keysPass);
                 keyManagers = keyManagerFactory.getKeyManagers();
-            }
 
-            if (options.certificate != null)
-            {
                 if (keyManagers != null)
                 {
-                    KeyManager[] keyManagersEx = new KeyManager[keyManagers.length + 1];
-                    System.arraycopy(keyManagers, 0, keyManagersEx, 0, keyManagers.length);
-                    keyManagers = keyManagersEx;
+                    for (int i = 0; i < keyManagers.length; i++)
+                    {
+                        if (keyManagers[i] instanceof X509ExtendedKeyManager)
+                        {
+                            X509ExtendedKeyManager keyManager = (X509ExtendedKeyManager) keyManagers[i];
+                            keyManagers[i] = new TlsX509ExtendedKeyManager(keyManager);
+                        }
+                    }
                 }
-                else
-                {
-                    keyManagers = new KeyManager[1];
-                }
-
-                keyManagers[keyManagers.length - 1] = new TlsX509ExtendedKeyManager(vault, options.certificate);
             }
 
             TrustManager[] trustManagers = null;
@@ -224,21 +225,19 @@ public final class TlsBinding
 
             engine.setSSLParameters(parameters);
 
-            if (options.certificate != null)
+            if (beginEx != null)
             {
-                SSLSession session = engine.getSession();
-
-                String name = null;
-
                 ProxyInfoFW info = beginEx.infos().matchFirst(a -> a.kind() == SECURE && a.secure().kind() == NAME);
                 if (info != null)
                 {
-                    name = info.secure().name().asString();
-                }
+                    String commonName = info.secure().name().asString();
+                    if (commonName != null)
+                    {
+                        String distinguishedName = String.format("CN=%s", commonName);
 
-                if (name != null)
-                {
-                    session.putValue(COMMON_NAME_KEY, name);
+                        SSLSession session = engine.getSession();
+                        session.putValue(DISTINGUISHED_NAME_KEY, distinguishedName);
+                    }
                 }
             }
         }
@@ -370,22 +369,53 @@ public final class TlsBinding
     private KeyStore newKeys(
         BindingVault vault,
         char[] password,
-        Collection<String> keyNames)
+        Collection<String> keyNames,
+        List<String> signerNames)
     {
         KeyStore store = null;
 
         try
         {
-            if (keyNames != null)
+            if (keyNames != null || signerNames != null)
             {
                 store = KeyStore.getInstance(TYPE_DEFAULT);
                 store.load(null, password);
+            }
+
+            if (keyNames != null)
+            {
+                assert store != null;
 
                 for (String keyName : keyNames)
                 {
                     KeyStore.PrivateKeyEntry entry = vault.key(keyName);
                     KeyStore.ProtectionParameter protection = new KeyStore.PasswordProtection(password);
                     store.setEntry(keyName, entry, protection);
+                }
+            }
+
+            if (signerNames != null)
+            {
+                assert store != null;
+
+                for (String signerName : signerNames)
+                {
+                    KeyStore.PrivateKeyEntry[] entries = vault.keys(signerName);
+                    if (entries != null)
+                    {
+                        for (KeyStore.PrivateKeyEntry entry : entries)
+                        {
+                            KeyStore.ProtectionParameter protection = new KeyStore.PasswordProtection(password);
+                            Certificate certificate = entry.getCertificate();
+                            if (certificate instanceof X509Certificate)
+                            {
+                                X509Certificate x509 = (X509Certificate) certificate;
+                                X500Principal x500 = x509.getSubjectX500Principal();
+                                String alias = String.format("%s %d", x500.getName(), x509.getSerialNumber());
+                                store.setEntry(alias, entry, protection);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -399,7 +429,8 @@ public final class TlsBinding
 
     private KeyStore newTrust(
         BindingVault vault,
-        Collection<String> trustNames)
+        Collection<String> trustNames,
+        boolean trustcacerts)
     {
         KeyStore store = null;
 
@@ -412,9 +443,23 @@ public final class TlsBinding
 
                 for (String trustName : trustNames)
                 {
-                    KeyStore.TrustedCertificateEntry entry = vault.trust(trustName);
+                    KeyStore.TrustedCertificateEntry entry = vault.certificate(trustName);
 
                     store.setEntry(trustName, entry, null);
+                }
+            }
+
+            if (trustcacerts)
+            {
+                TrustedCertificateEntry[] cacerts = TlsTrust.cacerts();
+
+                for (TrustedCertificateEntry cacert : cacerts)
+                {
+                    X509Certificate trusted = (X509Certificate) cacert.getTrustedCertificate();
+                    X500Principal subject = trusted.getSubjectX500Principal();
+                    String name = subject.getName();
+
+                    store.setEntry(name, cacert, null);
                 }
             }
         }
