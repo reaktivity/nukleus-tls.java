@@ -27,7 +27,8 @@ public final class TlsOptions extends Options
     public final List<String> sni;
     public final List<String> alpn;
     public final TlsMutual mutual;
-    public final TlsCertificate certificate;
+    public final List<String> signers;
+    public final boolean trustcacerts;
 
     public TlsOptions(
         String version,
@@ -36,7 +37,8 @@ public final class TlsOptions extends Options
         List<String> sni,
         List<String> alpn,
         TlsMutual mutual,
-        TlsCertificate certificate)
+        List<String> signers,
+        boolean trustcacerts)
     {
         this.version = version;
         this.keys = keys;
@@ -44,6 +46,7 @@ public final class TlsOptions extends Options
         this.sni = sni;
         this.alpn = alpn;
         this.mutual = mutual;
-        this.certificate = certificate;
+        this.signers = signers;
+        this.trustcacerts = trustcacerts;
     }
 }

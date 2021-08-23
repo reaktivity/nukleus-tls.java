@@ -15,7 +15,6 @@
  */
 package org.reaktivity.nukleus.tls.internal.config;
 
-import static java.time.Duration.ofDays;
 import static java.util.Arrays.asList;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -59,7 +58,7 @@ public class TlsOptionsAdapterTest
     @Test
     public void shouldWriteOptions()
     {
-        TlsOptions options = new TlsOptions("TLSv1.2", null, null, null, null, null, null);
+        TlsOptions options = new TlsOptions("TLSv1.2", null, null, null, null, null, null, false);
 
         String text = jsonb.toJson(options);
 
@@ -84,7 +83,7 @@ public class TlsOptionsAdapterTest
     @Test
     public void shouldWriteOptionsWithKeys()
     {
-        TlsOptions options = new TlsOptions(null, asList("localhost"), null, null, null, null, null);
+        TlsOptions options = new TlsOptions(null, asList("localhost"), null, null, null, null, null, false);
 
         String text = jsonb.toJson(options);
 
@@ -109,12 +108,37 @@ public class TlsOptionsAdapterTest
     @Test
     public void shouldWriteOptionsWithTrust()
     {
-        TlsOptions options = new TlsOptions(null, null, asList("serverca"), null, null, null, null);
+        TlsOptions options = new TlsOptions(null, null, asList("serverca"), null, null, null, null, false);
 
         String text = jsonb.toJson(options);
 
         assertThat(text, not(nullValue()));
         assertThat(text, equalTo("{\"trust\":[\"serverca\"]}"));
+    }
+
+    @Test
+    public void shouldReadOptionsWithTrustcacerts()
+    {
+        String text =
+                "{" +
+                    "\"trustcacerts\": true" +
+                "}";
+
+        TlsOptions options = jsonb.fromJson(text, TlsOptions.class);
+
+        assertThat(options, not(nullValue()));
+        assertThat(options.trustcacerts, equalTo(true));
+    }
+
+    @Test
+    public void shouldWriteOptionsWithTrustcacerts()
+    {
+        TlsOptions options = new TlsOptions(null, null, null, null, null, null, null, true);
+
+        String text = jsonb.toJson(options);
+
+        assertThat(text, not(nullValue()));
+        assertThat(text, equalTo("{\"trustcacerts\":true}"));
     }
 
     @Test
@@ -134,7 +158,7 @@ public class TlsOptionsAdapterTest
     @Test
     public void shouldWriteOptionsWithServerName()
     {
-        TlsOptions options = new TlsOptions(null, null, null, asList("example.net"), null, null, null);
+        TlsOptions options = new TlsOptions(null, null, null, asList("example.net"), null, null, null, false);
 
         String text = jsonb.toJson(options);
 
@@ -159,7 +183,7 @@ public class TlsOptionsAdapterTest
     @Test
     public void shouldWriteOptionsWithAlpn()
     {
-        TlsOptions options = new TlsOptions(null, null, null, null, asList("echo"), null, null);
+        TlsOptions options = new TlsOptions(null, null, null, null, asList("echo"), null, null, false);
 
         String text = jsonb.toJson(options);
 
@@ -184,7 +208,7 @@ public class TlsOptionsAdapterTest
     @Test
     public void shouldWriteOptionsWithMutual()
     {
-        TlsOptions options = new TlsOptions(null, null, null, null, null, WANTED, null);
+        TlsOptions options = new TlsOptions(null, null, null, null, null, WANTED, null, false);
 
         String text = jsonb.toJson(options);
 
@@ -197,30 +221,24 @@ public class TlsOptionsAdapterTest
     {
         String text =
                 "{" +
-                    "\"certificate\":" +
-                    "{" +
-                        "\"validity\": 10," +
-                        "\"signers\": [ \"clientca\" ]" +
-                    "}" +
+                    "\"signers\": [ \"clientca\" ]" +
                 "}";
 
         TlsOptions options = jsonb.fromJson(text, TlsOptions.class);
 
         assertThat(options, not(nullValue()));
-        assertThat(options.certificate, not(nullValue()));
-        assertThat(options.certificate.validity, equalTo(ofDays(10)));
-        assertThat(options.certificate.signers, equalTo(asList("clientca")));
+        assertThat(options.signers, equalTo(asList("clientca")));
     }
 
     @Test
     public void shouldWriteOptionsWithSigners()
     {
         TlsOptions options =
-                new TlsOptions(null, null, null, null, null, null, new TlsCertificate(ofDays(10), asList("clientca")));
+                new TlsOptions(null, null, null, null, null, null, asList("clientca"), false);
 
         String text = jsonb.toJson(options);
 
         assertThat(text, not(nullValue()));
-        assertThat(text, equalTo("{\"certificate\":{\"validity\":10,\"signers\":[\"clientca\"]}}"));
+        assertThat(text, equalTo("{\"signers\":[\"clientca\"]}"));
     }
 }

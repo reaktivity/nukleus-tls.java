@@ -6,7 +6,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.reaktivity</groupId>
   <artifactId>nukleus-tls</artifactId>
-  <version>0.177</version>
+  <version>0.178</version>
   <name>TLS Nukleus Implementation</name>
   <description>TLS Nukleus Implementation</description>
   <url>https://github.com/reaktivity/nukleus-tls.java</url>
@@ -62,8 +62,8 @@
 
     <nukleus.plugin.version>0.85</nukleus.plugin.version>
 
-    <nukleus.tls.spec.version>0.63</nukleus.tls.spec.version>
-    <reaktor.version>0.171</reaktor.version>
+    <nukleus.tls.spec.version>0.64</nukleus.tls.spec.version>
+    <reaktor.version>0.172</reaktor.version>
   </properties>
 
   <dependencies>
@@ -78,11 +78,6 @@
       <artifactId>reaktor</artifactId>
       <version>${reaktor.version}</version>
       <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.bouncycastle</groupId>
-      <artifactId>bcpkix-jdk15on</artifactId>
-      <version>1.61</version>
     </dependency>
     <dependency>
       <groupId>org.reaktivity</groupId>

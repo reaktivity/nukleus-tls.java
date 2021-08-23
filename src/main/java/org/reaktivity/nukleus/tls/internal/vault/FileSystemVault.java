@@ -15,77 +15,25 @@
  */
 package org.reaktivity.nukleus.tls.internal.vault;
 
-import static java.util.Collections.unmodifiableMap;
-import static java.util.stream.Collectors.toList;
-import static org.bouncycastle.asn1.x509.Extension.authorityKeyIdentifier;
-import static org.bouncycastle.asn1.x509.Extension.keyUsage;
-import static org.bouncycastle.asn1.x509.Extension.subjectAlternativeName;
-import static org.bouncycastle.asn1.x509.Extension.subjectKeyIdentifier;
-import static org.bouncycastle.asn1.x509.GeneralName.dNSName;
-import static org.bouncycastle.asn1.x509.KeyUsage.digitalSignature;
-import static org.bouncycastle.asn1.x509.KeyUsage.keyEncipherment;
-
-import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLConnection;
 import java.security.KeyStore;
 import java.security.KeyStore.Entry;
-import java.security.PrivateKey;
-import java.security.SecureRandom;
-import java.security.cert.CertificateFactory;
-import java.security.cert.X509Certificate;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.TreeMap;
 import java.util.function.Function;
 
-import javax.security.auth.x500.X500Principal;
-
 import org.agrona.LangUtil;
-import org.bouncycastle.asn1.ASN1Encodable;
-import org.bouncycastle.asn1.DERSequence;
-import org.bouncycastle.asn1.x500.X500Name;
-import org.bouncycastle.asn1.x500.style.RFC4519Style;
-import org.bouncycastle.asn1.x509.GeneralName;
-import org.bouncycastle.asn1.x509.KeyUsage;
-import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
-import org.bouncycastle.cert.X509CertificateHolder;
-import org.bouncycastle.cert.X509v3CertificateBuilder;
-import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
-import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
-import org.bouncycastle.operator.ContentSigner;
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
-import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
 import org.reaktivity.nukleus.tls.internal.vault.config.FileSystemOptions;
 import org.reaktivity.nukleus.tls.internal.vault.config.FileSystemStore;
 import org.reaktivity.reaktor.nukleus.vault.BindingVault;
-import org.reaktivity.reaktor.nukleus.vault.CertificateRequest;
 
 public class FileSystemVault implements BindingVault
 {
     private static final String TYPE_DEFAULT = "PKCS12";
 
-    private static final Map<String, String> SIG_TYPES_BY_KEY_TYPES;
-
-    static
-    {
-        Map<String, String> sigAlgsByKeyAlgs = new TreeMap<>(String::compareToIgnoreCase);
-        sigAlgsByKeyAlgs.put("EC", "SHA256WithECDSA");
-        sigAlgsByKeyAlgs.put("RSA", "SHA256WithRSA");
-        sigAlgsByKeyAlgs.put("DSA", "SHA1WithDSA");
-        SIG_TYPES_BY_KEY_TYPES = unmodifiableMap(sigAlgsByKeyAlgs);
-    }
-
     private final Function<String, KeyStore.PrivateKeyEntry> lookupKey;
     private final Function<String, KeyStore.TrustedCertificateEntry> lookupTrust;
-    private final Function<String, KeyStore.PrivateKeyEntry> lookupSigner;
-    private final SecureRandom random;
-
-    private CertificateFactory factory;
 
     public FileSystemVault(
         FileSystemOptions options,
@@ -93,8 +41,6 @@ public class FileSystemVault implements BindingVault
     {
         lookupKey = supplyLookupPrivateKeyEntry(resolvePath, options.keys);
         lookupTrust = supplyLookupTrustedCertificateEntry(resolvePath, options.trust);
-        lookupSigner = supplyLookupPrivateKeyEntry(resolvePath, options.signers);
-        random = new SecureRandom();
     }
 
     @Override
@@ -105,109 +51,10 @@ public class FileSystemVault implements BindingVault
     }
 
     @Override
-    public KeyStore.TrustedCertificateEntry trust(
+    public KeyStore.TrustedCertificateEntry certificate(
         String alias)
     {
         return lookupTrust.apply(alias);
-    }
-
-    @Override
-    public String signedRef(
-        String signer,
-        String dname,
-        String keyType)
-    {
-        return null;
-    }
-
-    @Override
-    public X509Certificate[] sign(
-        String signerAlias,
-        CertificateRequest request)
-    {
-        X509Certificate[] chain = null;
-
-        sign:
-        try
-        {
-            KeyStore.PrivateKeyEntry signerEntry = lookupSigner.apply(signerAlias);
-
-            if (signerEntry == null ||
-                signerEntry.getPrivateKey() == null ||
-                !X509Certificate.class.isInstance(signerEntry.getCertificate()))
-            {
-                break sign;
-            }
-
-            if (factory == null)
-            {
-                factory = CertificateFactory.getInstance("X509");
-            }
-
-            PrivateKey signerKey = signerEntry.getPrivateKey();
-            X509Certificate signerX509 = (X509Certificate) signerEntry.getCertificate();
-            X500Principal issuerX500 = signerX509.getIssuerX500Principal();
-            X500Name issuer = new X500Name(RFC4519Style.INSTANCE, issuerX500.getName());
-            X500Name dnameX500 = new X500Name(RFC4519Style.INSTANCE, request.dname);
-
-            String keyType = signerKey.getAlgorithm();
-            String sigType = SIG_TYPES_BY_KEY_TYPES.get(keyType);
-            if (sigType == null)
-            {
-                break sign;
-            }
-
-            ContentSigner signer = new JcaContentSignerBuilder(sigType)
-                .setSecureRandom(random)
-                .build(signerKey);
-            SubjectPublicKeyInfo publicKeyInfo =
-                new JcaPKCS10CertificationRequestBuilder(dnameX500, request.publicKey)
-                    .build(signer)
-                    .getSubjectPublicKeyInfo();
-
-            JcaX509ExtensionUtils utils = new JcaX509ExtensionUtils();
-            X509v3CertificateBuilder builder =
-                new X509v3CertificateBuilder(
-                        issuer,
-                        new BigInteger(Long.SIZE, random),
-                        Date.from(request.notBefore),
-                        Date.from(request.notAfter),
-                        dnameX500,
-                        publicKeyInfo)
-                    .addExtension(authorityKeyIdentifier, false, utils.createAuthorityKeyIdentifier(signerX509))
-                    .addExtension(keyUsage, true, new KeyUsage(digitalSignature | keyEncipherment));
-
-            if (request.subjectNames != null && !request.subjectNames.isEmpty())
-            {
-                List<ASN1Encodable> encodableNames = request.subjectNames.stream()
-                    .map(n -> new GeneralName(dNSName, n))
-                    .map(ASN1Encodable.class::cast)
-                    .collect(toList());
-
-                ASN1Encodable[] encodableArray = encodableNames.toArray(new ASN1Encodable[encodableNames.size()]);
-
-                builder.addExtension(subjectAlternativeName, false, new DERSequence(encodableArray));
-            }
-
-            X509CertificateHolder holder = builder
-                    .addExtension(subjectKeyIdentifier, false, utils.createSubjectKeyIdentifier(publicKeyInfo))
-                    .build(signer);
-            X509Certificate issued = new JcaX509CertificateConverter()
-                .getCertificate(holder);
-
-            InputStream encoded = new ByteArrayInputStream(issued.getEncoded());
-            X509Certificate signedCert = (X509Certificate) factory.generateCertificate(encoded);
-
-            signedCert.verify(signerX509.getPublicKey());
-
-            chain = new X509Certificate[] { issued, signerX509 };
-        }
-        catch (Exception ex)
-        {
-            // sign failed
-        }
-
-        return chain;
     }
 
     private static Function<String, KeyStore.PrivateKeyEntry> supplyLookupPrivateKeyEntry(

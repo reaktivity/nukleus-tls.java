@@ -65,21 +65,21 @@ public class ClientIT
     }
 
     @Test
-    @Configuration("client.mutual.json")
+    @Configuration("client.cacerts.json")
     @Specification({
-        "${app}/client.auth/client",
-        "${net}/client.auth/server" })
-    public void shouldEstablishConnectionWithClientAuth() throws Exception
+        "${app}/connection.established/client",
+        "${net}/connection.established/server" })
+    public void shouldEstablishConnectionWithTrustcacerts() throws Exception
     {
         k3po.finish();
     }
 
     @Test
-    @Configuration("client.mutual.signer.json")
+    @Configuration("client.mutual.json")
     @Specification({
         "${app}/client.auth/client",
         "${net}/client.auth/server" })
-    public void shouldEstablishConnectionWithSigner() throws Exception
+    public void shouldEstablishConnectionWithClientAuth() throws Exception
     {
         k3po.finish();
     }

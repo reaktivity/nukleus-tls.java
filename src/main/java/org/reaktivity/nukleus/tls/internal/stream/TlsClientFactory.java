@@ -231,19 +231,18 @@ public final class TlsClientFactory implements TlsStreamFactory
 
             if (tlsEngine != null)
             {
-                final long networkRouteId = route.id;
+                final long resolvedId = route.id;
 
-                final long applicationInitialId = begin.streamId();
-                final long applicationRouteId = begin.routeId();
-                final long applicationAffinity = begin.affinity();
+                final long initialId = begin.streamId();
+                final long affinity = begin.affinity();
 
                 newStream = new TlsStream(
                     application,
-                    applicationRouteId,
-                    applicationInitialId,
-                    applicationAffinity,
+                    routeId,
+                    initialId,
+                    affinity,
                     tlsEngine,
-                    networkRouteId)::onAppMessage;
+                    resolvedId)::onAppMessage;
             }
         }
 
@@ -829,14 +828,14 @@ public final class TlsClientFactory implements TlsStreamFactory
             long initialId,
             long affinity,
             SSLEngine tlsEngine,
-            long tlsRouteId)
+            long resolvedId)
         {
             this.app = application;
             this.routeId = routeId;
             this.initialId = initialId;
             this.replyId = supplyReplyId.applyAsLong(initialId);
             this.affinity = affinity;
-            this.client = new TlsClient(tlsEngine, tlsRouteId);
+            this.client = new TlsClient(tlsEngine, resolvedId);
         }
 
         private int replyWindow()
