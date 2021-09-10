@@ -20,7 +20,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
-import static org.reaktivity.nukleus.tls.internal.config.TlsMutual.WANTED;
+import static org.reaktivity.nukleus.tls.internal.config.TlsMutual.REQUESTED;
 
 import javax.json.bind.Jsonb;
 import javax.json.bind.JsonbBuilder;
@@ -196,24 +196,24 @@ public class TlsOptionsAdapterTest
     {
         String text =
                 "{" +
-                    "\"mutual\": \"wanted\"" +
+                    "\"mutual\": \"requested\"" +
                 "}";
 
         TlsOptions options = jsonb.fromJson(text, TlsOptions.class);
 
         assertThat(options, not(nullValue()));
-        assertThat(options.mutual, equalTo(WANTED));
+        assertThat(options.mutual, equalTo(REQUESTED));
     }
 
     @Test
     public void shouldWriteOptionsWithMutual()
     {
-        TlsOptions options = new TlsOptions(null, null, null, null, null, WANTED, null, false);
+        TlsOptions options = new TlsOptions(null, null, null, null, null, REQUESTED, null, false);
 
         String text = jsonb.toJson(options);
 
         assertThat(text, not(nullValue()));
-        assertThat(text, equalTo("{\"mutual\":\"wanted\"}"));
+        assertThat(text, equalTo("{\"mutual\":\"requested\"}"));
     }
 
     @Test
