@@ -29,8 +29,8 @@ import java.security.KeyStore.TrustedCertificateEntry;
 import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.Collection;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.KeyManager;
@@ -83,12 +83,13 @@ public final class TlsBinding
 
     public void init(
         BindingVault vault,
+        boolean ignoreEmptyVaultRefs,
         String keyManagerAlgorithm,
         SecureRandom random)
     {
         char[] keysPass = "generated".toCharArray();
-        KeyStore keys = newKeys(vault, keysPass, options.keys, options.signers);
-        KeyStore trust = newTrust(vault, options.trust, options.trustcacerts && kind == Role.CLIENT);
+        KeyStore keys = newKeys(vault, ignoreEmptyVaultRefs, keysPass, options.keys, options.signers);
+        KeyStore trust = newTrust(vault, ignoreEmptyVaultRefs, options.trust, options.trustcacerts && kind == Role.CLIENT);
 
         try
         {
@@ -368,14 +369,21 @@ public final class TlsBinding
 
     private KeyStore newKeys(
         BindingVault vault,
+        boolean ignoreEmptyNames,
         char[] password,
-        Collection<String> keyNames,
+        List<String> keyNames,
         List<String> signerNames)
     {
         KeyStore store = null;
 
         try
         {
+            if (ignoreEmptyNames)
+            {
+                keyNames = ignoreEmptyNames(keyNames);
+                signerNames = ignoreEmptyNames(signerNames);
+            }
+
             if (keyNames != null || signerNames != null)
             {
                 store = KeyStore.getInstance(TYPE_DEFAULT);
@@ -429,13 +437,19 @@ public final class TlsBinding
 
     private KeyStore newTrust(
         BindingVault vault,
-        Collection<String> trustNames,
+        boolean ignoreEmptyNames,
+        List<String> trustNames,
         boolean trustcacerts)
     {
         KeyStore store = null;
 
         try
         {
+            if (ignoreEmptyNames)
+            {
+                trustNames = ignoreEmptyNames(trustNames);
+            }
+
             if (trustNames != null)
             {
                 store = KeyStore.getInstance(TYPE_DEFAULT);
@@ -469,5 +483,23 @@ public final class TlsBinding
         }
 
         return store;
+    }
+
+    private List<String> ignoreEmptyNames(
+        List<String> names)
+    {
+        if (names != null && !names.isEmpty())
+        {
+            names = names.stream()
+                .filter(n -> !n.isEmpty())
+                .collect(Collectors.toList());
+
+            if (names.isEmpty())
+            {
+                names = null;
+            }
+        }
+
+        return names;
     }
 }
