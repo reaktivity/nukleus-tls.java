@@ -136,6 +136,7 @@ public final class TlsServerFactory implements TlsStreamFactory
     private final BufferPool decodePool;
     private final BufferPool encodePool;
     private final String keyManagerAlgorithm;
+    private final boolean ignoreEmptyVaultRefs;
     private final LongFunction<BindingVault> supplyVault;
     private final LongUnaryOperator supplyInitialId;
     private final LongUnaryOperator supplyReplyId;
@@ -172,6 +173,7 @@ public final class TlsServerFactory implements TlsStreamFactory
         this.encodePool = new CountingBufferPool(bufferPool, counters.serverEncodeAcquires, counters.serverEncodeReleases);
 
         this.keyManagerAlgorithm = config.keyManagerAlgorithm();
+        this.ignoreEmptyVaultRefs = config.ignoreEmptyVaultRefs();
         this.supplyVault = context::supplyVault;
         this.supplyInitialId = context::supplyInitialId;
         this.supplyReplyId = context::supplyReplyId;
@@ -203,7 +205,7 @@ public final class TlsServerFactory implements TlsStreamFactory
 
         if (vault != null)
         {
-            tlsBinding.init(vault, keyManagerAlgorithm, random);
+            tlsBinding.init(vault, ignoreEmptyVaultRefs, keyManagerAlgorithm, random);
         }
 
         bindings.put(binding.id, tlsBinding);
