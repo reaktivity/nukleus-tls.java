@@ -16,7 +16,7 @@
 package org.reaktivity.nukleus.tls.internal.config;
 
 import static java.util.stream.Collectors.toList;
-import static org.reaktivity.nukleus.tls.internal.config.TlsMutual.NEEDED;
+import static org.reaktivity.nukleus.tls.internal.config.TlsMutual.REQUIRED;
 
 import java.util.List;
 
@@ -97,7 +97,7 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
         }
 
         if (tlsOptions.mutual != null &&
-            (tlsOptions.mutual != NEEDED || tlsOptions.trust != null))
+            (tlsOptions.mutual != REQUIRED || tlsOptions.trust != null))
         {
             String mutual = tlsOptions.mutual.name().toLowerCase();
             object.add(MUTUAL_NAME, mutual);
@@ -137,7 +137,7 @@ public final class TlsOptionsAdapter implements OptionsAdapterSpi, JsonbAdapter<
                 : null;
         TlsMutual mutual = object.containsKey(MUTUAL_NAME)
                 ? TlsMutual.valueOf(object.getString(MUTUAL_NAME).toUpperCase())
-                : trust != null ? NEEDED : null;
+                : trust != null ? REQUIRED : null;
         List<String> signers = object.containsKey(SIGNERS_NAME)
                 ? asListString(object.getJsonArray(SIGNERS_NAME))
                 : null;

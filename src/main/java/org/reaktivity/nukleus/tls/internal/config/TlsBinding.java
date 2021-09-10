@@ -256,17 +256,17 @@ public final class TlsBinding
             engine = context.createSSLEngine();
             engine.setUseClientMode(false);
 
-            TlsMutual mutual = Optional.ofNullable(options != null ? options.mutual : null).orElse(TlsMutual.DISABLED);
+            TlsMutual mutual = Optional.ofNullable(options != null ? options.mutual : null).orElse(TlsMutual.NONE);
 
             switch (mutual)
             {
-            case DISABLED:
+            case NONE:
                 engine.setWantClientAuth(false);
                 break;
-            case WANTED:
+            case REQUESTED:
                 engine.setWantClientAuth(true);
                 break;
-            case NEEDED:
+            case REQUIRED:
                 engine.setNeedClientAuth(true);
                 break;
             }

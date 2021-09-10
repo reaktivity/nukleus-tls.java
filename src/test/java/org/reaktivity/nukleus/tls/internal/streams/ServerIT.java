@@ -266,19 +266,19 @@ public class ServerIT
     @Test
     @Configuration("server.mutual.json")
     @Specification({
-        "${net}/server.want.auth/client",
-        "${app}/server.want.auth/server"})
-    public void serverNeedClientAuth() throws Exception
+        "${net}/server.mutual.auth/client",
+        "${app}/server.mutual.auth/server"})
+    public void shouldRequireMutualAuthentication() throws Exception
     {
         k3po.finish();
     }
 
     @Test
-    @Configuration("server.mutual.wanted.json")
+    @Configuration("server.mutual.requested.json")
     @Specification({
-        "${net}/server.want.auth/client",
-        "${app}/server.want.auth/server"})
-    public void serverWantClientAuth() throws Exception
+        "${net}/server.mutual.auth/client",
+        "${app}/server.mutual.auth/server"})
+    public void shouldRequestMutualAuthentication() throws Exception
     {
         k3po.finish();
     }

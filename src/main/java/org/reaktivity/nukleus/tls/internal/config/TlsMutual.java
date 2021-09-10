@@ -17,7 +17,7 @@ package org.reaktivity.nukleus.tls.internal.config;
 
 public enum TlsMutual
 {
-    DISABLED,
-    WANTED,
-    NEEDED
+    NONE,
+    REQUESTED,
+    REQUIRED
 }
