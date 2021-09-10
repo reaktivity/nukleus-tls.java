@@ -30,6 +30,7 @@ import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import javax.net.ssl.ExtendedSSLSession;
@@ -255,22 +256,19 @@ public final class TlsBinding
             engine = context.createSSLEngine();
             engine.setUseClientMode(false);
 
-            TlsMutual mutual = options != null ? options.mutual : null;
-            if (mutual != null)
+            TlsMutual mutual = Optional.ofNullable(options != null ? options.mutual : null).orElse(TlsMutual.DISABLED);
+
+            switch (mutual)
             {
-                switch (mutual)
-                {
-                case WANTED:
-                    engine.setWantClientAuth(true);
-                    break;
-                case NEEDED:
-                    engine.setNeedClientAuth(true);
-                    break;
-                }
-            }
-            else
-            {
+            case DISABLED:
                 engine.setWantClientAuth(false);
+                break;
+            case WANTED:
+                engine.setWantClientAuth(true);
+                break;
+            case NEEDED:
+                engine.setNeedClientAuth(true);
+                break;
             }
 
             engine.setHandshakeApplicationProtocolSelector(this::selectAlpn);
