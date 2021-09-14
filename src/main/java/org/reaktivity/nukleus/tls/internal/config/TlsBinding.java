@@ -448,11 +448,14 @@ public final class TlsBinding
                 trustNames = ignoreEmptyNames(trustNames);
             }
 
-            if (trustNames != null)
+            if (trustNames != null || trustcacerts)
             {
                 store = KeyStore.getInstance(TYPE_DEFAULT);
                 store.load(null, null);
+            }
 
+            if (trustNames != null)
+            {
                 for (String trustName : trustNames)
                 {
                     KeyStore.TrustedCertificateEntry entry = vault.certificate(trustName);
@@ -471,7 +474,7 @@ public final class TlsBinding
                     X500Principal subject = trusted.getSubjectX500Principal();
                     String name = subject.getName();
 
-                    store.setEntry(name, cacert, null);
+                    store.setCertificateEntry(name, trusted);
                 }
             }
         }
