@@ -227,6 +227,17 @@ public class ClientIT
         k3po.finish();
     }
 
+    @Ignore("TODO: requires k3po TLS 1.3 transport to send CLOSE_NOTIFY before closing")
+    @Test
+    @Configuration("client.json")
+    @Specification({
+        "${app}/client.sent.write.close.read.closed/client",
+        "${net}/client.sent.write.close.read.closed/server"})
+    public void shouldReceiveClientSentWriteCloseReadClosed() throws Exception
+    {
+        k3po.finish();
+    }
+
     @Ignore("TODO: throttle none implies immediately connected")
     @Test
     @Configuration("client.json")

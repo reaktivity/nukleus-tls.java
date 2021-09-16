@@ -23,6 +23,7 @@ public class TlsConfiguration extends Configuration
     public static final IntPropertyDef TLS_HANDSHAKE_TIMEOUT;
     public static final PropertyDef<String> TLS_KEY_MANAGER_ALGORITHM;
     public static final BooleanPropertyDef TLS_IGNORE_EMPTY_VAULT_REFS;
+    public static final LongPropertyDef TLS_AWAIT_SYNC_CLOSE_MILLIS;
 
     private static final ConfigurationDef TLS_CONFIG;
 
@@ -33,6 +34,7 @@ public class TlsConfiguration extends Configuration
         TLS_HANDSHAKE_TIMEOUT = config.property("handshake.timeout", 10);
         TLS_KEY_MANAGER_ALGORITHM = config.property("handshake.key.manager.algorithm", "PKIX");
         TLS_IGNORE_EMPTY_VAULT_REFS = config.property("ignore.empty.vault.refs", false);
+        TLS_AWAIT_SYNC_CLOSE_MILLIS = config.property("await.sync.close.millis", 3000L);
         TLS_CONFIG = config;
     }
 
@@ -60,5 +62,10 @@ public class TlsConfiguration extends Configuration
     public boolean ignoreEmptyVaultRefs()
     {
         return TLS_IGNORE_EMPTY_VAULT_REFS.getAsBoolean(this);
+    }
+
+    public long awaitSyncCloseMillis()
+    {
+        return TLS_AWAIT_SYNC_CLOSE_MILLIS.get(this);
     }
 }

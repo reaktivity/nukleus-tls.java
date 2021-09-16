@@ -81,8 +81,9 @@ public final class TlsServerFactory implements TlsStreamFactory
     private static final OctetsFW EMPTY_OCTETS = new OctetsFW().wrap(new UnsafeBuffer(new byte[0]), 0, 0);
     private static final Consumer<OctetsFW.Builder> EMPTY_EXTENSION = ex -> {};
     private static final int MAXIMUM_HEADER_SIZE = 5 + 20 + 256;    // TODO version + MAC + padding
-    private static final int HANDSHAKE_TASK_COMPLETE_SIGNAL = 1;
-    private static final int HANDSHAKE_TIMEOUT_SIGNAL = 2;
+    private static final int NET_SIGNAL_HANDSHAKE_TASK_COMPLETE = 1;
+    private static final int NET_SIGNAL_HANDSHAKE_TIMEOUT = 2;
+    private static final int APP_SIGNAL_RESET_LATER = 1;
     private static final MutableDirectBuffer EMPTY_MUTABLE_DIRECT_BUFFER = new UnsafeBuffer(new byte[0]);
 
     static final Optional<TlsServer.TlsStream> NULL_STREAM = Optional.ofNullable(null);
@@ -137,6 +138,7 @@ public final class TlsServerFactory implements TlsStreamFactory
     private final BufferPool encodePool;
     private final String keyManagerAlgorithm;
     private final boolean ignoreEmptyVaultRefs;
+    private final long awaitSyncCloseMillis;
     private final LongFunction<BindingVault> supplyVault;
     private final LongUnaryOperator supplyInitialId;
     private final LongUnaryOperator supplyReplyId;
@@ -174,6 +176,7 @@ public final class TlsServerFactory implements TlsStreamFactory
 
         this.keyManagerAlgorithm = config.keyManagerAlgorithm();
         this.ignoreEmptyVaultRefs = config.ignoreEmptyVaultRefs();
+        this.awaitSyncCloseMillis = config.awaitSyncCloseMillis();
         this.supplyVault = context::supplyVault;
         this.supplyInitialId = context::supplyInitialId;
         this.supplyReplyId = context::supplyReplyId;
@@ -996,7 +999,7 @@ public final class TlsServerFactory implements TlsStreamFactory
                     currentTimeMillis() + handshakeTimeoutMillis,
                     routeId,
                     replyId,
-                    HANDSHAKE_TIMEOUT_SIGNAL);
+                    NET_SIGNAL_HANDSHAKE_TIMEOUT);
             }
         }
 
@@ -1218,10 +1221,10 @@ public final class TlsServerFactory implements TlsStreamFactory
         {
             switch (signal.signalId())
             {
-            case HANDSHAKE_TASK_COMPLETE_SIGNAL:
+            case NET_SIGNAL_HANDSHAKE_TASK_COMPLETE:
                 onNetSignalHandshakeTaskComplete(signal);
                 break;
-            case HANDSHAKE_TIMEOUT_SIGNAL:
+            case NET_SIGNAL_HANDSHAKE_TIMEOUT:
                 onNetSignalHandshakeTimeout(signal);
                 break;
             }
@@ -1528,7 +1531,7 @@ public final class TlsServerFactory implements TlsStreamFactory
 
                 if (task != null)
                 {
-                    handshakeTaskFutureId = signaler.signalTask(task, routeId, replyId, HANDSHAKE_TASK_COMPLETE_SIGNAL);
+                    handshakeTaskFutureId = signaler.signalTask(task, routeId, replyId, NET_SIGNAL_HANDSHAKE_TASK_COMPLETE);
                 }
             }
         }
@@ -1617,7 +1620,8 @@ public final class TlsServerFactory implements TlsStreamFactory
                         break;
                     case CLOSED:
                         assert bytesProduced > 0;
-                        stream.ifPresent(s -> s.doAppReset(traceId));
+                        assert tlsEngine.isOutboundDone();
+                        stream.ifPresent(s -> s.doAppResetLater(traceId));
                         state = TlsState.closingReply(state);
                         break loop;
                     case OK:
@@ -1725,6 +1729,7 @@ public final class TlsServerFactory implements TlsStreamFactory
             private long replyAck;
 
             private int state;
+            private long resetLaterAt = NO_CANCEL_ID;
 
             private TlsStream(
                 long routeId,
@@ -1777,6 +1782,10 @@ public final class TlsServerFactory implements TlsStreamFactory
                     final ResetFW reset = resetRO.wrap(buffer, index, index + length);
                     onAppReset(reset);
                     break;
+                case SignalFW.TYPE_ID:
+                    final SignalFW signal = signalRO.wrap(buffer, index, index + length);
+                    onAppSignal(signal);
+                    break;
                 default:
                     break;
                 }
@@ -1818,7 +1827,11 @@ public final class TlsServerFactory implements TlsStreamFactory
 
                 assert replyAck <= replySeq;
 
-                if (replySeq > replyAck + replyMax)
+                if (TlsState.replyClosing(state))
+                {
+                    doAppReset(traceId);
+                }
+                else if (replySeq > replyAck + replyMax)
                 {
                     cleanupApp(traceId);
                     doNetAbort(traceId);
@@ -1881,6 +1894,8 @@ public final class TlsServerFactory implements TlsStreamFactory
                 stream = nullIfClosed(state, stream);
 
                 doEncodeCloseOutbound(traceId, budgetId);
+
+                cleanupResetLater();
             }
 
             private void onAppAbort(
@@ -1905,6 +1920,8 @@ public final class TlsServerFactory implements TlsStreamFactory
 
                 doAppAbort(traceId);
                 doNetReset(traceId);
+
+                cleanupResetLater();
             }
 
             private void onAppWindow(
@@ -1955,6 +1972,20 @@ public final class TlsServerFactory implements TlsStreamFactory
 
                 doAppReset(traceId);
                 doNetAbort(traceId);
+            }
+
+            private void onAppSignal(
+                SignalFW signal)
+            {
+                final long traceId = signal.traceId();
+                final int signalId = signal.signalId();
+
+                switch (signalId)
+                {
+                case APP_SIGNAL_RESET_LATER:
+                    doAppReset(traceId);
+                    break;
+                }
             }
 
             private void doAppBegin(
@@ -2089,6 +2120,28 @@ public final class TlsServerFactory implements TlsStreamFactory
 
                     doReset(app, routeId, replyId, replySeq, replyAck, replyMax, traceId, authorization);
                 }
+
+                cleanupResetLater();
+            }
+
+            private void doAppResetLater(
+                long traceId)
+            {
+                if (!TlsState.replyClosing(state))
+                {
+                    state = TlsState.closingReply(state);
+
+                    if (TlsState.initialClosing(state) &&
+                        awaitSyncCloseMillis > 0L)
+                    {
+                        final long signalAt = currentTimeMillis() + awaitSyncCloseMillis;
+                        resetLaterAt = signaler.signalAt(signalAt, routeId, replyId, APP_SIGNAL_RESET_LATER);
+                    }
+                    else
+                    {
+                        doAppReset(traceId);
+                    }
+                }
             }
 
             private void doAppWindow(
@@ -2120,6 +2173,14 @@ public final class TlsServerFactory implements TlsStreamFactory
             {
                 doAppAbort(traceId);
                 doAppReset(traceId);
+            }
+
+            private void cleanupResetLater()
+            {
+                if (resetLaterAt != NO_CANCEL_ID)
+                {
+                    signaler.cancel(resetLaterAt);
+                }
             }
         }
 
