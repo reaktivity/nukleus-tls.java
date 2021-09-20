@@ -18,7 +18,7 @@ package org.reaktivity.nukleus.tls.internal.config;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
 import static javax.net.ssl.StandardConstants.SNI_HOST_NAME;
-import static org.reaktivity.nukleus.tls.internal.identity.TlsX509ExtendedKeyManager.DISTINGUISHED_NAME_KEY;
+import static org.reaktivity.nukleus.tls.internal.identity.TlsX509ExtendedKeyManager.COMMON_NAME_KEY;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.ALPN;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.AUTHORITY;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.SECURE;
@@ -235,10 +235,8 @@ public final class TlsBinding
                     String commonName = info.secure().name().asString();
                     if (commonName != null)
                     {
-                        String distinguishedName = String.format("CN=%s", commonName);
-
                         SSLSession session = engine.getSession();
-                        session.putValue(DISTINGUISHED_NAME_KEY, distinguishedName);
+                        session.putValue(COMMON_NAME_KEY, commonName);
                     }
                 }
             }
