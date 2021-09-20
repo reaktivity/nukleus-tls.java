@@ -28,9 +28,9 @@ import javax.net.ssl.X509ExtendedKeyManager;
 import javax.net.ssl.X509KeyManager;
 import javax.security.auth.x500.X500Principal;
 
-public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager implements X509KeyManager
+public final class TlsClientX509ExtendedKeyManager extends X509ExtendedKeyManager implements X509KeyManager
 {
-    public static final String COMMON_NAME_KEY = "distinguished.name";
+    public static final String COMMON_NAME_KEY = "common.name";
 
     private static final Pattern COMMON_NAME_PATTERN = Pattern.compile("CN=(?<cn>[^\\s,]+).*");
 
@@ -38,7 +38,7 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
 
     private final X509ExtendedKeyManager delegate;
 
-    public TlsX509ExtendedKeyManager(
+    public TlsClientX509ExtendedKeyManager(
         X509ExtendedKeyManager delegate)
     {
         this.delegate = delegate;
