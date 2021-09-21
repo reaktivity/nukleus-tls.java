@@ -19,6 +19,8 @@ import java.net.Socket;
 import java.security.Principal;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSession;
@@ -26,13 +28,17 @@ import javax.net.ssl.X509ExtendedKeyManager;
 import javax.net.ssl.X509KeyManager;
 import javax.security.auth.x500.X500Principal;
 
-public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager implements X509KeyManager
+public final class TlsClientX509ExtendedKeyManager extends X509ExtendedKeyManager implements X509KeyManager
 {
-    public static final String DISTINGUISHED_NAME_KEY = "distinguished.name";
+    public static final String COMMON_NAME_KEY = "common.name";
+
+    private static final Pattern COMMON_NAME_PATTERN = Pattern.compile("CN=(?<cn>[^\\s,]+).*");
+
+    private final Matcher matchCN = COMMON_NAME_PATTERN.matcher("");
 
     private final X509ExtendedKeyManager delegate;
 
-    public TlsX509ExtendedKeyManager(
+    public TlsClientX509ExtendedKeyManager(
         X509ExtendedKeyManager delegate)
     {
         this.delegate = delegate;
@@ -81,9 +87,9 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
         String alias = null;
 
         SSLSession session = engine.getSession();
-        String subjectDN = (String) session.getValue(DISTINGUISHED_NAME_KEY);
+        String subjectCN = (String) session.getValue(COMMON_NAME_KEY);
 
-        if (subjectDN == null)
+        if (subjectCN == null)
         {
             alias = delegate.chooseEngineClientAlias(keyTypes, issuers, engine);
         }
@@ -102,7 +108,9 @@ public final class TlsX509ExtendedKeyManager extends X509ExtendedKeyManager impl
                         {
                             X500Principal subject = chain[0].getSubjectX500Principal();
 
-                            if (subject != null && subjectDN.equals(subject.getName()))
+                            if (subject != null &&
+                                matchCN.reset(subject.getName()).matches() &&
+                                subjectCN.equals(matchCN.group("cn")))
                             {
                                 alias = candidate;
                                 break outer;

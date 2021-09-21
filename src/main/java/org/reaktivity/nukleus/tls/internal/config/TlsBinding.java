@@ -18,7 +18,7 @@ package org.reaktivity.nukleus.tls.internal.config;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
 import static javax.net.ssl.StandardConstants.SNI_HOST_NAME;
-import static org.reaktivity.nukleus.tls.internal.identity.TlsX509ExtendedKeyManager.DISTINGUISHED_NAME_KEY;
+import static org.reaktivity.nukleus.tls.internal.identity.TlsClientX509ExtendedKeyManager.COMMON_NAME_KEY;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.ALPN;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.AUTHORITY;
 import static org.reaktivity.nukleus.tls.internal.types.ProxyInfoType.SECURE;
@@ -48,7 +48,7 @@ import javax.net.ssl.X509ExtendedKeyManager;
 import javax.security.auth.x500.X500Principal;
 
 import org.agrona.LangUtil;
-import org.reaktivity.nukleus.tls.internal.identity.TlsX509ExtendedKeyManager;
+import org.reaktivity.nukleus.tls.internal.identity.TlsClientX509ExtendedKeyManager;
 import org.reaktivity.nukleus.tls.internal.types.Array32FW;
 import org.reaktivity.nukleus.tls.internal.types.ProxyInfoFW;
 import org.reaktivity.nukleus.tls.internal.types.stream.ProxyBeginExFW;
@@ -101,14 +101,14 @@ public final class TlsBinding
                 keyManagerFactory.init(keys, keysPass);
                 keyManagers = keyManagerFactory.getKeyManagers();
 
-                if (keyManagers != null)
+                if (keyManagers != null && kind == Role.CLIENT)
                 {
                     for (int i = 0; i < keyManagers.length; i++)
                     {
                         if (keyManagers[i] instanceof X509ExtendedKeyManager)
                         {
                             X509ExtendedKeyManager keyManager = (X509ExtendedKeyManager) keyManagers[i];
-                            keyManagers[i] = new TlsX509ExtendedKeyManager(keyManager);
+                            keyManagers[i] = new TlsClientX509ExtendedKeyManager(keyManager);
                         }
                     }
                 }
@@ -235,10 +235,8 @@ public final class TlsBinding
                     String commonName = info.secure().name().asString();
                     if (commonName != null)
                     {
-                        String distinguishedName = String.format("CN=%s", commonName);
-
                         SSLSession session = engine.getSession();
-                        session.putValue(DISTINGUISHED_NAME_KEY, distinguishedName);
+                        session.putValue(COMMON_NAME_KEY, commonName);
                     }
                 }
             }
