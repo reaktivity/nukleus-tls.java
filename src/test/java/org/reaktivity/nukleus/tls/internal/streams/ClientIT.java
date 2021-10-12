@@ -79,7 +79,17 @@ public class ClientIT
     @Specification({
         "${app}/client.auth/client",
         "${net}/client.auth/server" })
-    public void shouldEstablishConnectionWithClientAuth() throws Exception
+    public void shouldEstablishConnectionWithClientKey() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Test
+    @Configuration("client.mutual.signer.json")
+    @Specification({
+        "${app}/client.auth/client",
+        "${net}/client.auth/server" })
+    public void shouldEstablishConnectionWithClientSigner() throws Exception
     {
         k3po.finish();
     }
@@ -296,6 +306,17 @@ public class ClientIT
         "${app}/server.sent.read.abort/client",
         "${net}/server.sent.read.abort/server"})
     public void shouldReceiveServerSentReadAbort() throws Exception
+    {
+        k3po.finish();
+    }
+
+    @Ignore("requires accepted only streams")
+    @Test
+    @Configuration("client.mutual.signer.json")
+    @Specification({
+        "${app}/client.auth.mismatched/client",
+        "${net}/client.auth.mismatched/server"})
+    public void shouldRejectClientAuthMismatched() throws Exception
     {
         k3po.finish();
     }

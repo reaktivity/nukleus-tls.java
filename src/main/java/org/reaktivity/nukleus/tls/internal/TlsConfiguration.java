@@ -24,6 +24,7 @@ public class TlsConfiguration extends Configuration
     public static final PropertyDef<String> TLS_KEY_MANAGER_ALGORITHM;
     public static final BooleanPropertyDef TLS_IGNORE_EMPTY_VAULT_REFS;
     public static final LongPropertyDef TLS_AWAIT_SYNC_CLOSE_MILLIS;
+    public static final BooleanPropertyDef TLS_PROACTIVE_CLIENT_REPLY_BEGIN;
 
     private static final ConfigurationDef TLS_CONFIG;
 
@@ -35,6 +36,7 @@ public class TlsConfiguration extends Configuration
         TLS_KEY_MANAGER_ALGORITHM = config.property("handshake.key.manager.algorithm", "PKIX");
         TLS_IGNORE_EMPTY_VAULT_REFS = config.property("ignore.empty.vault.refs", false);
         TLS_AWAIT_SYNC_CLOSE_MILLIS = config.property("await.sync.close.millis", 3000L);
+        TLS_PROACTIVE_CLIENT_REPLY_BEGIN = config.property("proactive.client.reply.begin", false);
         TLS_CONFIG = config;
     }
 
@@ -67,5 +69,10 @@ public class TlsConfiguration extends Configuration
     public long awaitSyncCloseMillis()
     {
         return TLS_AWAIT_SYNC_CLOSE_MILLIS.get(this);
+    }
+
+    public boolean proactiveClientReplyBegin()
+    {
+        return TLS_PROACTIVE_CLIENT_REPLY_BEGIN.get(this);
     }
 }

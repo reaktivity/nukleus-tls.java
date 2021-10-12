@@ -135,6 +135,7 @@ public final class TlsClientFactory implements TlsStreamFactory
     private final int decodeMax;
     private final int handshakeMax;
     private final long handshakeTimeoutMillis;
+    private final boolean proactiveReplyBegin;
 
     private final ByteBuffer inNetByteBuffer;
     private final MutableDirectBuffer inNetBuffer;
@@ -163,6 +164,7 @@ public final class TlsClientFactory implements TlsStreamFactory
 
         this.keyManagerAlgorithm = config.keyManagerAlgorithm();
         this.ignoreEmptyVaultRefs = config.ignoreEmptyVaultRefs();
+        this.proactiveReplyBegin = config.proactiveClientReplyBegin();
         this.supplyVault = context::supplyVault;
         this.supplyInitialId = context::supplyInitialId;
         this.supplyReplyId = context::supplyReplyId;
@@ -1970,7 +1972,10 @@ public final class TlsClientFactory implements TlsStreamFactory
                             assert bytesProduced > 0 || tlsEngine.isInboundDone();
                             if (result.getHandshakeStatus() == HandshakeStatus.FINISHED)
                             {
-                                onDecodeHandshakeFinished(traceId, budgetId);
+                                if (proactiveReplyBegin)
+                                {
+                                    onDecodeHandshakeFinished(traceId, budgetId);
+                                }
                             }
                             break;
                         }
