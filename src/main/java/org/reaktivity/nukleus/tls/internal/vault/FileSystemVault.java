@@ -20,8 +20,18 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.security.KeyStore;
 import java.security.KeyStore.Entry;
+import java.security.KeyStore.PrivateKeyEntry;
+import java.security.KeyStore.TrustedCertificateEntry;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Predicate;
+
+import javax.security.auth.x500.X500Principal;
 
 import org.agrona.LangUtil;
 import org.reaktivity.nukleus.tls.internal.vault.config.FileSystemOptions;
@@ -34,6 +44,8 @@ public class FileSystemVault implements BindingVault
 
     private final Function<String, KeyStore.PrivateKeyEntry> lookupKey;
     private final Function<String, KeyStore.TrustedCertificateEntry> lookupTrust;
+    private final Function<String, KeyStore.TrustedCertificateEntry> lookupSigner;
+    private final Function<Predicate<X500Principal>, KeyStore.PrivateKeyEntry[]> lookupKeys;
 
     public FileSystemVault(
         FileSystemOptions options,
@@ -41,6 +53,8 @@ public class FileSystemVault implements BindingVault
     {
         lookupKey = supplyLookupPrivateKeyEntry(resolvePath, options.keys);
         lookupTrust = supplyLookupTrustedCertificateEntry(resolvePath, options.trust);
+        lookupSigner = supplyLookupTrustedCertificateEntry(resolvePath, options.signers);
+        lookupKeys = supplyLookupPrivateKeyEntries(resolvePath, options.keys);
     }
 
     @Override
@@ -57,6 +71,27 @@ public class FileSystemVault implements BindingVault
         return lookupTrust.apply(alias);
     }
 
+    @Override
+    public PrivateKeyEntry[] keys(
+        String signer)
+    {
+        KeyStore.PrivateKeyEntry[] keys = null;
+
+        TrustedCertificateEntry trusted = lookupSigner.apply(signer);
+        if (trusted != null)
+        {
+            Certificate certificate = trusted.getTrustedCertificate();
+            if (certificate instanceof X509Certificate)
+            {
+                X509Certificate x509 = (X509Certificate) certificate;
+                X500Principal issuer = x509.getSubjectX500Principal();
+                keys = lookupKeys.apply(issuer::equals);
+            }
+        }
+
+        return keys;
+    }
+
     private static Function<String, KeyStore.PrivateKeyEntry> supplyLookupPrivateKeyEntry(
         Function<String, URL> resolvePath,
         FileSystemStore aliases)
@@ -69,6 +104,63 @@ public class FileSystemVault implements BindingVault
         FileSystemStore aliases)
     {
         return supplyLookupAlias(resolvePath, aliases, FileSystemVault::lookupTrustedCertificateEntry);
+    }
+
+    private Function<Predicate<X500Principal>, KeyStore.PrivateKeyEntry[]> supplyLookupPrivateKeyEntries(
+        Function<String, URL> resolvePath,
+        FileSystemStore entries)
+    {
+        Function<Predicate<X500Principal>, KeyStore.PrivateKeyEntry[]> lookupKeys = p -> null;
+
+        if (entries != null)
+        {
+            try
+            {
+                URL storeURL = resolvePath.apply(entries.store);
+                URLConnection connection = storeURL.openConnection();
+                try (InputStream input = connection.getInputStream())
+                {
+                    String type = Optional.ofNullable(entries.type).orElse(TYPE_DEFAULT);
+                    char[] password = Optional.ofNullable(entries.password).map(String::toCharArray).orElse(null);
+
+                    KeyStore store = KeyStore.getInstance(type);
+                    store.load(input, password);
+                    KeyStore.PasswordProtection protection = new KeyStore.PasswordProtection(password);
+
+                    List<String> aliases = Collections.list(store.aliases());
+
+                    lookupKeys = matchSigner ->
+                    {
+                        List<KeyStore.PrivateKeyEntry> keys = null;
+
+                        for (String alias : aliases)
+                        {
+                            PrivateKeyEntry key = lookupPrivateKeyEntry(alias, store, protection);
+                            Certificate certificate = key.getCertificate();
+                            if (key != null &&
+                                certificate instanceof X509Certificate &&
+                                matchSigner.test(((X509Certificate) certificate).getIssuerX500Principal()))
+                            {
+                                if (keys == null)
+                                {
+                                    keys = new ArrayList<>();
+                                }
+
+                                keys.add(key);
+                            }
+                        }
+
+                        return keys != null ? keys.toArray(KeyStore.PrivateKeyEntry[]::new) : null;
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                LangUtil.rethrowUnchecked(ex);
+            }
+        }
+
+        return lookupKeys;
     }
 
     private static <R> Function<String, R> supplyLookupAlias(
